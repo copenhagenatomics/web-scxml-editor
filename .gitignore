@@ -40,3 +40,4 @@ next-env.d.ts
 .claude/settings.local.json
 xml/examples/*    
 .vscode/settings.json
+.claude/settings.json

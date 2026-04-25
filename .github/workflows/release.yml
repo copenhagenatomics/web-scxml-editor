@@ -37,30 +37,24 @@ jobs:
 
       - name: Prepare artifact directory
         run: |
-          mkdir -p release-artifact
-
-          cp -r .next/standalone/. release-artifact/
-
-          mkdir -p release-artifact/.next/static
-          cp -r .next/static/. release-artifact/.next/static/
-
-          cp -r public release-artifact/public
-
-          cp package.json release-artifact/package.json
-          cp next.config.ts release-artifact/next.config.ts
+          cp -r out release-artifact
 
       - name: Create start instructions
         run: |
           cat > release-artifact/START_HERE.md << 'EOF'
           # SCXML Visual Editor
 
-          Requirements: Node.js 20+
+          This is a static build. Serve the files with any web server:
 
           ```bash
-          node server.js
-          # Or with a custom port:
-          PORT=8080 node server.js
+          # Python (no install needed)
+          python3 -m http.server 3000
+
+          # Node.js (npx)
+          npx serve .
           ```
+
+          Or deploy the folder contents to any static host (Netlify, S3, GitHub Pages, nginx).
           EOF
 
       - name: Create versioned zip archive
@@ -78,11 +72,12 @@ jobs:
 
             Download `scxml-editor-${{ steps.version.outputs.VERSION }}.zip` below.
 
-            **Run it** (requires Node.js 20+):
+            **Serve it locally:**
             ```bash
             unzip scxml-editor-${{ steps.version.outputs.VERSION }}.zip
-            node server.js
+            python3 -m http.server 3000
             ```
+            Or deploy the folder to any static host (Netlify, S3, GitHub Pages, nginx).
           files: |
             scxml-editor-${{ steps.version.outputs.VERSION }}.zip
           draft: false
