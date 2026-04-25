@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Package Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Prepare artifact directory
+        run: |
+          mkdir -p release-artifact
+
+          cp -r .next/standalone/. release-artifact/
+
+          mkdir -p release-artifact/.next/static
+          cp -r .next/static/. release-artifact/.next/static/
+
+          cp -r public release-artifact/public
+
+          cp package.json release-artifact/package.json
+          cp next.config.ts release-artifact/next.config.ts
+
+      - name: Create start instructions
+        run: |
+          cat > release-artifact/START_HERE.md << 'EOF'
+          # SCXML Visual Editor
+
+          Requirements: Node.js 20+
+
+          ```bash
+          node server.js
+          # Or with a custom port:
+          PORT=8080 node server.js
+          ```
+          EOF
+
+      - name: Create versioned zip archive
+        run: |
+          cd release-artifact
+          zip -r "../scxml-editor-${{ steps.version.outputs.VERSION }}.zip" .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "SCXML Visual Editor ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Release ${{ steps.version.outputs.VERSION }}
+
+            Download `scxml-editor-${{ steps.version.outputs.VERSION }}.zip` below.
+
+            **Run it** (requires Node.js 20+):
+            ```bash
+            unzip scxml-editor-${{ steps.version.outputs.VERSION }}.zip
+            node server.js
+            ```
+          files: |
+            scxml-editor-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
