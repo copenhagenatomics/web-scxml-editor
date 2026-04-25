@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="idle" name="TestStateMachine" datamodel="ecmascript" binding="early">
+  
+  <!-- Data model with various data types -->
+  <datamodel>
+    <data id="counter" expr="0" />
+    <data id="userName" expr="'anonymous'" />
+    <data id="isActive" expr="false" />
+    <data id="config" expr="{ timeout: 5000, maxRetries: 3 }" />
+  </datamodel>
+
+  <!-- Initial idle state -->
+  <state id="idle">
+    <onentry>
+      <log label="System" expr="'Entering idle state'" />
+      <assign location="isActive" expr="false" />
+    </onentry>
+    
+    <!-- Transition to active state -->
+    <transition event="start" target="active">
+      <assign location="counter" expr="counter + 1" />
+      <log label="Transition" expr="'Starting system, count: ' + counter" />
+    </transition>
+    
+    <!-- Conditional transition based on data -->
+    <transition event="quick.start" cond="counter &gt; 5" target="processing">
+      <log label="QuickStart" expr="'Fast track activated'" />
+    </transition>
+    
+    <!-- Transition to configuration -->
+    <transition event="configure" target="configuration" />
+  </state>
+
+  <!-- Active state with nested states -->
+  <state id="active" initial="ready">
+    <onentry>
+      <assign location="isActive" expr="true" />
+      <send event="status.update" delay="1s" />
+    </onentry>
+    
+    <onexit>
+      <assign location="isActive" expr="false" />
+      <log label="System" expr="'Leaving active state'" />
+    </onexit>
+
+    <!-- Nested ready state -->
+    <state id="ready">
+      <onentry>
+        <log label="Ready" expr="'System ready for processing'" />
+      </onentry>
+      
+      <transition event="process" target="processing" />
+      <transition event="pause" target="paused" />
+      <transition event="stop" target="idle" />
+      
+      <!-- Internal transition (doesn't exit/re-enter state) -->
+      <transition event="refresh" type="internal">
+        <log label="Refresh" expr="'Refreshing data...'" />
+        <raise event="data.updated" />
+      </transition>
+    </state>
+
+    <!-- Processing state -->
+    <state id="processing">
+      <onentry>
+        <log label="Processing" expr="'Starting processing...'" />
+        <send event="timeout" delay="10s" id="processingTimer" />
+      </onentry>
+      
+      <onexit>
+        <cancel sendid="processingTimer" />
+      </onexit>
+      
+      <transition event="complete" target="ready">
+        <log label="Processing" expr="'Processing completed successfully'" />
+      </transition>
+      
+      <transition event="error" target="error">
+        <assign location="counter" expr="counter - 1" />
+      </transition>
+      
+      <transition event="timeout" target="error">
+        <log label="Error" expr="'Processing timed out'" />
+      </transition>
+      
+      <transition event="pause" target="paused" />
+    </state>
+
+    <!-- Paused state -->
+    <state id="paused">
+      <onentry>
+        <log label="Paused" expr="'System paused'" />
+      </onentry>
+      
+      <transition event="resume" target="ready" />
+      <transition event="stop" target="idle" />
+    </state>
+
+    <!-- Error state with conditional logic -->
+    <state id="error">
+      <onentry>
+        <log label="Error" expr="'Error occurred, counter: ' + counter" />
+        <if cond="counter &gt; 0">
+          <send event="retry" delay="2s" />
+        <else />
+          <send event="fail" delay="1s" />
+        </if>
+      </onentry>
+      
+      <transition event="retry" cond="counter &gt; 0" target="ready">
+        <log label="Retry" expr="'Retrying operation'" />
+      </transition>
+      
+      <transition event="fail" target="failed" />
+      <transition event="reset" target="idle">
+        <assign location="counter" expr="0" />
+      </transition>
+    </state>
+  </state>
+
+  <!-- Configuration state with parallel regions -->
+  <state id="configuration">
+    <onentry>
+      <log label="Config" expr="'Entering configuration mode'" />
+    </onentry>
+    
+    <parallel id="configSections">
+      <!-- User settings section -->
+      <state id="userSettings" initial="editingName">
+        <state id="editingName">
+          <transition event="name.changed" target="editingPrefs">
+            <assign location="userName" expr="_event.data.name" />
+          </transition>
+        </state>
+        
+        <state id="editingPrefs">
+          <transition event="prefs.saved" target="editingName" />
+        </state>
+      </state>
+      
+      <!-- System settings section -->
+      <state id="systemSettings" initial="basic">
+        <state id="basic">
+          <transition event="advanced" target="advanced" />
+        </state>
+        
+        <state id="advanced">
+          <transition event="basic" target="basic" />
+        </state>
+      </state>
+    </parallel>
+    
+    <transition event="config.done" target="idle">
+      <log label="Config" expr="'Configuration completed'" />
+    </transition>
+  </state>
+
+  <!-- Failed final state -->
+  <state id="failed">
+    <onentry>
+      <log label="Failed" expr="'System failed - manual intervention required'" />
+    </onentry>
+    
+    <transition event="manual.fix" target="idle">
+      <assign location="counter" expr="0" />
+      <log label="Recovery" expr="'System manually recovered'" />
+    </transition>
+    
+    <transition event="shutdown" target="terminated" />
+  </state>
+
+  <!-- Success final state with done data -->
+  <final id="terminated">
+    <onentry>
+      <log label="Shutdown" expr="'System shutting down gracefully'" />
+    </onentry>
+    
+    <donedata>
+      <param name="finalCount" expr="counter" />
+      <param name="userName" expr="userName" />
+      <param name="shutdownTime" expr="new Date().toISOString()" />
+    </donedata>
+  </final>
+
+  <!-- History state example -->
+  <state id="maintenance">
+    <history id="maintenanceHistory" type="deep">
+      <transition target="idle" />
+    </history>
+    
+    <state id="diagnostics" initial="memoryCheck">
+      <state id="memoryCheck">
+        <transition event="memory.ok" target="diskCheck" />
+      </state>
+      
+      <state id="diskCheck">
+        <transition event="disk.ok" target="networkCheck" />
+      </state>
+      
+      <state id="networkCheck">
+        <transition event="network.ok" target="diagnosticsComplete" />
+      </state>
+      
+      <final id="diagnosticsComplete" />
+    </state>
+    
+    <transition event="maintenance.complete" target="maintenanceHistory" />
+    <transition event="exit.maintenance" target="idle" />
+  </state>
+
+  <!-- Global transitions -->
+  <transition event="emergency.stop" target="failed">
+    <log label="Emergency" expr="'Emergency stop activated!'" />
+  </transition>
+  
+  <transition event="maintenance.mode" target="maintenance" />
+
+</scxml>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" datamodel="ecmascript" initial="red">
+  <state id="red">
+    <onentry>
+      <log label="traffic-light" expr="'Entering red light state'" />
+    </onentry>
+    <transition event="timer" target="green" />
+  </state>
+  
+  <state id="yellow">
+    <onentry>
+      <log label="traffic-light" expr="'Entering yellow light state'" />
+    </onentry>
+    <transition event="timer" target="red" />
+  </state>
+  
+  <state id="green">
+    <onentry>
+      <log label="traffic-light" expr="'Entering green light state'" />
+    </onentry>
+    <transition event="timer" target="yellow" />
+  </state>
+</scxml>

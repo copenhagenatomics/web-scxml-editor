@@ -1,0 +1,49 @@
+<scxml name="Scxml" version="1.0" xmlns="http://www.w3.org/2005/07/scxml" initial="Airplane">
+
+  <!-- Main airplane state -->
+  <state id="Airplane" initial="Refuel">
+    <!-- Pause goes to Expecting -->
+    <transition event="Pause" target="Expecting"/>
+
+    <!-- History remembers last child (Engines or Refuel).
+         Default is Refuel if no history yet -->
+    <history id="AirplaneHistory" type="deep">
+      <transition target="Engines"/>
+    </history>
+
+    <!-- Engines parallel region -->
+    <parallel id="Engines">
+      <!-- If no fuel, go back to Refuel (kills both engines) -->
+      <transition event="NoFuel" target="Refuel"/>
+
+      <state id="Left" initial="LeftOff">
+        <state id="LeftOff">
+          <transition event="Startup.Left" target="LeftOn"/>
+        </state>
+        <state id="LeftOn">
+          <transition event="Shutdown.Left" target="LeftOff"/>
+        </state>
+      </state>
+
+      <state id="Right" initial="RightOff">
+        <state id="RightOff">
+          <transition event="Startup.Right" target="RightOn"/>
+        </state>
+        <state id="RightOn">
+          <transition event="Shutdown.Right" target="RightOff"/>
+        </state>
+      </state>
+    </parallel>
+
+    <!-- Refuel state -->
+    <state id="Refuel">
+      <transition event="Finished" target="Engines"/>
+    </state>
+  </state>
+
+  <!-- Expecting state -->
+  <state id="Expecting">
+    <!-- Resume goes to the history of Airplane -->
+    <transition event="Resume" target="AirplaneHistory"/>
+  </state>
+</scxml>
