@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Code, Workflow, FileText } from 'lucide-react';
+import { Code, Workflow } from 'lucide-react';
 import { InlineTipsCarousel } from './inline-tips-carousel';
 
 interface TwoTabLayoutProps {
@@ -108,27 +108,16 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
 
   return (
     <div className='h-full flex flex-col'>
-      {/* Header with file info and actions */}
-      <div className='flex items-center justify-between p-4 border-b bg-white'>
-        <div className='flex items-center space-x-3'>
-          <FileText className='h-5 w-5 text-gray-500' />
-          <h2 className='text-lg font-semibold text-gray-900'>
-            {fileInfo?.name || 'Untitled Document'}
-          </h2>
-          {fileInfo?.isDirty && (
-            <span className='text-xs text-amber-600 font-medium'>
-              • Modified
-            </span>
-          )}
-        </div>
-        {actions && (
-          <div className='flex items-center space-x-3'>
+      {/* Actions toolbar */}
+      {actions && (
+        <div className='flex items-center justify-start px-4 py-2 border-b bg-white'>
+          <div className='flex items-center space-x-3 w-full'>
             {typeof actions === 'function'
               ? actions(activeTab, setActiveTab)
               : actions}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className='flex items-center justify-between border-b bg-gray-50'>
@@ -157,7 +146,6 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
           </button>
         </div>
 
-        {/* Tips Carousel */}
         <div className='px-6'>
           <InlineTipsCarousel
             tips={editorTips}

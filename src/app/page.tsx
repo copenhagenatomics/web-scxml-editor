@@ -252,6 +252,54 @@ export default function Home() {
     [setContent, setFileInfo, setErrors, setValidationPanelVisible, historyManager]
   );
 
+  const [isProgramLoading, setIsProgramLoading] = React.useState(false);
+  const [isApplying, setIsApplying] = React.useState(false);
+  const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const handleLoadProgram = useCallback(async () => {
+    setIsProgramLoading(true);
+    try {
+      const res = await fetch('/scxml-editor/program');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const scxml = await res.text();
+      setContent(scxml);
+      setFileInfo({ name: 'program.scxml', size: scxml.length, lastModified: new Date(), content: scxml });
+      setErrors([]);
+      historyManager.initialize(scxml, 'Loaded from system');
+      navigateToRoot();
+      setToast({ message: 'Program loaded successfully', type: 'success' });
+    } catch (e) {
+      setToast({ message: `Failed to load program: ${(e as Error).message}`, type: 'error' });
+    } finally {
+      setIsProgramLoading(false);
+    }
+  }, [setContent, setFileInfo, setErrors, setValidationPanelVisible, historyManager, navigateToRoot]);
+
+  const handleApplyToSystem = useCallback(async () => {
+    setIsApplying(true);
+    setToast(null);
+    try {
+      const res = await fetch('/program/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(content),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { message: string; restarting: boolean };
+      setToast({ message: data.message, type: 'success' });
+    } catch (e) {
+      setToast({ message: `Error: ${(e as Error).message}`, type: 'error' });
+    } finally {
+      setIsApplying(false);
+    }
+  }, [content]);
+
   const getDownloadFilename = () => {
     if (fileInfo?.name) {
       return fileInfo.name;
@@ -311,6 +359,25 @@ export default function Home() {
         onChange={handleFileInputChange}
         className='hidden'
       />
+
+      <button
+        onClick={handleLoadProgram}
+        disabled={isProgramLoading}
+        className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+      >
+        <span>{isProgramLoading ? 'Loading…' : 'Load Current Program'}</span>
+      </button>
+
+      <button
+        onClick={handleApplyToSystem}
+        disabled={isApplying}
+
+        className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+      >
+        <span>{isApplying ? 'Applying…' : 'Apply to System'}</span>
+      </button>
+
+      <div className='flex-1' />
 
       <UndoRedoControls
         onUndo={handleUndo}
@@ -459,7 +526,15 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className='h-screen'>
+          <div className='h-screen relative'>
+            {toast && (
+              <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-start space-x-3 px-4 py-3 rounded-lg shadow-lg text-sm max-w-lg w-full ${
+                toast.type === 'success' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'
+              }`}>
+                <span className='flex-1 whitespace-pre-wrap'>{toast.message}</span>
+                <button onClick={() => setToast(null)} className='shrink-0 font-bold opacity-60 hover:opacity-100'>✕</button>
+              </div>
+            )}
             <TwoTabLayout
               codeEditor={renderCodeEditor()}
               visualDiagram={renderVisualDiagram()}
