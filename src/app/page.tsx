@@ -8,7 +8,7 @@ import {
 } from '@/components/file-operations';
 import { TwoTabLayout, type TabType } from '@/components/layout';
 import { VisualDiagram } from '@/components/diagram';
-import { Upload } from 'lucide-react';
+import { Upload, FileText } from 'lucide-react';
 import { ErrorBoundary, ValidationPanel, UndoRedoControls } from '@/components/ui';
 import { SCXMLParser, SCXMLValidator } from '@/lib';
 import { hasVisualMetadata } from '@/lib/utils';
@@ -18,6 +18,8 @@ import { HistoryManager } from '@/lib/history/history-manager';
 import type { FileInfo, ValidationError } from '@/types/common';
 import type { ActionType } from '@/types/history';
 import { DEFAULT_SCXML_TEMPLATE } from '@/lib/consts/default_scxml_template';
+
+const systemIntegrationEnabled = process.env.NEXT_PUBLIC_IS_STANDALONE_APP === 'true';
 
 export default function Home() {
   const {
@@ -350,7 +352,10 @@ export default function Home() {
     </div>
   );
 
-  const renderActions = (activeTab: TabType, setActiveTab: (tab: TabType) => void) => (
+  const renderActions = (
+    activeTab: TabType,
+    setActiveTab: (tab: TabType) => void,
+  ) => (
     <>
       <input
         ref={fileInputRef}
@@ -360,22 +365,39 @@ export default function Home() {
         className='hidden'
       />
 
-      <button
-        onClick={handleLoadProgram}
-        disabled={isProgramLoading}
-        className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-      >
-        <span>{isProgramLoading ? 'Loading…' : 'Load Current Program'}</span>
-      </button>
+      {systemIntegrationEnabled ? (
+        <div className='flex items-center space-x-2'>
+          <FileText className='h-5 w-5 text-gray-500' />
+          <h2 className='text-lg font-semibold text-gray-900'>
+            {fileInfo?.name || "Untitled Document"}
+          </h2>
+          {isDirty && (
+            <span className='text-xs text-amber-600 font-medium'>
+              • Modified
+            </span>
+          )}
+        </div>
+      ) : (
+        <>
+          <button
+            onClick={handleLoadProgram}
+            disabled={isProgramLoading}
+            className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <span>
+              {isProgramLoading ? "Loading…" : "Load Current Program"}
+            </span>
+          </button>
 
-      <button
-        onClick={handleApplyToSystem}
-        disabled={isApplying}
-
-        className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-      >
-        <span>{isApplying ? 'Applying…' : 'Apply to System'}</span>
-      </button>
+          <button
+            onClick={handleApplyToSystem}
+            disabled={isApplying}
+            className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <span>{isApplying ? "Applying…" : "Apply to System"}</span>
+          </button>
+        </>
+      )}
 
       <div className='flex-1' />
 
@@ -398,23 +420,23 @@ export default function Home() {
       <button
         onClick={() => {
           // If on visual tab, switch to code editor tab
-          if (activeTab === 'visual') {
-            setActiveTab('code');
+          if (activeTab === "visual") {
+            setActiveTab("code");
           }
           setValidationPanelVisible(!isValidationPanelVisible);
         }}
         className={`cursor-pointer text-sm px-3 py-2 rounded-md transition-colors ${
           hasErrors
-            ? 'bg-red-100 text-red-800 hover:bg-red-200'
+            ? "bg-red-100 text-red-800 hover:bg-red-200"
             : hasWarnings
-            ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-            : 'bg-green-100 text-green-800 hover:bg-green-200'
+              ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
+              : "bg-green-100 text-green-800 hover:bg-green-200"
         }`}
       >
         {errors.length === 0
-          ? 'Valid'
-          : `${errors.filter((e) => e.severity === 'error').length} errors, ${
-              errors.filter((e) => e.severity === 'warning').length
+          ? "Valid"
+          : `${errors.filter((e) => e.severity === "error").length} errors, ${
+              errors.filter((e) => e.severity === "warning").length
             } warnings`}
       </button>
 
