@@ -17,6 +17,7 @@ interface XMLEditorProps {
   height?: string | number;
   theme?: 'light' | 'dark';
   onNavigateToLine?: (line: number, column?: number) => void;
+  onMount?: () => void;
 }
 
 export interface XMLEditorRef {
@@ -33,6 +34,7 @@ export const XMLEditor = forwardRef<XMLEditorRef, XMLEditorProps>(
       readOnly = false,
       height = '500px',
       theme = 'dark',
+      onMount,
     },
     ref
   ) => {
@@ -188,6 +190,7 @@ export const XMLEditor = forwardRef<XMLEditorRef, XMLEditorProps>(
           } catch (error) {
             console.error('❌ Error setting up SCXML editor:', error);
           }
+          onMount?.();
         });
       }
     };
