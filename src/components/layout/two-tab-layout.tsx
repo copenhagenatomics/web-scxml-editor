@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { Code, Workflow } from 'lucide-react';
 import { InlineTipsCarousel } from './inline-tips-carousel';
+import { useHostAPIStore } from '@/stores/host-api-store';
 
 interface TwoTabLayoutProps {
   codeEditor: React.ReactNode;
@@ -28,6 +29,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
   actions,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('code');
+  const { commands, feedbackQueue, executeCommand, dismissFeedback } = useHostAPIStore();
 
   const handleTabChange = useCallback((tab: TabType) => {
     setActiveTab(tab);
@@ -107,14 +109,59 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
   ];
 
   return (
-    <div className='h-full flex flex-col'>
+    <div className='h-full flex flex-col relative'>
+      {feedbackQueue.map(item => (
+        <div
+          key={item.id}
+          className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-start space-x-3 px-4 py-3 rounded-lg shadow-lg text-sm max-w-lg w-full ${
+            item.level === 'info'
+              ? 'bg-green-50 border border-green-200 text-green-800'
+              : item.level === 'warning'
+                ? 'bg-yellow-50 border border-yellow-200 text-yellow-800'
+                : 'bg-red-50 border border-red-200 text-red-800'
+          }`}
+        >
+          <span className='flex-1 whitespace-pre-wrap'>{item.message}</span>
+          <button
+            onClick={() => dismissFeedback(item.id)}
+            className='shrink-0 font-bold opacity-60 hover:opacity-100'
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+
       {/* Actions toolbar */}
       {actions && (
         <div className='flex items-center justify-start px-4 py-2 border-b bg-white'>
           <div className='flex items-center space-x-3 w-full'>
+
+            {/* Host-registered commands */}
+            {commands.length > 0 && (
+              <>
+                {commands.map(cmd => (
+                  <button
+                    key={cmd.id}
+                    onClick={() => executeCommand(cmd.id)}
+                    disabled={cmd.isExecuting}
+                    title={cmd.tooltip}
+                    className='cursor-pointer flex items-center space-x-2 text-sm px-3 py-2 rounded-md bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                    {cmd.isExecuting && (
+                      <span className='h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin inline-block' />
+                    )}
+                    <span>{cmd.label}</span>
+                  </button>
+                ))}
+                <div className='h-6 w-px bg-gray-300' />
+              </>
+            )}
+
+            {/* Built-in actions */}
             {typeof actions === 'function'
               ? actions(activeTab, setActiveTab)
               : actions}
+
           </div>
         </div>
       )}
