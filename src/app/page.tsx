@@ -258,7 +258,10 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const api: ScxmlEditorAPI = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stub = window.ScxmlEditorAPI as any;
+
+    const realApi: ScxmlEditorAPI = {
       onReady,
       loadScxml: (xml: string) => {
         setContent(xml);
@@ -270,7 +273,20 @@ export default function Home() {
       registerCommand,
       showFeedback,
     };
-    window.ScxmlEditorAPI = api;
+
+    if (stub?._q) {
+      // Upgrade the stub object in place so any host reference already captured
+      // (e.g. `var api = iframe.contentWindow.ScxmlEditorAPI` in a load handler)
+      // automatically gets the real methods without needing to re-read the property.
+      const queue = stub._q as { ready: (() => void)[]; commands: any[]; feedback: [string, any][] };
+      Object.assign(stub, realApi);
+      delete stub._q;
+      queue.ready.forEach(cb => onReady(cb));
+      queue.commands.forEach(o => registerCommand(o));
+      queue.feedback.forEach(([m, l]) => showFeedback(m, l));
+    } else {
+      window.ScxmlEditorAPI = realApi;
+    }
   }, []);
 
   const getDownloadFilename = () => {
