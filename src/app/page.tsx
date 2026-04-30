@@ -361,7 +361,7 @@ export default function Home() {
         className='mr-2'
       />
 
-      <div className='h-6 w-px bg-gray-300 mx-2' />
+      <div className='h-6 w-px bg-gray-300 m-2' />
 
       <button
         onClick={handleNewFileUpload}
