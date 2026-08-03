@@ -35,6 +35,8 @@ describe('validateInitialStateGroups', () => {
     expect(errors[0].severity).toBe('error');
     expect(errors[0].message).toContain('A');
     expect(errors[0].message).toContain('B');
+    expect(errors[0].stateId).toBe('A');
+    expect(errors[0].targetStateId).toBe('B');
   });
 
   it('reports an error for a merged group inside a nested compound state', () => {

@@ -48,6 +48,7 @@ export default function Home() {
 
   // --- Refs ---
   const editorRef = useRef<XMLEditorRef>(null);
+  const pendingNavigateRef = useRef<{ line: number; column: number } | null>(null);
 
   // --- Derived ---
   const totalErrors = useMemo(
@@ -84,6 +85,14 @@ export default function Home() {
     }
   }, []);
 
+  const handleEditorMount = useCallback(() => {
+    const pending = pendingNavigateRef.current;
+    if (pending) {
+      pendingNavigateRef.current = null;
+      editorRef.current?.navigateToLine(pending.line, pending.column);
+    }
+  }, []);
+
   const handleValidationClose = useCallback(() => {
     setActivePanel(null);
     setValidationPanelTab('validation');
@@ -115,7 +124,6 @@ export default function Home() {
 
         <button
           onClick={() => {
-            if (activeTab === 'visual') setActiveTab('code');
             const opening = activePanel !== 'validation';
             setActivePanel(opening ? 'validation' : null);
             if (!opening) setValidationPanelTab('validation');
@@ -204,6 +212,7 @@ export default function Home() {
                   onValidationTabChange={setValidationPanelTab}
                   onValidationClose={handleValidationClose}
                   onEntriesChange={handleEntriesChange}
+                  onEditorMount={handleEditorMount}
                 />
               }
               visualDiagram={
@@ -217,6 +226,12 @@ export default function Home() {
               }
               fileInfo={{ name: fileInfo?.name, isDirty }}
               actions={renderActions}
+              validationPanelTab={validationPanelTab}
+              onValidationTabChange={setValidationPanelTab}
+              onValidationClose={handleValidationClose}
+              onNavigateToLine={(line, column) => {
+                pendingNavigateRef.current = { line, column };
+              }}
             />
           </div>
         )}

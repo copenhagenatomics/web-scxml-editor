@@ -15,6 +15,7 @@ interface ValidationPanelProps {
   onErrorClick?: (error: ValidationError) => void;
   onDismissHostError: (id: string) => void;
   onClearHostErrors: () => void;
+  supportsStateHighlight?: boolean;
 }
 
 export function ValidationPanel({
@@ -27,6 +28,7 @@ export function ValidationPanel({
   onErrorClick,
   onDismissHostError,
   onClearHostErrors,
+  supportsStateHighlight,
 }: ValidationPanelProps) {
   if (!isVisible) return null;
 
@@ -78,7 +80,7 @@ export function ValidationPanel({
 
       <div className='p-4 flex-1 overflow-y-auto scrollbar-thin'>
         {!showTabs || activeTab === 'validation' ? (
-          <ValidationTab errors={errors} onErrorClick={onErrorClick} />
+          <ValidationTab errors={errors} onErrorClick={onErrorClick} supportsStateHighlight={supportsStateHighlight} />
         ) : (
           <HostAlertsTab
             hostErrors={hostErrors}
@@ -98,9 +100,10 @@ export function ValidationPanel({
 interface ValidationTabProps {
   errors: ValidationError[];
   onErrorClick?: (error: ValidationError) => void;
+  supportsStateHighlight?: boolean;
 }
 
-function ValidationTab({ errors, onErrorClick }: ValidationTabProps) {
+function ValidationTab({ errors, onErrorClick, supportsStateHighlight }: ValidationTabProps) {
   const errorCount = errors.filter(e => e.severity === 'error').length;
   const warningCount = errors.filter(e => e.severity === 'warning').length;
   const sortedErrors = [...errors].sort((a, b) => {
@@ -136,7 +139,7 @@ function ValidationTab({ errors, onErrorClick }: ValidationTabProps) {
       </div>
       <div className='space-y-2'>
         {sortedErrors.map((error, index) => (
-          <ValidationErrorItem key={index} error={error} onClick={onErrorClick} />
+          <ValidationErrorItem key={index} error={error} onClick={onErrorClick} supportsStateHighlight={supportsStateHighlight} />
         ))}
       </div>
     </div>
@@ -232,12 +235,14 @@ function HostErrorCard({ item, onDismiss }: HostErrorCardProps) {
 interface ValidationErrorItemProps {
   error: ValidationError;
   onClick?: (error: ValidationError) => void;
+  supportsStateHighlight?: boolean;
 }
 
-function ValidationErrorItem({ error, onClick }: ValidationErrorItemProps) {
+function ValidationErrorItem({ error, onClick, supportsStateHighlight }: ValidationErrorItemProps) {
   const isError = error.severity === 'error';
-  const hasLocation = error.line && error.column;
-  const isClickable = onClick && hasLocation;
+  const hasLocation = Boolean(error.line && error.column);
+  const canHighlightState = Boolean(supportsStateHighlight && error.stateId);
+  const isClickable = onClick && (hasLocation || canHighlightState);
 
   return (
     <div
@@ -274,12 +279,14 @@ function ValidationErrorItem({ error, onClick }: ValidationErrorItemProps) {
           <p className={`text-sm font-medium break-words ${isError ? 'text-red-800 dark:text-red-300' : 'text-yellow-800 dark:text-yellow-300'}`}>
             {error.message}
           </p>
-          {(error.line || error.column) && (
+          {(hasLocation || isClickable) && (
             <p className={`text-xs mt-1 flex items-center ${isError ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
-              <span>Line {error.line || '?'}, Column {error.column || '?'}</span>
+              {hasLocation && (
+                <span>Line {error.line || '?'}, Column {error.column || '?'}</span>
+              )}
               {isClickable && (
-                <span className={`ml-2 text-xs ${isError ? 'text-red-500' : 'text-yellow-500'}`}>
-                  (click to navigate)
+                <span className={`${hasLocation ? 'ml-2 ' : ''}text-xs ${isError ? 'text-red-500' : 'text-yellow-500'}`}>
+                  {canHighlightState ? '(click to highlight)' : '(click to navigate)'}
                 </span>
               )}
             </p>

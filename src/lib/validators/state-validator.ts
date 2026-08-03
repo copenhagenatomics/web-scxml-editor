@@ -413,6 +413,7 @@ export function validateCompoundStates(
         errors.push({
           message: `Compound state '${state['@_id']}' must have either an 'initial' attribute or an <initial> child element`,
           severity: 'error',
+          stateId: state['@_id'],
         });
       }
     }

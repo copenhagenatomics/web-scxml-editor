@@ -18,6 +18,7 @@ import {
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
 } from '@/lib/utils/transition-slot-rules';
+import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
 import { ActionType } from '@/types/history';
 import type { SCXMLDocument, TransitionElement } from '@/types/scxml';
@@ -26,7 +27,6 @@ import {
   SmartStepEdge,
   SmartStraightEdge,
 } from '@tisoap/react-flow-smart-edge';
-import { ChevronRight } from 'lucide-react';
 import React, { useCallback } from 'react';
 import {
   Background,
@@ -61,6 +61,8 @@ import { TransitionPanel, type TransitionApplyArgs, type TransitionApplyResult }
 import { InitialGroupConflictBanner } from './initial-group-conflict-banner';
 import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
+import { useEditorStore } from '@/stores/editor-store';
+import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
 import { findTimeEventToken, resolveTimeEventDisplay } from '@/lib/utils/time-transition';
 import {
   wouldMergeDistinctGroups,
@@ -2044,13 +2046,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const {
     filteredNodes,
     filteredEdges: hierarchyFilteredEdges,
-    breadcrumbPath,
     canNavigateUp,
     navigateUp: originalNavigateUp,
     navigateToRoot: originalNavigateToRoot,
     navigateIntoState: originalNavigateIntoState,
-    navigateToBreadcrumb: originalNavigateToBreadcrumb,
-    currentParentNode,
     currentParentId,
   } = useHierarchyNavigation({
     allNodes: parsedData.nodes,
@@ -2059,6 +2058,17 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   // Update allNodesRef with original nodes (with parentId intact)
   allNodesRef.current = parsedData.nodes;
+
+  // Keep the hierarchy index panel's tooltip data (editor-store) in sync
+  // with the current node set, so it works from the toolbar without that
+  // component needing direct access to the diagram's node graph.
+  const setInitialChildByParent = useEditorStore((state) => state.setInitialChildByParent);
+  React.useEffect(() => {
+    setInitialChildByParent(buildInitialChildByParent(parsedData.nodes));
+  }, [parsedData.nodes, setInitialChildByParent]);
+
+  const focusTarget = useEditorStore((state) => state.focusTarget);
+  const setFocusTarget = useEditorStore((state) => state.setFocusTarget);
 
   const navigateWithFitView = useCallback(
     (navigationFn: () => void) => {
@@ -2092,11 +2102,36 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [navigateWithFitView, originalNavigateIntoState]
   );
 
-  const navigateToBreadcrumb = useCallback(
-    (index: number) =>
-      navigateWithFitView(() => originalNavigateToBreadcrumb(index)),
-    [navigateWithFitView, originalNavigateToBreadcrumb]
-  );
+  // Handle a request (from the validation panel, via editor-store) to
+  // navigate to and highlight a specific state/transition in the diagram.
+  React.useEffect(() => {
+    if (!focusTarget) return;
+
+    const resolution = resolveFocusTarget(
+      allNodesRef.current,
+      focusTarget.stateId,
+      focusTarget.targetStateId
+    );
+
+    if (!resolution) {
+      setFocusTarget(null);
+      return;
+    }
+
+    navigateWithFitView(() => {
+      originalNavigateToRoot();
+      resolution.ancestorIds.forEach((ancestorId) => originalNavigateIntoState(ancestorId));
+    });
+    setSelectedTransitions(new Set());
+    setActiveStates(resolution.highlightIds);
+    setFocusTarget(null);
+  }, [
+    focusTarget,
+    navigateWithFitView,
+    originalNavigateToRoot,
+    originalNavigateIntoState,
+    setFocusTarget,
+  ]);
 
   // ==================== ADD ROOT STATE HANDLER ====================
   const handleAddRootState = React.useCallback(() => {
@@ -2506,12 +2541,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // Handle keyboard events for edge deletion
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Delete' && !activePanel && selectedTransitions.size > 0) {
+      if (event.key === 'Delete' && activePanel !== 'validation' && selectedTransitions.size > 0) {
         event.preventDefault();
         const edgeId = Array.from(selectedTransitions)[0];
         handleEdgesChange([{ id: edgeId, type: 'remove' }]);
       }
-      if (event.key === 'Delete' && activeStates.size > 0) {
+      if (event.key === 'Delete' && activePanel !== 'validation' && activeStates.size > 0) {
         event.preventDefault();
         const stateId = Array.from(activeStates);
         handleNodesChange(stateId.map((id) => ({ id, type: 'remove' })));
@@ -2555,35 +2590,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             </div>
           </div>
         )}
-
-        {/* Hierarchy Navigation Controls — hidden; breadcrumb shown in main toolbar */}
-        <div className='hidden'>
-          <div className='flex items-center gap-1 flex-1'>
-            {breadcrumbPath.map((path, index) => (
-              <React.Fragment key={index}>
-                <button
-                  onClick={() => navigateToBreadcrumb(index)}
-                  className={`px-2 py-1 text-sm hover:bg-muted rounded transition-colors ${
-                    index === breadcrumbPath.length - 1
-                      ? 'font-semibold text-default'
-                      : 'text-muted hover:text-default'
-                  }`}
-                >
-                  {path}
-                </button>
-                {index < breadcrumbPath.length - 1 && (
-                  <ChevronRight className='h-3 w-3 text-dimmed' />
-                )}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {currentParentNode && (
-            <div className='text-sm text-muted ml-auto'>
-              Level: {breadcrumbPath.length - 1}
-            </div>
-          )}
-        </div>
 
         <div className='flex-1 relative'>
           <ReactFlow
@@ -2647,7 +2653,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             nodesDraggable={true}
             nodesConnectable={true}
             elementsSelectable={true}
-            deleteKeyCode={['Delete']}
+            deleteKeyCode={activePanel === 'validation' ? [] : ['Delete']}
             connectionLineType={ConnectionLineType.SmoothStep}
             connectionMode={ConnectionMode.Loose}
             connectionRadius={2}

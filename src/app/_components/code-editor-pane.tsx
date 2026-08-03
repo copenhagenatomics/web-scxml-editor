@@ -18,6 +18,7 @@ export interface CodeEditorPaneProps {
   onValidationTabChange: (tab: 'validation' | 'host-alerts') => void;
   onValidationClose: () => void;
   onEntriesChange: (values: ConfigValue[]) => void;
+  onEditorMount?: () => void;
 }
 
 export function CodeEditorPane({
@@ -28,6 +29,7 @@ export function CodeEditorPane({
   onValidationTabChange,
   onValidationClose,
   onEntriesChange,
+  onEditorMount,
 }: CodeEditorPaneProps) {
   const { content, errors } = useEditorStore();
   const { activePanel } = usePanelStore();
@@ -46,6 +48,7 @@ export function CodeEditorPane({
           errors={errors}
           height='100%'
           theme={isDark ? 'dark' : 'light'}
+          onMount={onEditorMount}
         />
       </div>
       <div className='shrink-0 h-full'>

@@ -33,7 +33,9 @@ export const InlineTipsCarousel: React.FC<InlineTipsCarouselProps> = ({
     setCurrentIndex(0);
   }, [filteredTips.length]);
 
-  // Auto-advance functionality
+  // Auto-advance functionality. Depending on currentIndex means the timer
+  // restarts whenever the tip changes, whether from auto-advance itself or
+  // a manual prev/next click, so manual navigation always gets a full interval.
   useEffect(() => {
     if (!autoAdvance || filteredTips.length <= 1) return;
 
@@ -42,7 +44,7 @@ export const InlineTipsCarousel: React.FC<InlineTipsCarouselProps> = ({
     }, autoAdvanceInterval);
 
     return () => clearInterval(timer);
-  }, [autoAdvance, autoAdvanceInterval, filteredTips.length]);
+  }, [autoAdvance, autoAdvanceInterval, filteredTips.length, currentIndex]);
 
   const goToPrevious = () => {
     setCurrentIndex(

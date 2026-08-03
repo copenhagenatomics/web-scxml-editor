@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useEffect } from 'react';
 import { Node, Edge } from 'reactflow';
 import { useEditorStore } from '@/stores/editor-store';
 
@@ -105,54 +105,16 @@ export function useHierarchyNavigation({
     );
   }, [allEdges, filteredNodes]);
 
-  // Get breadcrumb path for navigation display
-  const breadcrumbPath = useMemo(() => {
-    if (hierarchyState.currentPath.length === 0) {
-      return ['Root'];
-    }
-    return ['Root', ...hierarchyState.currentPath];
-  }, [hierarchyState.currentPath]);
-
   // Check if we can navigate up
   const canNavigateUp = hierarchyState.currentPath.length > 0;
-
-  // Navigate to a specific level in the breadcrumb
-  const navigateToBreadcrumb = useCallback(
-    (index: number) => {
-      if (index === 0) {
-        navigateToRoot();
-      } else if (index < hierarchyState.currentPath.length) {
-        // Navigate to intermediate level
-        const targetPath = hierarchyState.currentPath.slice(0, index);
-        const targetParentId = targetPath[targetPath.length - 1] || null;
-
-        // We need to reset to that level
-        // For now, we'll navigate up repeatedly
-        const stepsUp = hierarchyState.currentPath.length - index;
-        for (let i = 0; i < stepsUp; i++) {
-          navigateUp();
-        }
-      }
-    },
-    [hierarchyState.currentPath, navigateToRoot, navigateUp]
-  );
-
-  // Find parent node info for display
-  const currentParentNode = useMemo(() => {
-    if (!hierarchyState.currentParentId) return null;
-    return allNodes.find((n) => n.id === hierarchyState.currentParentId);
-  }, [hierarchyState.currentParentId, allNodes]);
 
   return {
     filteredNodes,
     filteredEdges,
-    breadcrumbPath,
     canNavigateUp,
     navigateUp,
     navigateToRoot,
     navigateIntoState,
-    navigateToBreadcrumb,
-    currentParentNode,
     currentParentId: hierarchyState.currentParentId,
   };
 }

@@ -89,6 +89,8 @@ export function validateTransitionsInElement(
             errors.push({
               message: `Transition target '${target}' not found. Make sure a state with id="${target}" exists in your SCXML document.`,
               severity: 'error',
+              stateId: element['@_id'],
+              targetStateId: target,
             });
           }
         });
@@ -115,6 +117,8 @@ export function validateInitialStates(
             errors.push({
               message: `Initial state '${stateId}' in state '${state['@_id'] || 'unnamed'}' not found. Make sure a state with id="${stateId}" exists in your SCXML document.`,
               severity: 'error',
+              stateId: state['@_id'],
+              targetStateId: stateId,
             });
           }
         });
@@ -148,6 +152,7 @@ export function validateTransitionSemantics(
           errors.push({
             message: `Invalid transition type '${transition['@_type']}'. Must be 'internal' or 'external'`,
             severity: 'error',
+            stateId: (element as any)['@_id'],
           });
         }
 
@@ -162,6 +167,7 @@ export function validateTransitionSemantics(
             errors.push({
               message: 'Internal transitions cannot target other states',
               severity: 'error',
+              stateId: sourceId,
             });
           }
         }
@@ -177,6 +183,7 @@ export function validateTransitionSemantics(
               errors.push({
                 message: `Invalid event name '${event}'. Event names must be valid identifiers`,
                 severity: 'warning',
+                stateId: (element as any)['@_id'],
               });
             }
           });
@@ -266,6 +273,8 @@ function validateCrossHierarchyInElement(
                 severity: 'error',
                 line: position?.line,
                 column: position?.column,
+                stateId: elementId,
+                targetStateId: targetId,
               });
             }
           }

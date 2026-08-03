@@ -39,6 +39,8 @@ function validateContainer(
           .map((m) => `'${m}'`)
           .join(' and ')} are both marked as Initial States but are connected by a transition (directly or indirectly), which merges two Initial State groups. Remove one of the Initial markers, or remove the transition(s) connecting them.`,
         severity: 'error',
+        stateId: members[0],
+        targetStateId: members[1],
       });
     });
   }

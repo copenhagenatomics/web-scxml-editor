@@ -130,10 +130,6 @@ export const XMLEditor = forwardRef<XMLEditorRef, XMLEditorProps>(
       editor: import('monaco-editor').editor.IStandaloneCodeEditor
     ) => {
       editorRef.current = editor;
-      const lineNumber = 6; // change this to your target line
-
-      // Move cursor
-      editor.setPosition({ lineNumber, column: 1 });
 
       // When a paste replaces the whole document (select-all + paste a new SCXML doc, or
       // pasting into an empty editor), apply the same duplicate-transition normalization

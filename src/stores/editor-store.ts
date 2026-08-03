@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ValidationError, FileInfo, EditorState } from '@/types/common';
+import type { InitialChildInfo } from '@/lib/utils/hierarchy-initial-info';
 
 // Hierarchy navigation state
 export interface HierarchyState {
@@ -14,6 +15,13 @@ interface EditorStore extends EditorState {
 
   // Hierarchy navigation state
   hierarchyState: HierarchyState;
+  // Initial child(ren) info per parent state id, keyed for the hierarchy
+  // index panel's hover tooltip (HIERARCHY_ROOT_KEY for top-level).
+  initialChildByParent: Map<string, InitialChildInfo[]>;
+  // Cross-component request to navigate the diagram to and highlight a
+  // specific state (e.g. from clicking a validation error while on the
+  // Visual tab). Consumed and cleared by VisualDiagram.
+  focusTarget: { stateId: string; targetStateId?: string } | null;
 
   // Actions
   setContent: (content: string) => void;
@@ -28,6 +36,8 @@ interface EditorStore extends EditorState {
   navigateUp: () => void;
   navigateToRoot: () => void;
   setVisibleNodes: (nodes: Set<string>) => void;
+  setInitialChildByParent: (map: Map<string, InitialChildInfo[]>) => void;
+  setFocusTarget: (target: { stateId: string; targetStateId?: string } | null) => void;
 }
 
 const initialState: EditorState = {
@@ -47,6 +57,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   ...initialState,
   fileInfo: null,
   hierarchyState: initialHierarchyState,
+  initialChildByParent: new Map(),
+  focusTarget: null,
 
   setContent: (content: string) => {
     set({ 
@@ -80,7 +92,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       ...initialState,
       fileInfo: null,
-      hierarchyState: initialHierarchyState
+      hierarchyState: initialHierarchyState,
+      initialChildByParent: new Map(),
+      focusTarget: null,
     });
   },
 
@@ -143,5 +157,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         visibleNodes: nodes
       }
     });
-  }
+  },
+
+  setInitialChildByParent: (map: Map<string, InitialChildInfo[]>) => {
+    set({ initialChildByParent: map });
+  },
+
+  setFocusTarget: (target) => {
+    set({ focusTarget: target });
+  },
 }));

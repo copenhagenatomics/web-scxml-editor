@@ -4,6 +4,8 @@ export interface ValidationError {
   column?: number;
   severity: 'error' | 'warning';
   code?: string;
+  stateId?: string;
+  targetStateId?: string;
 }
 
 export interface ParseResult<T> {

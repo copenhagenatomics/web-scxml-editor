@@ -1,11 +1,16 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
-import { Code2, Workflow, ChevronRight, Home } from "lucide-react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { Code2, Workflow, ChevronRight, Home, Layers } from "lucide-react";
 import { InlineTipsCarousel } from "./inline-tips-carousel";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useHostAPIStore } from "@/stores/host-api-store";
 import { useEditorStore } from "@/stores/editor-store";
+import { Panel, Badge } from "@/components/ui/primitives";
+import { formatInitialTooltip, HIERARCHY_ROOT_KEY } from "@/lib/utils/hierarchy-initial-info";
+import { ValidationPanel } from "@/components/ui";
+import { usePanelStore } from "@/stores/panel-store";
+import type { ValidationError } from "@/types/common";
 
 interface TwoTabLayoutProps {
   codeEditor: React.ReactNode;
@@ -20,6 +25,10 @@ interface TwoTabLayoutProps {
         activeTab: TabType,
         setActiveTab: (tab: TabType) => void,
       ) => React.ReactNode);
+  validationPanelTab: 'validation' | 'host-alerts';
+  onValidationTabChange: (tab: 'validation' | 'host-alerts') => void;
+  onValidationClose: () => void;
+  onNavigateToLine: (line: number, column: number) => void;
 }
 
 export type TabType = "code" | "visual";
@@ -29,16 +38,40 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
   visualDiagram,
   fileInfo,
   actions,
+  validationPanelTab,
+  onValidationTabChange,
+  onValidationClose,
+  onNavigateToLine,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(
     () => useHostAPIStore.getState().requestedTab ?? "code"
   );
-  const { commands, feedbackQueue, executeCommand, dismissFeedback, requestedTab, setRequestedTab } =
-    useHostAPIStore();
-  const { hierarchyState, navigateToRoot, navigateUp } = useEditorStore();
+  const {
+    commands, feedbackQueue, executeCommand, dismissFeedback, requestedTab, setRequestedTab,
+    hostErrors, dismissHostError, clearHostErrors,
+  } = useHostAPIStore();
+  const { hierarchyState, navigateToRoot, navigateUp, initialChildByParent, errors, setFocusTarget } = useEditorStore();
+  const { activePanel } = usePanelStore();
   const currentPath = hierarchyState.currentPath;
   const visiblePath = currentPath.slice(-2);
   const hasHiddenSegments = currentPath.length > 2;
+
+  const [isHierarchyPanelOpen, setIsHierarchyPanelOpen] = useState(false);
+  const hierarchyPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isHierarchyPanelOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (hierarchyPanelRef.current && !hierarchyPanelRef.current.contains(e.target as Node)) {
+        setIsHierarchyPanelOpen(false);
+      }
+    };
+    // Capture phase: the ReactFlow canvas stops propagation of its own
+    // mousedown handling, so a bubble-phase listener here never sees clicks
+    // on the diagram — capture fires before that, regardless.
+    document.addEventListener('mousedown', handleClickOutside, true);
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [isHierarchyPanelOpen]);
 
   useEffect(() => {
     if (requestedTab !== null) {
@@ -50,6 +83,20 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
   const handleTabChange = useCallback((tab: TabType) => {
     setActiveTab(tab);
   }, []);
+
+  const handleVisualErrorClick = useCallback(
+    (error: ValidationError) => {
+      if (error.stateId) {
+        setFocusTarget({ stateId: error.stateId, targetStateId: error.targetStateId });
+        return;
+      }
+      if (error.line && error.column) {
+        setActiveTab("code");
+        onNavigateToLine(error.line, error.column);
+      }
+    },
+    [setFocusTarget, onNavigateToLine]
+  );
 
   const editorTips = [
     {
@@ -243,6 +290,68 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
                 );
               })}
             </div>
+
+            <div className='relative' ref={hierarchyPanelRef}>
+              <button
+                onClick={() => setIsHierarchyPanelOpen((v) => !v)}
+                className='flex items-center gap-1 p-0.5 text-dimmed hover:text-default transition-colors'
+                title='Show full state path'
+              >
+                <Layers className='h-3.5 w-3.5' />
+                <Badge>{currentPath.length + 1}</Badge>
+              </button>
+              {isHierarchyPanelOpen && (
+                <div className='absolute left-0 top-full mt-1 z-50'>
+                  <Panel
+                    title='State Path'
+                    onClose={() => setIsHierarchyPanelOpen(false)}
+                    widthClass='w-64'
+                    className='max-h-[60vh]'
+                  >
+                    <ul className='py-1'>
+                      <li>
+                        <button
+                          onClick={() => { navigateToRoot(); setIsHierarchyPanelOpen(false); }}
+                          className='w-full flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted hover:text-default hover:bg-muted transition-colors'
+                          title={formatInitialTooltip(initialChildByParent.get(HIERARCHY_ROOT_KEY))}
+                        >
+                          <Home className='h-3.5 w-3.5' />
+                          Home
+                        </button>
+                      </li>
+                      {currentPath.map((segment, i) => {
+                        const isLast = i === currentPath.length - 1;
+                        const stepsUp = currentPath.length - 1 - i;
+                        const tooltip = formatInitialTooltip(initialChildByParent.get(segment));
+                        return (
+                          <li key={i}>
+                            {isLast ? (
+                              <span
+                                className='block px-3 py-1.5 pl-7 text-sm font-medium text-default'
+                                title={tooltip}
+                              >
+                                {segment}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  for (let j = 0; j < stepsUp; j++) navigateUp();
+                                  setIsHierarchyPanelOpen(false);
+                                }}
+                                className='w-full text-left px-3 py-1.5 pl-7 text-sm text-muted hover:text-default hover:bg-muted transition-colors'
+                                title={tooltip}
+                              >
+                                {segment}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </Panel>
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -252,7 +361,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
           tips={editorTips}
           activeTab={activeTab}
           autoAdvance={true}
-          autoAdvanceInterval={6000}
+          autoAdvanceInterval={10000}
         />
 
         <ThemeToggle />
@@ -270,7 +379,25 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
           <div className='h-full p-4 bg-base'>{codeEditor}</div>
         )}
         {activeTab === "visual" && (
-          <div className='h-full bg-muted'>{visualDiagram}</div>
+          <div className='h-full bg-muted relative'>
+            {visualDiagram}
+            {activePanel === 'validation' && (
+              <div className='absolute right-4 top-4 bottom-4 z-40'>
+                <ValidationPanel
+                  errors={errors}
+                  hostErrors={hostErrors}
+                  isVisible={true}
+                  activeTab={validationPanelTab}
+                  onClose={onValidationClose}
+                  onTabChange={onValidationTabChange}
+                  onErrorClick={handleVisualErrorClick}
+                  supportsStateHighlight={true}
+                  onDismissHostError={dismissHostError}
+                  onClearHostErrors={clearHostErrors}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

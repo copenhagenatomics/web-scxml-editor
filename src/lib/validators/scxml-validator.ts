@@ -231,6 +231,7 @@ export class SCXMLValidator {
       errors.push({
         message: `Duplicate state ID '${id}'`,
         severity: 'error',
+        stateId: id,
       });
     });
 
