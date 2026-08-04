@@ -1033,6 +1033,58 @@ function MyComponent() {
 }
 ```
 
+### GitHub Integration
+
+The editor can connect, link, push, and pull a single SCXML file against a
+file in a GitHub repository (single-user MVP — one linked repo/branch/path
+at a time, no multi-file sync). This is implemented by
+`src/stores/github-store.ts`, `src/lib/github/*`, the `useGithubConnect`
+and `useGithubPull` hooks under `src/app/_hooks/`, and the
+`GithubPanel` component (opened from the GitHub button in the main
+toolbar).
+
+Connecting uses GitHub's OAuth **Device Flow**, not the more common
+redirect-based Authorization Code Flow: the user is shown a short code and
+opens `github.com/login/device` (in any browser) to enter it, while the
+editor polls in the background until they do. This was chosen because the
+editor is deployed in contexts (e.g. embedded per-device inside
+LoopControl) where every installation is reached at its own local
+IP/hostname, and a classic OAuth App only supports one registered
+`redirect_uri` — Device Flow needs none at all. It also needs no client
+secret (confirmed against GitHub's own docs), so this app never holds one.
+
+GitHub's device-flow endpoints don't send CORS headers, though, so the
+browser can't call `github.com` directly — both device-flow calls are
+relayed through a same-origin endpoint that just forwards the request and
+returns GitHub's response verbatim (no secret involved, purely a CORS
+workaround). For local dev that's the standalone Express service in
+`server/` (see `server/README.md` for how to register a GitHub OAuth App
+and enable Device Flow on it); a LoopControl-embedded deployment instead
+points at LoopControl's own `/api/v1/scxml-editor/github/device/*`
+endpoints, which perform the same relay natively (same-origin, no CORS
+config needed). The frontend needs three environment variables, copied
+from `.env.local.example` into `.env.local`:
+
+- `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the GitHub OAuth App's Client ID (public,
+  safe to ship in the bundle).
+- `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT` / `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT`
+  — the *full* URLs of the two relay endpoints (not base URLs — the paths
+  differ by deployment). For local dev against the standalone service,
+  those are `http://localhost:4000/api/github/device/code` and
+  `http://localhost:4000/api/github/device/token`.
+
+Local development runs two processes side by side:
+
+```bash
+# Terminal 1 — auth service
+cd server
+npm install
+npm start
+
+# Terminal 2 — editor, from the repo root
+npm run dev
+```
+
 ---
 
 ## History & Undo/Redo System

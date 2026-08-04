@@ -34,6 +34,15 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          # Baked into this release's static bundle for the LoopControl-embedded
+          # deployment target (see DEVELOPER_GUIDE.md's "GitHub Integration"
+          # section). The device-flow relay endpoints are relative paths since
+          # they're same-origin under whatever host each LoopControl instance
+          # runs at - a fixed absolute URL wouldn't work across a fleet of
+          # devices each reached at their own local IP/hostname.
+          NEXT_PUBLIC_GITHUB_CLIENT_ID: ${{ vars.GITHUB_OAUTH_CLIENT_ID }}
+          NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT: /api/v1/scxml-editor/github/device/code
+          NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT: /api/v1/scxml-editor/github/device/token
 
       - name: Prepare artifact directory
         run: |

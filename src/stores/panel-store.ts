@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type PanelId = 'config' | 'channelMapping' | 'events' | 'validation' | 'transition' | 'stateActions';
+export type PanelId = 'config' | 'channelMapping' | 'events' | 'validation' | 'transition' | 'stateActions' | 'github';
 
 interface PanelStore {
   activePanel: PanelId | null;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
-import { ChannelMappingPanel, ConfigPanel, EventsPanel } from '@/components/ui';
+import { ChannelMappingPanel, ConfigPanel, EventsPanel, GithubPanel } from '@/components/ui';
 import { updateConfigFieldExpr, updateConfigFieldType } from '@/lib/utils/datamodel-extractor';
 import { useEditorStore } from '@/stores/editor-store';
 import { usePanelStore } from '@/stores/panel-store';
@@ -45,6 +45,10 @@ export function SidePanels({ onEntriesChange, onContentChange }: SidePanelsProps
       />
       <EventsPanel
         isVisible={activePanel === 'events'}
+        onClose={handleClose}
+      />
+      <GithubPanel
+        isVisible={activePanel === 'github'}
         onClose={handleClose}
       />
     </>

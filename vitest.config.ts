@@ -18,6 +18,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     globals: true,
-    exclude: ['**/__tests__/**', '**/node_modules/**'],
+    exclude: ['**/__tests__/**', '**/node_modules/**', 'server/**'],
   },
 });

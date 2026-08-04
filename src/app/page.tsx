@@ -10,7 +10,7 @@ import { useEditorStore } from '@/stores/editor-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
 import type { ValidationError } from '@/types/common';
-import { Download, Eye, MoreVertical, Upload as UploadIcon } from 'lucide-react';
+import { Download, Eye, Github, MoreVertical, Upload as UploadIcon } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { CodeEditorPane } from './_components/code-editor-pane';
 import { VisualEditorPane } from './_components/visual-editor-pane';
@@ -136,6 +136,14 @@ export default function Home() {
           className='p-2 rounded-md hover:bg-muted transition-colors'
         >
           <StatusDot status={hasErrors ? 'error' : hasWarnings ? 'warning' : 'success'} />
+        </button>
+
+        <button
+          onClick={() => setActivePanel(activePanel === 'github' ? null : 'github')}
+          title='GitHub'
+          className='p-2 rounded-md text-muted hover:bg-muted hover:text-default transition-colors'
+        >
+          <Github className='h-4 w-4' />
         </button>
 
         <div className='h-6 w-px bg-[var(--ui-border)]' />
