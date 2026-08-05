@@ -41,8 +41,8 @@ jobs:
           # runs at - a fixed absolute URL wouldn't work across a fleet of
           # devices each reached at their own local IP/hostname.
           NEXT_PUBLIC_GITHUB_CLIENT_ID: ${{ vars.GITHUB_OAUTH_CLIENT_ID }}
-          NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT: /api/v1/scxml-editor/github/device/code
-          NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT: /api/v1/scxml-editor/github/device/token
+          NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT: ${{ vars.NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT }}
+          NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT: ${{ vars.NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT }}
 
       - name: Prepare artifact directory
         run: |
