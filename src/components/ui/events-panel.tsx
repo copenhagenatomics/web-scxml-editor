@@ -120,32 +120,39 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 </button>
               </div>
               {event.hasArgument && (
-                <div className='flex items-center gap-1.5 mt-1.5'>
-                  <input
-                    type='text'
-                    value={event.defaultValue ?? '0'}
-                    onChange={e => update(index, { defaultValue: e.target.value })}
-                    placeholder='default'
-                    title='Default'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <input
-                    type='number'
-                    value={event.min ?? ''}
-                    onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
-                    placeholder='min'
-                    title='Min'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <input
-                    type='number'
-                    value={event.max ?? ''}
-                    onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
-                    placeholder='max'
-                    title='Max'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <div className='flex-1'>
+                <div className='flex items-start gap-1.5 mt-1.5'>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Default</label>
+                    <input
+                      type='text'
+                      value={event.defaultValue ?? '0'}
+                      onChange={e => update(index, { defaultValue: e.target.value })}
+                      placeholder='default'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Min</label>
+                    <input
+                      type='number'
+                      value={event.min ?? ''}
+                      onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      placeholder='min'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Max</label>
+                    <input
+                      type='number'
+                      value={event.max ?? ''}
+                      onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      placeholder='max'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Unit</label>
                     <SearchableSelect
                       value={event.unit ?? ''}
                       options={UNITS}
@@ -184,35 +191,42 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 </button>
               </div>
               {isAdding === 'arg' && (
-                <div className='flex items-center gap-1.5 mt-1.5'>
-                  <input
-                    type='text'
-                    value={newDefaultValue}
-                    onChange={e => setNewDefaultValue(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='default'
-                    title='Default'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <input
-                    type='text'
-                    value={newMin}
-                    onChange={e => setNewMin(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='min'
-                    title='Min'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <input
-                    type='text'
-                    value={newMax}
-                    onChange={e => setNewMax(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='max'
-                    title='Max'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <div className='flex-1'>
+                <div className='flex items-start gap-1.5 mt-1.5'>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Default</label>
+                    <input
+                      type='text'
+                      value={newDefaultValue}
+                      onChange={e => setNewDefaultValue(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='default'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Min</label>
+                    <input
+                      type='text'
+                      value={newMin}
+                      onChange={e => setNewMin(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='min'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Max</label>
+                    <input
+                      type='text'
+                      value={newMax}
+                      onChange={e => setNewMax(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='max'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Unit</label>
                     <SearchableSelect
                       value={newUnit}
                       options={UNITS}
