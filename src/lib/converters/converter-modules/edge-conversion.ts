@@ -190,7 +190,7 @@ export function convertTransitionToEdge(
       hasExplicitTargetHandle,
     },
     // Add styling for better visibility
-    animated: condition ? false : true, // Animate non-conditional transitions
+    animated: false,
     style: {
       strokeWidth: 2,
       stroke: getTransitionColor(condition),

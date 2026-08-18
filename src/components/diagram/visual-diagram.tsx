@@ -3,7 +3,6 @@
 
 // ==================== IMPORTS ====================
 import { useHierarchyNavigation } from '@/hooks/use-hierarchy-navigation';
-import { parseTransitionIndexFromEdgeId } from '@/lib/converters/converter-modules';
 import { SCXMLToXStateConverter } from '@/lib/converters/scxml-to-xstate';
 import { nodeDimensionCalculator } from '@/lib/layout/node-dimension-calculator';
 import { VisualMetadataManager } from '@/lib/metadata';
@@ -932,7 +931,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           stroke: EVENT_TRANSITION_COLOR,
         },
         zIndex: 1,
-        animated: true,
+        animated: false,
       };
 
       setEdges((eds) => addEdge(newEdge, eds));
@@ -1038,6 +1037,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
 
       const reconnecting = reconnectingEdgeRef.current;
+      const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
       const slotCheck =
         reconnecting && reconnecting.source === connection.source
           ? checkTransitionEditSlotConflict(
