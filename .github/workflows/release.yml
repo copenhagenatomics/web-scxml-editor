@@ -71,6 +71,12 @@ jobs:
           cd release-artifact
           zip -r "../scxml-editor-${{ steps.version.outputs.VERSION }}.zip" .
 
+      - name: Generate SHA256 checksum
+        id: checksum
+        run: |
+          sha256sum "scxml-editor-${{ steps.version.outputs.VERSION }}.zip" > "scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256"
+          echo "SHA256=$(cut -d ' ' -f1 "scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256")" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -81,6 +87,8 @@ jobs:
 
             Download `scxml-editor-${{ steps.version.outputs.VERSION }}.zip` below.
 
+            **SHA256:** `${{ steps.checksum.outputs.SHA256 }}`
+
             **Serve it locally:**
             ```bash
             unzip scxml-editor-${{ steps.version.outputs.VERSION }}.zip
@@ -89,5 +97,6 @@ jobs:
             Or deploy the folder to any static host (Netlify, S3, GitHub Pages, nginx).
           files: |
             scxml-editor-${{ steps.version.outputs.VERSION }}.zip
+            scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256
           draft: false
           prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
