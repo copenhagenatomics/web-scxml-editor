@@ -21,6 +21,10 @@ import {
 } from '@/lib/utils/transition-slot-rules';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
+import {
+  EVENT_TRANSITION_COLOR,
+  getTransitionColor,
+} from '@/lib/consts/transition-colors';
 import { ActionType } from '@/types/history';
 import type { SCXMLDocument, TransitionElement } from '@/types/scxml';
 import {
@@ -925,7 +929,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         style: {
           strokeWidth: 2,
           zIndex: 1,
-          stroke: '#3b82f6',
+          stroke: EVENT_TRANSITION_COLOR,
         },
         zIndex: 1,
         animated: true,
@@ -2406,7 +2410,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         };
 
         // Determine selection color based on edge type
-        const selectionColor = edge.data?.condition ? '#ef4444' : '#3b82f6';
+        const selectionColor = getTransitionColor(edge.data?.condition);
         return {
           ...edge,
           selected: true, // CRITICAL: This prop enables waypoint handles to show
@@ -2722,7 +2726,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                   markerHeight='12'
                   orient='auto'
                 >
-                  <path d='M 2 2 L 18 10 L 2 18 L 7 10 Z' fill='#3b82f6' />
+                  <path d='M 2 2 L 18 10 L 2 18 L 7 10 Z' fill={EVENT_TRANSITION_COLOR} />
                 </marker>
               </defs>
             </svg>

@@ -8,6 +8,7 @@
 import { Edge, MarkerType } from 'reactflow';
 import type { SCXMLTransitionEdgeData } from '@/components/diagram';
 import { ConditionEvaluator } from '@/lib/scxml/condition-evaluator';
+import { getTransitionColor } from '@/lib/consts/transition-colors';
 import type { StateRegistryEntry } from './state-registry';
 
 /**
@@ -192,11 +193,11 @@ export function convertTransitionToEdge(
     animated: condition ? false : true, // Animate non-conditional transitions
     style: {
       strokeWidth: 2,
-      stroke: condition ? '#ef4444' : '#3b82f6', // Red for conditional, blue for normal
+      stroke: getTransitionColor(condition),
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: condition ? '#ef4444' : '#3b82f6',
+      color: getTransitionColor(condition),
       width: 20,
       height: 20,
     },
@@ -214,7 +215,7 @@ export function convertTransitionToEdge(
     labelBgPadding: [8, 4],
     labelBgBorderRadius: 4,
     labelBgStyle: {
-      fill: condition ? '#ef4444' : '#3b82f6',
+      fill: getTransitionColor(condition),
       fillOpacity: 0.9,
     },
   };
