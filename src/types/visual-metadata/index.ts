@@ -353,7 +353,7 @@ export const VISUAL_METADATA_CONSTANTS = {
     /** Fixed note width in px (notes are not user-resizable) */
     WIDTH: 500,
     /** Base note height in px */
-    HEIGHT: 500,
+    HEIGHT: 250,
     /** Font size used until text overflows, in px */
     FONT_SIZE_LARGE: 28,
     /** Font size used after large-font overflow, in px */
