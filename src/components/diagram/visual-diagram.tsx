@@ -3,6 +3,7 @@
 
 // ==================== IMPORTS ====================
 import { useHierarchyNavigation } from '@/hooks/use-hierarchy-navigation';
+import { parseTransitionIndexFromEdgeId } from '@/lib/converters/converter-modules';
 import { SCXMLToXStateConverter } from '@/lib/converters/scxml-to-xstate';
 import { nodeDimensionCalculator } from '@/lib/layout/node-dimension-calculator';
 import { VisualMetadataManager } from '@/lib/metadata';
@@ -995,6 +996,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [setEdges, scxmlContent, onSCXMLChange]
   );
 
+  // Set for the duration of a drag on an existing edge's endpoint (onReconnectStart ->
+  // onReconnectEnd), so isValidConnection can tell "moving this edge's own handle" apart
+  // from "drawing a brand new connection" — otherwise the transition being dragged shows
+  // up as its own conflicting duplicate in the same-target slot check below, since it's
+  // still present, untouched, in the parsed scxmlContent at validation time.
+  const reconnectingEdgeRef = React.useRef<Edge | null>(null);
+
+  const onReconnectStart = useCallback((_event: unknown, edge: Edge) => {
+    reconnectingEdgeRef.current = edge;
+  }, []);
+
+  const onReconnectEnd = useCallback(() => {
+    reconnectingEdgeRef.current = null;
+  }, []);
+
   const isValidConnection = useCallback(
     (connection: Connection | Edge) => {
       if (!connection.source || !connection.target) return true;
@@ -1017,7 +1033,20 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         return false;
       }
 
-      const slotCheck = checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
+      const reconnecting = reconnectingEdgeRef.current;
+      const slotCheck =
+        reconnecting && reconnecting.source === connection.source
+          ? checkTransitionEditSlotConflict(
+              parseResult.data,
+              connection.source,
+              parseTransitionIndexFromEdgeId(reconnecting.id),
+              {
+                '@_event': reconnecting.data?.event,
+                '@_cond': reconnecting.data?.condition,
+                '@_target': connection.target,
+              }
+            )
+          : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
       if (slotCheck.blocked) {
         setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
         return false;
@@ -2600,6 +2629,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             onConnect={onConnect}
             isValidConnection={isValidConnection}
             onReconnect={onReconnect}
+            onReconnectStart={onReconnectStart}
+            onReconnectEnd={onReconnectEnd}
             onNodeClick={(event, node) =>
               handleStateClick(node.id, event, node.type)
             }
