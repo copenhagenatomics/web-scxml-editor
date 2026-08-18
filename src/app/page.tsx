@@ -179,7 +179,7 @@ export default function Home() {
                   className='w-full flex items-center gap-3 px-4 py-2 text-sm text-default hover:bg-muted transition-colors'
                 >
                   <Eye className='h-4 w-4 text-muted' />
-                  With Visual Data
+                  Download
                 </button>
               )}
             </div>
