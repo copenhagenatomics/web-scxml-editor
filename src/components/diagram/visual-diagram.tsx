@@ -47,6 +47,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
@@ -222,6 +223,23 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const { activePanel, setActivePanel } = usePanelStore();
 
   const [connectionBlockedMessage, setConnectionBlockedMessage] = React.useState<string | null>(null);
+
+  // React-flow's default wheelDelta only boosts pinch-zoom (ctrlKey wheel
+  // events) on macOS, leaving pinch zoom on Windows using the tiny raw
+  // deltaY the trackpad reports. We only target Windows, so drop that
+  // check and boost pinch zoom the same way scroll zoom is boosted.
+  const d3ZoomInstance = useStore((s) => s.d3Zoom);
+  React.useEffect(() => {
+    if (!d3ZoomInstance) return;
+    d3ZoomInstance.wheelDelta((event: WheelEvent) => {
+      const factor = event.ctrlKey ? 10 : 1;
+      return (
+        -event.deltaY *
+        (event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002) *
+        factor
+      );
+    });
+  }, [d3ZoomInstance]);
 
   React.useEffect(() => {
     if (!connectionBlockedMessage) return;
