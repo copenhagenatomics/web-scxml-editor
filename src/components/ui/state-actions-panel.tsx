@@ -81,6 +81,7 @@ export function StateActionsPanel({
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const channels = useHostAPIStore((s) => s.channels);
+  const showFeedback = useHostAPIStore((s) => s.showFeedback);
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -148,6 +149,7 @@ export function StateActionsPanel({
       setLocalReactions(updatedList);
       onApplyReactions(updatedList);
       resetForm();
+      showFeedback('Reaction saved.', 'info');
       return;
     }
 
@@ -166,6 +168,7 @@ export function StateActionsPanel({
     }
 
     resetForm();
+    showFeedback('Action saved.', 'info');
   };
 
   const handleDelete = (index: number) => {

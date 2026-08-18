@@ -92,6 +92,9 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [isOpen, setIsOpen] = React.useState(false);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Delays onClose() after a successful apply so the panel doesn't vanish on the same tick as
+  // the keypress — gives the confirmation toast a moment to register before the panel closes.
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Remembers the auto-generated _t_ event name after the first save so rapid double-clicks
   // reuse the same name instead of incrementing the index again before the prop updates.
   const appliedTimeEventRef = React.useRef<string | null>(null);
@@ -107,12 +110,14 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   React.useEffect(() => {
     return () => {
       if (blurTimerRef.current !== null) clearTimeout(blurTimerRef.current);
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
     };
   }, []);
 
   const channels = useHostAPIStore((state) => state.channels);
   const channelMappings = useHostAPIStore((state) => state.channelMappings);
   const events = useHostAPIStore((state) => state.events);
+  const showFeedback = useHostAPIStore((state) => state.showFeedback);
 
   // ── main search suggestions ──
   const suggestions: Suggestion[] = React.useMemo(() => {
@@ -196,6 +201,17 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     setActiveIndex(-1);
   };
 
+  const reportApplyResult = (result: TransitionApplyResult) => {
+    if (result && result.blocked) {
+      setApplyError(result.reason ?? 'This change is not allowed.');
+      return;
+    }
+    setApplyError(null);
+    showFeedback('Transition updated.', 'info');
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => onClose(), 400);
+  };
+
   const handleApply = () => {
     const trimmed = rawValue.trim();
     if (!trimmed) return;
@@ -217,7 +233,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
         originalEventName: event,
         originalCancelSendId: initCancelId || undefined,
       });
-      setApplyError(timeResult && timeResult.blocked ? timeResult.reason ?? 'This change is not allowed.' : null);
+      reportApplyResult(timeResult);
       return;
     }
 
@@ -244,7 +260,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
         originalEventName: event,
         originalCancelSendId: initCancelId || undefined,
       });
-      setApplyError(timeResult && timeResult.blocked ? timeResult.reason ?? 'This change is not allowed.' : null);
+      reportApplyResult(timeResult);
       return;
     }
 
@@ -272,7 +288,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       originalEventName: event,
       originalCancelSendId: initCancelId || undefined,
     });
-    setApplyError(result && result.blocked ? result.reason ?? 'This change is not allowed.' : null);
+    reportApplyResult(result);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
