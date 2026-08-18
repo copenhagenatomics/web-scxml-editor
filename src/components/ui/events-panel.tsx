@@ -126,6 +126,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     value={event.defaultValue ?? '0'}
                     onChange={e => update(index, { defaultValue: e.target.value })}
                     placeholder='default'
+                    title='Default'
                     className={`flex-1 ${argInputClass}`}
                   />
                   <input
@@ -133,6 +134,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     value={event.min ?? ''}
                     onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
                     placeholder='min'
+                    title='Min'
                     className={`flex-1 ${argInputClass}`}
                   />
                   <input
@@ -140,6 +142,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     value={event.max ?? ''}
                     onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
                     placeholder='max'
+                    title='Max'
                     className={`flex-1 ${argInputClass}`}
                   />
                   <div className='flex-1'>
@@ -188,6 +191,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     onChange={e => setNewDefaultValue(e.target.value)}
                     onKeyDown={onKeyDown}
                     placeholder='default'
+                    title='Default'
                     className={`min-w-0 flex-1 ${inputClass}`}
                   />
                   <input
@@ -196,6 +200,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     onChange={e => setNewMin(e.target.value)}
                     onKeyDown={onKeyDown}
                     placeholder='min'
+                    title='Min'
                     className={`min-w-0 flex-1 ${inputClass}`}
                   />
                   <input
@@ -204,6 +209,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     onChange={e => setNewMax(e.target.value)}
                     onKeyDown={onKeyDown}
                     placeholder='max'
+                    title='Max'
                     className={`min-w-0 flex-1 ${inputClass}`}
                   />
                   <div className='flex-1'>
