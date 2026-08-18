@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from 'react';
 import { Node, Edge } from 'reactflow';
 import { useEditorStore } from '@/stores/editor-store';
+import { isNoteId } from '@/types/visual-metadata';
 
 interface UseHierarchyNavigationProps {
   allNodes: Node[];
@@ -55,9 +56,13 @@ export function useHierarchyNavigation({
       );
     }
 
-    // Update node data to indicate if they have children (compound states)
+    // Update node data to indicate if they have children (compound states).
+    // Notes are annotations, not structural children, so they must never
+    // make a state look/behave like a compound (navigable) state.
     return visibleNodesList.map((node) => {
-      const hasChildren = allNodes.some((n) => n.parentId === node.id);
+      const hasChildren = allNodes.some(
+        (n) => n.parentId === node.id && !isNoteId(n.id)
+      );
 
       return {
         ...node,

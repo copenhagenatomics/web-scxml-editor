@@ -33,6 +33,7 @@ import {
   type Rect,
 } from '@/lib/layout/edge-obstacle-utils';
 import { getTransitionColor } from '@/lib/consts/transition-colors';
+import { isNoteId } from '@/types/visual-metadata';
 
 export interface SCXMLTransitionEdgeData {
   event?: string;
@@ -272,8 +273,13 @@ export const SCXMLTransitionEdge: React.FC<
 
     // Only nodes at the edge's own hierarchy level count as obstacles —
     // including an enclosing container would wall off routing inside it.
+    // Notes are annotations, not diagram structure, so edges must ignore
+    // them entirely rather than routing around them.
     const siblings = nodes.filter(
-      (n) => n.parentNode === sourceNode.parentNode && !n.hidden
+      (n) =>
+        n.parentNode === sourceNode.parentNode &&
+        !n.hidden &&
+        !isNoteId(n.id)
     );
 
     const nodeRect = (n: Node): Rect | null => {
