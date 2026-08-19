@@ -37,6 +37,16 @@ describe('classifyTransitionSlot', () => {
     const t: TransitionElement = { '@_event': 'click', '@_cond': '  ', '@_target': 'B' };
     expect(classifyTransitionSlot(t)).toBe('event');
   });
+
+  it('classifies an auto-generated timer event as the timer slot, distinct from the event slot', () => {
+    const t: TransitionElement = { '@_event': 'Idle_t_0_timeEvent_0', '@_target': 'B' };
+    expect(classifyTransitionSlot(t)).toBe('timer');
+  });
+
+  it('classifies a comma-merged list containing a timer token as the timer slot', () => {
+    const t: TransitionElement = { '@_event': 'click, Idle_t_0_timeEvent_0', '@_target': 'B' };
+    expect(classifyTransitionSlot(t)).toBe('timer');
+  });
 });
 
 describe('findTransitionSlotConflict', () => {
@@ -101,6 +111,35 @@ describe('findTransitionSlotConflict', () => {
     const result = findTransitionSlotConflict([], candidate);
     expect(result.blocked).toBe(true);
     expect(result.reason).toMatch(/both an event and a condition/i);
+  });
+
+  it('blocks a second timer-slot transition when one already exists', () => {
+    const existing: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'A_t_1_timeEvent_1', '@_target': 'B' };
+    const result = findTransitionSlotConflict([existing], candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one timer-based transition/i);
+  });
+
+  it('does not block a timer-slot candidate when only a plain event-slot transition exists', () => {
+    const existing: TransitionElement = { '@_event': 'e1', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
+  });
+
+  it('does not block an event-slot candidate when only a timer-slot transition exists', () => {
+    const existing: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'e1', '@_target': 'B' };
+    expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
+  });
+
+  it('does not block a timer-slot candidate when only cond- and always-slot transitions exist', () => {
+    const existing: TransitionElement[] = [
+      { '@_cond': 'x>1', '@_target': 'B' },
+      { '@_target': 'B' },
+    ];
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    expect(findTransitionSlotConflict(existing, candidate)).toEqual({ blocked: false });
   });
 });
 
@@ -278,6 +317,49 @@ describe('checkTransitionEditSlotConflict', () => {
       } as any,
     };
     const candidate: TransitionElement = { '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result).toEqual({ blocked: false });
+  });
+
+  it('blocks switching a transition into a timer slot already occupied by a sibling', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_event': 'e1', '@_target': 'B' },
+              { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    // Editing transition index 0 (currently a plain event) into a timer event collides
+    // with index 1's existing timer-slot transition.
+    const candidate: TransitionElement = { '@_event': 'A_t_1_timeEvent_1', '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one timer-based transition/i);
+  });
+
+  it('does not block switching a transition into a timer slot when the sibling is a plain event-slot transition', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_cond': 'x>1', '@_target': 'B' },
+              { '@_event': 'e1', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
     const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
     expect(result).toEqual({ blocked: false });
   });

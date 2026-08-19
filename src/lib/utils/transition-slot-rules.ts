@@ -1,6 +1,7 @@
 import type { TransitionElement, SCXMLDocument, ParallelElement } from '@/types/scxml';
+import { findTimeEventToken } from './time-transition';
 
-export type TransitionSlot = 'event' | 'cond' | 'always' | 'invalid-both';
+export type TransitionSlot = 'event' | 'timer' | 'cond' | 'always' | 'invalid-both';
 
 /**
  * Like findStateById (in scxml-manipulation-utils.ts), but also searches into <parallel>
@@ -53,7 +54,10 @@ export function isPresent(v: string | undefined): boolean {
 /**
  * both present -> 'invalid-both'.
  * cond present, event absent -> 'cond'.
- * event present, cond absent -> 'event'.
+ * event present, cond absent, and the event (or one token of a comma-merged list)
+ *   follows the auto-generated {stateId}_t_{N}_timeEvent_{N} pattern -> 'timer'
+ *   (a distinct slot from 'event' — see time-transition.ts's isTimeEventName).
+ * event present, cond absent, not a timer event -> 'event'.
  * neither present -> 'always' (bare/eventless transition, fires immediately on entry).
  */
 export function classifyTransitionSlot(t: TransitionElement): TransitionSlot {
@@ -61,7 +65,7 @@ export function classifyTransitionSlot(t: TransitionElement): TransitionSlot {
   const hasCond = isPresent(t['@_cond']);
   if (hasEvent && hasCond) return 'invalid-both';
   if (hasCond) return 'cond';
-  if (hasEvent) return 'event';
+  if (hasEvent) return findTimeEventToken(t['@_event']) ? 'timer' : 'event';
   return 'always';
 }
 
@@ -89,9 +93,11 @@ export function findTransitionSlotConflict(
       reason:
         candidateSlot === 'event'
           ? 'Only one event-based transition is allowed between these two states.'
-          : candidateSlot === 'cond'
-            ? 'Only one condition-based transition is allowed between these two states.'
-            : 'Only one eventless transition is allowed between these two states.',
+          : candidateSlot === 'timer'
+            ? 'Only one timer-based transition is allowed between these two states.'
+            : candidateSlot === 'cond'
+              ? 'Only one condition-based transition is allowed between these two states.'
+              : 'Only one eventless transition is allowed between these two states.',
     };
   }
 
