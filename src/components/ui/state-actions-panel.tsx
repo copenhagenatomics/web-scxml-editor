@@ -374,7 +374,7 @@ export function StateActionsPanel({
   if (!isVisible) return null;
 
   return (
-    <Panel title='State Actions' onClose={onClose} widthClass='w-[380px]'>
+    <Panel title='State Actions' onClose={onClose} widthClass='w-[520px]'>
       <div className='flex flex-col h-full'>
         {/* Sub-header: stateId + add button */}
         <div className='flex items-center justify-between px-3 py-1.5 border-b border-default bg-muted flex-shrink-0'>
