@@ -131,7 +131,8 @@ const WaypointHandle: React.FC<{
   onDragEnd?: (edgeId: string, index: number) => void;
   onDelete?: (edgeId: string, index: number) => void;
   condition?: string;
-}> = ({ edgeId, index, x, y, onDrag, onDragEnd, onDelete, condition }) => {
+  event?: string;
+}> = ({ edgeId, index, x, y, onDrag, onDragEnd, onDelete, condition, event }) => {
   const [isDragging, setIsDragging] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const { screenToFlowPosition } = useReactFlow();
@@ -169,7 +170,7 @@ const WaypointHandle: React.FC<{
     e.preventDefault();
     onDelete?.(edgeId, index);
   };
-  const waypointColor = getTransitionColor(condition);
+  const waypointColor = getTransitionColor(condition, event);
   return (
     <g>
       {/* Larger invisible hit area for easier interaction */}
@@ -181,7 +182,7 @@ const WaypointHandle: React.FC<{
         style={{
           cursor: isDragging ? 'grabbing' : 'grab',
           pointerEvents: 'all',
-          // stroke: getTransitionColor(condition),
+          // stroke: getTransitionColor(condition, event),
         }}
         onMouseDown={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}
@@ -384,7 +385,7 @@ export const SCXMLTransitionEdge: React.FC<
   }
 
   // Determine edge styling based on transition properties
-  const getEdgeColor = () => getTransitionColor(condition); // Keep color based on type, selected or not
+  const getEdgeColor = () => getTransitionColor(condition, event); // Keep color based on type, selected or not
 
   const getStrokeStyle = () => {
     if (selected) return 'solid'; // Solid when selected
@@ -475,6 +476,7 @@ export const SCXMLTransitionEdge: React.FC<
               onDragEnd={onWaypointDragEnd}
               onDelete={onWaypointDelete}
               condition={condition}
+              event={event}
             />
           ))}
         </g>
@@ -515,7 +517,7 @@ export const SCXMLTransitionEdge: React.FC<
                   width: 'fit-content',
                   maxWidth: '100%',
                   zIndex: 10000,
-                backgroundColor: getTransitionColor(condition),
+                backgroundColor: getTransitionColor(condition, event),
                   color: '#fff',
                   opacity: 0.95,
                   cursor: 'pointer',

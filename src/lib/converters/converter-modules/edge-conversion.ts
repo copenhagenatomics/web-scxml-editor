@@ -193,11 +193,11 @@ export function convertTransitionToEdge(
     animated: false,
     style: {
       strokeWidth: 2,
-      stroke: getTransitionColor(condition),
+      stroke: getTransitionColor(condition, event),
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: getTransitionColor(condition),
+      color: getTransitionColor(condition, event),
       width: 20,
       height: 20,
     },
@@ -215,7 +215,7 @@ export function convertTransitionToEdge(
     labelBgPadding: [8, 4],
     labelBgBorderRadius: 4,
     labelBgStyle: {
-      fill: getTransitionColor(condition),
+      fill: getTransitionColor(condition, event),
       fillOpacity: 0.9,
     },
   };

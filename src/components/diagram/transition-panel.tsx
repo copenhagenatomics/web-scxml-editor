@@ -21,7 +21,7 @@ const MAX_TEXTAREA_HEIGHT = 200;
 
 export interface TransitionApplyArgs {
   newValue: string;
-  editingField: 'event' | 'cond';
+  editingField: 'event' | 'cond' | 'none';
   delay: { type: 'delay' | 'delayexpr'; value: string } | null;
   cancelSendId: string | null;
   originalEventName: string | undefined;
@@ -214,7 +214,18 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
 
   const handleApply = () => {
     const trimmed = rawValue.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      const result = onApply({
+        newValue: '',
+        editingField: 'none',
+        delay: null,
+        cancelSendId: null,
+        originalEventName: event,
+        originalCancelSendId: initCancelId || undefined,
+      });
+      reportApplyResult(result);
+      return;
+    }
 
     const timeParsed = parseAfterSyntax(trimmed);
 

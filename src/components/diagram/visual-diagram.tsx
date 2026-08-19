@@ -11,7 +11,6 @@ import {
   addStateToDocument,
   createStateElement,
   findStateById,
-  getNextTransitionEventName,
   removeTransitionByEdgeId,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
@@ -21,6 +20,7 @@ import {
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
 import {
+  ALWAYS_TRANSITION_COLOR,
   EVENT_TRANSITION_COLOR,
   getTransitionColor,
 } from '@/lib/consts/transition-colors';
@@ -379,7 +379,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             const candidate: TransitionElement =
               editingField === 'cond'
                 ? { '@_cond': newValue, '@_target': selectedEdgeForEdit.target }
-                : { '@_event': newValue, '@_target': selectedEdgeForEdit.target };
+                : editingField === 'event'
+                  ? { '@_event': newValue, '@_target': selectedEdgeForEdit.target }
+                  : { '@_target': selectedEdgeForEdit.target };
             const slotCheck = checkTransitionEditSlotConflict(
               preCheck.data,
               selectedEdgeForEdit.source,
@@ -411,8 +413,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         else console.error('Failed to update transition:', transResult.error);
 
         // Step 2: apply delay/cancel actions on the already-updated content
-        // Runs in event mode (add/remove) and when switching to cond (cleanup old send/cancel)
-        if (editingField === 'event' || (editingField === 'cond' && originalEventName)) {
+        // Runs in event mode (add/remove), when switching to cond (cleanup old send/cancel),
+        // and when clearing to eventless (cleanup old send/cancel; a no-op when there was no delay)
+        if (editingField === 'event' || editingField === 'none' || (editingField === 'cond' && originalEventName)) {
           const sourceNodeId = selectedEdgeForEdit.source;
           const sourceNode = nodes.find((n) => n.id === sourceNodeId);
           if (sourceNode) {
@@ -891,11 +894,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const onConnect = useCallback(
     (params: Connection) => {
-      let preParsedDoc: SCXMLDocument | undefined;
       if (params.source && params.target && parserRef.current && scxmlContent) {
         const preCheck = parserRef.current.parse(scxmlContent);
         if (preCheck.success && preCheck.data) {
-          preParsedDoc = preCheck.data;
           const { blocked, reason } = wouldMergeDistinctGroups(
             preCheck.data,
             params.source,
@@ -919,9 +920,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       // Set intelligent defaults: outgoing from bottom, incoming to top
       const sourceHandle = params.sourceHandle || 'bottom';
       const targetHandle = params.targetHandle || 'top';
-      const nextEventName = preParsedDoc
-        ? getNextTransitionEventName(preParsedDoc)
-        : 'event1';
 
       const newEdge: Edge = {
         id: `${params.source}-${params.target}-${Date.now()}`,
@@ -937,7 +935,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         //   color: '#6b7280',
         // },
         data: {
-          event: nextEventName,
+          event: undefined,
           condition: undefined,
           actions: [],
           sourceHandle: sourceHandle,
@@ -946,7 +944,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         style: {
           strokeWidth: 2,
           zIndex: 1,
-          stroke: EVENT_TRANSITION_COLOR,
+          stroke: ALWAYS_TRANSITION_COLOR,
         },
         zIndex: 1,
         animated: false,
@@ -963,7 +961,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
             if (sourceState) {
               const newTransition: TransitionElement = {
-                '@_event': nextEventName,
                 '@_target': params.target!,
               };
 
@@ -987,7 +984,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const handleCommand = new UpdateTransitionHandlesCommand(
                 params.source!,
                 params.target!,
-                nextEventName, // The event we just created
+                undefined, // No event — eventless by default
                 undefined, // No condition
                 sourceHandle,
                 targetHandle
@@ -2428,7 +2425,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         };
 
         // Determine selection color based on edge type
-        const selectionColor = getTransitionColor(edge.data?.condition);
+        const selectionColor = getTransitionColor(edge.data?.condition, edge.data?.event);
         return {
           ...edge,
           selected: true, // CRITICAL: This prop enables waypoint handles to show

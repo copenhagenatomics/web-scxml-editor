@@ -39,7 +39,7 @@ export function validateTransitionSlotConflicts(
       }
 
       for (const group of groups.values()) {
-        const bySlot = new Map<'event' | 'cond', TransitionElement[]>();
+        const bySlot = new Map<'event' | 'cond' | 'always', TransitionElement[]>();
 
         for (const t of group) {
           const slot = classifyTransitionSlot(t);
@@ -82,7 +82,9 @@ export function validateTransitionSlotConflicts(
               message:
                 slot === 'event'
                   ? `Only one event-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`
-                  : `Only one condition-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`,
+                  : slot === 'cond'
+                    ? `Only one condition-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`
+                    : `Only one eventless transition is allowed from '${sourceId}' to '${t['@_target']}'.`,
               severity: 'error',
               line: position?.line,
               column: position?.column,
