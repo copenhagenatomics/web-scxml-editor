@@ -1266,13 +1266,28 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         return;
       }
 
-      // Only process nodes that were actually dragged
-      const positionChanges = dragEndChanges.filter((change) =>
-        isDraggingRef.current.has(change.id)
-      );
+      // Only process nodes that were actually dragged (mouse) or moved via
+      // keyboard (ReactFlow's built-in arrow-key nudging never sets
+      // dragging: true, so it would otherwise be dropped here as "just a
+      // click" and the moved node would snap back to its stale SCXML
+      // position the next time something re-syncs from the source of truth,
+      // e.g. selecting another node).
+      const positionChanges = dragEndChanges.filter((change) => {
+        if (isDraggingRef.current.has(change.id)) {
+          return true;
+        }
+        const currentNode = nodes.find((n) => n.id === change.id);
+        if (!currentNode?.position || !change.position) {
+          return false;
+        }
+        return (
+          Math.abs(currentNode.position.x - change.position.x) >= 1 ||
+          Math.abs(currentNode.position.y - change.position.y) >= 1
+        );
+      });
 
       if (positionChanges.length === 0) {
-        // This was a click, not a drag - don't update SCXML
+        // This was a click, not a drag or keyboard move - don't update SCXML
         return;
       }
 
