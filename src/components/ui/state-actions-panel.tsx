@@ -478,16 +478,19 @@ export function StateActionsPanel({
       </div>
       <div>
         <label className='text-[10px] text-muted block mb-0.5'>Expression</label>
-        <input
-          type='text'
+        <textarea
           value={formExpr}
           onChange={(e) => setFormExpr(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleApply();
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleApply();
+            }
             if (e.key === 'Escape') resetForm();
           }}
           placeholder='expression'
-          className={inputClass}
+          rows={3}
+          className={`${inputClass} resize-y font-mono`}
         />
       </div>
 
