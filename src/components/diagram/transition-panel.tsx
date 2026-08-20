@@ -304,7 +304,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     if (!isOpen || rawValue.length === 0) return null;
     // Guide user if they've started typing "after" but the format isn't complete yet
     if (rawValue.trimStart().startsWith('after') && parseAfterSyntax(rawValue.trim()) === null) {
-      return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s';
+      return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s  ·  after (expression) ms';
     }
     if (selectionMode === 'event' || suggestions.length > 0) return null;
     return 'No match — type "this_" to create a new channel, or "after Xs" for a time transition';
