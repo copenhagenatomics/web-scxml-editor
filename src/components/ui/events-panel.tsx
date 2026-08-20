@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Eye, EyeOff, Trash2 } from 'lucide-react';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import type { EventEntry } from '@/types/host-api';
@@ -18,6 +18,8 @@ interface EventsPanelProps {
 export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
   const events = useHostAPIStore(state => state.events);
   const setEvents = useHostAPIStore(state => state.setEvents);
+  const showFeedback = useHostAPIStore(state => state.showFeedback);
+  const fieldOriginalRef = useRef('');
   const [isAdding, setIsAdding] = useState<false | 'plain' | 'arg'>(false);
   const [newName, setNewName] = useState('');
   const [newDefaultValue, setNewDefaultValue] = useState('0');
@@ -63,6 +65,18 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
 
   const argInputClass = `min-w-0 ${inputClass}`;
 
+  const trackFieldFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    fieldOriginalRef.current = e.target.value;
+  };
+
+  const notifyIfFieldChanged = (e: React.FocusEvent<HTMLInputElement>, message: string) => {
+    if (e.target.value !== fieldOriginalRef.current) showFeedback(message, 'info');
+  };
+
+  const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') e.currentTarget.blur();
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleConfirmAdd();
     if (e.key === 'Escape') resetForm();
@@ -97,7 +111,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 <input
                   type='text'
                   value={event.name}
+                  onFocus={trackFieldFocus}
                   onChange={e => update(index, { name: e.target.value })}
+                  onBlur={e => notifyIfFieldChanged(e, 'User action renamed.')}
+                  onKeyDown={blurOnEnter}
                   className={`flex-1 ${inputClass}`}
                 />
                 <button
@@ -126,7 +143,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     <input
                       type='text'
                       value={event.defaultValue ?? '0'}
+                      onFocus={trackFieldFocus}
                       onChange={e => update(index, { defaultValue: e.target.value })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Default value updated.')}
+                      onKeyDown={blurOnEnter}
                       placeholder='default'
                       className={argInputClass}
                     />
@@ -136,7 +156,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     <input
                       type='number'
                       value={event.min ?? ''}
+                      onFocus={trackFieldFocus}
                       onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Min updated.')}
+                      onKeyDown={blurOnEnter}
                       placeholder='min'
                       className={argInputClass}
                     />
@@ -146,7 +169,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     <input
                       type='number'
                       value={event.max ?? ''}
+                      onFocus={trackFieldFocus}
                       onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Max updated.')}
+                      onKeyDown={blurOnEnter}
                       placeholder='max'
                       className={argInputClass}
                     />
@@ -156,7 +182,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                     <SearchableSelect
                       value={event.unit ?? ''}
                       options={UNITS}
-                      onChange={v => update(index, { unit: v || undefined })}
+                      onChange={v => {
+                        update(index, { unit: v || undefined });
+                        if (v !== (event.unit ?? '')) showFeedback('Unit updated.', 'info');
+                      }}
                       placeholder='?'
                     />
                   </div>
