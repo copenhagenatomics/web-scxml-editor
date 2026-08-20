@@ -6,6 +6,7 @@
  */
 
 import { Edge, MarkerType } from 'reactflow';
+import { XMLParser } from 'fast-xml-parser';
 import type { SCXMLTransitionEdgeData } from '@/components/diagram';
 import { ConditionEvaluator } from '@/lib/scxml/condition-evaluator';
 import { getTransitionColor } from '@/lib/consts/transition-colors';
@@ -258,6 +259,75 @@ function getElements(parent: any, elementName: string): any {
   return parent?.[elementName];
 }
 
+/** One of the action element tag names we track ordering for. */
+export type ActionTag = 'log' | 'assign' | 'send' | 'cancel';
+
+/** Actions grouped by tag name, each group in document order within that group. */
+type ActionsByType = Record<ActionTag, string[]>;
+
+/**
+ * Collect action strings from one or more action-holding elements (e.g. all
+ * <onentry> elements for a state), grouped by tag name. Shared by
+ * convertActions() (type-grouped output) and extractActionsText() (which can
+ * additionally interleave using true document order).
+ */
+function collectActionsByType(
+  actionsElement: any,
+  getAttribute: (element: any, attrName: string) => string | undefined,
+  getElements: (parent: any, elementName: string) => any
+): ActionsByType {
+  const byType: ActionsByType = { log: [], assign: [], send: [], cancel: [] };
+  const elements = Array.isArray(actionsElement) ? actionsElement : [actionsElement];
+
+  for (const el of elements) {
+    if (!el) continue;
+
+    const logs = getElements(el, 'log');
+    if (logs) {
+      const logsArray = Array.isArray(logs) ? logs : [logs];
+      for (const _log of logsArray) {
+        byType.log.push('log');
+      }
+    }
+
+    const assigns = getElements(el, 'assign');
+    if (assigns) {
+      const assignsArray = Array.isArray(assigns) ? assigns : [assigns];
+      for (const assign of assignsArray) {
+        const location = getAttribute(assign, 'location') || '';
+        const expr = getAttribute(assign, 'expr') || '';
+        // Store assign with location and expr in format: assign|location|expr
+        // This preserves the data for editing while remaining backward compatible
+        byType.assign.push(`assign|${location}|${expr}`);
+      }
+    }
+
+    const sends = getElements(el, 'send');
+    if (sends) {
+      const sendsArray = Array.isArray(sends) ? sends : [sends];
+      for (const send of sendsArray) {
+        const event = getAttribute(send, 'event') || '';
+        const delayexpr = getAttribute(send, 'delayexpr');
+        const delay = getAttribute(send, 'delay');
+        const delayType = delayexpr !== undefined ? 'delayexpr' : 'delay';
+        const delayValue = delayexpr ?? delay ?? '';
+        byType.send.push(`send|${event}|${delayType}|${delayValue}`);
+      }
+    }
+
+    const cancels = getElements(el, 'cancel');
+    if (cancels) {
+      const cancelsArray = Array.isArray(cancels) ? cancels : [cancels];
+      for (const cancel of cancelsArray) {
+        const sendid = getAttribute(cancel, 'sendid') || '';
+        byType.cancel.push(`cancel|${sendid}`);
+      }
+    }
+  }
+
+  return byType;
+}
+
 /**
  * Convert action elements to action strings
  */
@@ -266,77 +336,117 @@ export function convertActions(
   getAttribute: (element: any, attrName: string) => string | undefined,
   getElements: (parent: any, elementName: string) => any
 ): string[] {
-  const actions: string[] = [];
-
-  if (!actionsElement) return actions;
-
-  // Handle different types of actions
-  const logs = getElements(actionsElement, 'log');
-  if (logs) {
-    const logsArray = Array.isArray(logs) ? logs : [logs];
-    for (const log of logsArray) {
-      const label = getAttribute(log, 'label') || '';
-      const expr = getAttribute(log, 'expr') || '';
-      actions.push('log');
-    }
-  }
-
-  const assigns = getElements(actionsElement, 'assign');
-  if (assigns) {
-    const assignsArray = Array.isArray(assigns) ? assigns : [assigns];
-    for (const assign of assignsArray) {
-      const location = getAttribute(assign, 'location') || '';
-      const expr = getAttribute(assign, 'expr') || '';
-      // Store assign with location and expr in format: assign|location|expr
-      // This preserves the data for editing while remaining backward compatible
-      actions.push(`assign|${location}|${expr}`);
-    }
-  }
-
-  const sends = getElements(actionsElement, 'send');
-  if (sends) {
-    const sendsArray = Array.isArray(sends) ? sends : [sends];
-    for (const send of sendsArray) {
-      const event = getAttribute(send, 'event') || '';
-      const delayexpr = getAttribute(send, 'delayexpr');
-      const delay = getAttribute(send, 'delay');
-      const delayType = delayexpr !== undefined ? 'delayexpr' : 'delay';
-      const delayValue = delayexpr ?? delay ?? '';
-      actions.push(`send|${event}|${delayType}|${delayValue}`);
-    }
-  }
-
-  const cancels = getElements(actionsElement, 'cancel');
-  if (cancels) {
-    const cancelsArray = Array.isArray(cancels) ? cancels : [cancels];
-    for (const cancel of cancelsArray) {
-      const sendid = getAttribute(cancel, 'sendid') || '';
-      actions.push(`cancel|${sendid}`);
-    }
-  }
-
-  return actions;
+  if (!actionsElement) return [];
+  const byType = collectActionsByType(actionsElement, getAttribute, getElements);
+  return [...byType.log, ...byType.assign, ...byType.send, ...byType.cancel];
 }
 
 /**
- * Extract actions text from action elements
+ * Extract actions text from action elements.
+ *
+ * fast-xml-parser's default (non-order-preserving) mode groups a state's
+ * <onentry>/<onexit> children by tag name, so e.g. an assign/send/assign/send
+ * sequence in the source becomes two groups — all assigns, then all sends.
+ * Passing `order` (from buildActionOrderMap) interleaves the result back
+ * into the original document order instead of that type-grouped order.
  */
 export function extractActionsText(
   actionsElement: any,
   getAttribute: (element: any, attrName: string) => string | undefined,
-  getElements: (parent: any, elementName: string) => any
+  getElements: (parent: any, elementName: string) => any,
+  order?: ActionTag[]
 ): string[] {
-  const actions: string[] = [];
+  if (!actionsElement) return [];
+  const byType = collectActionsByType(actionsElement, getAttribute, getElements);
 
-  if (Array.isArray(actionsElement)) {
-    for (const element of actionsElement) {
-      actions.push(...convertActions(element, getAttribute, getElements));
-    }
-  } else {
-    actions.push(...convertActions(actionsElement, getAttribute, getElements));
+  if (!order || order.length === 0) {
+    return [...byType.log, ...byType.assign, ...byType.send, ...byType.cancel];
   }
 
+  const queues: ActionsByType = {
+    log: [...byType.log],
+    assign: [...byType.assign],
+    send: [...byType.send],
+    cancel: [...byType.cancel],
+  };
+  const actions: string[] = [];
+  for (const tag of order) {
+    const next = queues[tag]?.shift();
+    if (next !== undefined) actions.push(next);
+  }
+  // Safety net for any mismatch between the order info and the extracted
+  // actions (e.g. an action type extractActionsText doesn't parse yet).
+  actions.push(...queues.log, ...queues.assign, ...queues.send, ...queues.cancel);
   return actions;
+}
+
+const ACTION_TAGS: ReadonlySet<string> = new Set(['log', 'assign', 'send', 'cancel']);
+
+/**
+ * Parse the raw SCXML source a second time, with fast-xml-parser's
+ * preserveOrder mode, purely to recover the true document order of
+ * onentry/onexit action children per state. The primary parse (used
+ * everywhere else) groups children by tag name and cannot answer this.
+ *
+ * Returns a map from state id -> ordered action tags for its onentry and
+ * onexit blocks (concatenated across multiple onentry/onexit elements, in
+ * document order, matching how extractActionsText concatenates them).
+ */
+export function buildActionOrderMap(
+  xmlContent: string
+): Map<string, { onentry: ActionTag[]; onexit: ActionTag[] }> {
+  const map = new Map<string, { onentry: ActionTag[]; onexit: ActionTag[] }>();
+  if (!xmlContent) return map;
+
+  let parsed: any[];
+  try {
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      preserveOrder: true,
+    });
+    parsed = parser.parse(xmlContent);
+  } catch {
+    return map;
+  }
+
+  const tagOf = (node: any): string | undefined =>
+    Object.keys(node).find((k) => k !== ':@');
+
+  const orderOf = (children: any[]): ActionTag[] => {
+    const order: ActionTag[] = [];
+    for (const child of children) {
+      const tag = tagOf(child);
+      if (tag && ACTION_TAGS.has(tag)) order.push(tag as ActionTag);
+    }
+    return order;
+  };
+
+  const walk = (nodes: any[]) => {
+    for (const node of nodes) {
+      const tag = tagOf(node);
+      if (!tag) continue;
+      const children = node[tag];
+      if (!Array.isArray(children)) continue;
+
+      const id = node[':@']?.['@_id'];
+      if (id) {
+        const onentry: ActionTag[] = [];
+        const onexit: ActionTag[] = [];
+        for (const child of children) {
+          const childTag = tagOf(child);
+          if (childTag === 'onentry') onentry.push(...orderOf(child.onentry));
+          if (childTag === 'onexit') onexit.push(...orderOf(child.onexit));
+        }
+        map.set(id, { onentry, onexit });
+      }
+
+      walk(children);
+    }
+  };
+
+  walk(parsed);
+  return map;
 }
 
 /**
