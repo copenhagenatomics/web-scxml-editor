@@ -1,6 +1,7 @@
 import type { TransitionElement, SCXMLDocument, ParallelElement } from '@/types/scxml';
+import { findTimeEventToken } from './time-transition';
 
-export type TransitionSlot = 'event' | 'cond' | 'invalid-both';
+export type TransitionSlot = 'event' | 'timer' | 'cond' | 'always' | 'invalid-both';
 
 /**
  * Like findStateById (in scxml-manipulation-utils.ts), but also searches into <parallel>
@@ -46,21 +47,26 @@ function findTransitionSourceElement(
   return searchStates(scxmlDoc.scxml.state) || searchParallels(scxmlDoc.scxml.parallel);
 }
 
-function isPresent(v: string | undefined): boolean {
+export function isPresent(v: string | undefined): boolean {
   return !!v && v.trim().length > 0;
 }
 
 /**
- * cond absent -> 'event' (covers event-only and bare/always transitions).
- * cond present + event absent -> 'cond'.
  * both present -> 'invalid-both'.
+ * cond present, event absent -> 'cond'.
+ * event present, cond absent, and the event (or one token of a comma-merged list)
+ *   follows the auto-generated {stateId}_t_{N}_timeEvent_{N} pattern -> 'timer'
+ *   (a distinct slot from 'event' — see time-transition.ts's isTimeEventName).
+ * event present, cond absent, not a timer event -> 'event'.
+ * neither present -> 'always' (bare/eventless transition, fires immediately on entry).
  */
 export function classifyTransitionSlot(t: TransitionElement): TransitionSlot {
   const hasEvent = isPresent(t['@_event']);
   const hasCond = isPresent(t['@_cond']);
   if (hasEvent && hasCond) return 'invalid-both';
   if (hasCond) return 'cond';
-  return 'event';
+  if (hasEvent) return findTimeEventToken(t['@_event']) ? 'timer' : 'event';
+  return 'always';
 }
 
 /**
@@ -87,7 +93,11 @@ export function findTransitionSlotConflict(
       reason:
         candidateSlot === 'event'
           ? 'Only one event-based transition is allowed between these two states.'
-          : 'Only one condition-based transition is allowed between these two states.',
+          : candidateSlot === 'timer'
+            ? 'Only one timer-based transition is allowed between these two states.'
+            : candidateSlot === 'cond'
+              ? 'Only one condition-based transition is allowed between these two states.'
+              : 'Only one eventless transition is allowed between these two states.',
     };
   }
 
@@ -95,9 +105,9 @@ export function findTransitionSlotConflict(
 }
 
 /**
- * A freshly-drawn diagram connection is always constructed as an event-slot candidate
- * (auto-generated event name, no cond — see onConnect in visual-diagram.tsx), so this
- * only ever needs to check the event slot.
+ * A freshly-drawn diagram connection is always constructed as a bare/eventless candidate
+ * (no event, no cond — see onConnect in visual-diagram.tsx), so this only ever needs to
+ * check the 'always' slot.
  */
 export function checkNewConnectionSlotConflict(
   scxmlDoc: SCXMLDocument,
@@ -114,7 +124,7 @@ export function checkNewConnectionSlotConflict(
     (t) => t['@_target'] === targetId && (t['@_type'] || 'external') === 'external'
   );
 
-  const candidate: TransitionElement = { '@_event': '__new_connection__', '@_target': targetId };
+  const candidate: TransitionElement = { '@_target': targetId };
   return findTransitionSlotConflict(sameTarget, candidate);
 }
 

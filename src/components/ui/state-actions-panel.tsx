@@ -3,9 +3,21 @@
 import { BADGE_COLORS, EVENT_FALLBACK_VALUE, getVariableType } from '@/lib';
 import { extractDatamodelVariables } from '@/lib/utils/datamodel-extractor';
 import { useHostAPIStore } from '@/stores/host-api-store';
-import { Plus, X } from 'lucide-react';
+import { GripVertical, Plus, X } from 'lucide-react';
 import React from 'react';
 import { Panel, inputClass, FormActions, PanelEmptyState } from '@/components/ui/primitives';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { v4 as uuidv4 } from 'uuid';
+import { reorderByDragEvent } from '@/lib/utils/reorder-by-drag-event';
 
 interface AssignActionRow { type: 'assign'; location: string; expr: string; }
 interface SendActionRow   { type: 'send'; event: string; delayType: 'delay' | 'delayexpr'; delayValue: string; }
@@ -47,6 +59,89 @@ function toStrings(rows: ActionRow[]): string[] {
   }).filter((s): s is string => s !== undefined);
 }
 
+// Rows have no persistent identity in the SCXML source (they're plain
+// tuples). We attach a client-only `_rowId` so React and dnd-kit can track
+// each row's identity across a reorder instead of recycling identity by
+// array index — index-as-id caused the dragged row to visually snap back to
+// its old position before jumping to the new one, since dnd-kit had no way
+// to tell that "slot 0" now holds a different row.
+type WithRowId<T> = T & { _rowId: string };
+
+function withRowIds<T>(rows: T[]): WithRowId<T>[] {
+  return rows.map((row) => ({ ...row, _rowId: uuidv4() }));
+}
+
+interface SortableActionRowProps {
+  id: string;
+  index: number;
+  disabled: boolean;
+  align?: 'center' | 'start';
+  onClick: () => void;
+  onDelete: () => void;
+  children: React.ReactNode;
+}
+
+function SortableActionRow({
+  id,
+  index,
+  disabled,
+  align = 'center',
+  onClick,
+  onDelete,
+  children,
+}: SortableActionRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id, disabled });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      onClick={onClick}
+      className={`flex ${align === 'start' ? 'items-start' : 'items-center'} justify-between px-2 py-1.5 rounded text-xs cursor-pointer group hover:bg-muted`}
+    >
+      <div className={`flex ${align === 'start' ? 'items-start' : 'items-center'} gap-1.5 min-w-0 flex-1`}>
+        <button
+          type='button'
+          aria-label='Reorder action'
+          disabled={disabled}
+          onClick={(e) => e.stopPropagation()}
+          {...attributes}
+          {...listeners}
+          className={`flex-shrink-0 ${
+            disabled
+              ? 'text-dimmed opacity-30 cursor-not-allowed'
+              : 'text-dimmed hover:text-default cursor-grab active:cursor-grabbing'
+          }`}
+        >
+          <GripVertical className='h-3 w-3' />
+        </button>
+        <span
+          data-testid='action-order-badge'
+          className='text-[10px] text-dimmed font-mono flex-shrink-0 w-4 text-right'
+        >
+          {index + 1}
+        </span>
+        <div className='min-w-0 flex-1'>{children}</div>
+      </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className={`ml-2 flex-shrink-0 text-dimmed hover:text-error opacity-0 group-hover:opacity-100 transition-opacity ${
+          align === 'start' ? 'mt-0.5' : ''
+        }`}
+      >
+        <X className='h-3 w-3' />
+      </button>
+    </div>
+  );
+}
+
 export function StateActionsPanel({
   isVisible,
   onClose,
@@ -63,9 +158,9 @@ export function StateActionsPanel({
   onApplyReactions,
 }: StateActionsPanelProps) {
   const [activeTab, setActiveTab] = React.useState<Tab>('onentry');
-  const [localEntry, setLocalEntry] = React.useState<ActionRow[]>(initialEntry);
-  const [localExit, setLocalExit] = React.useState<ActionRow[]>(initialExit);
-  const [localReactions, setLocalReactions] = React.useState<InternalEventActionRow[]>(initialReactions);
+  const [localEntry, setLocalEntry] = React.useState<WithRowId<ActionRow>[]>(() => withRowIds(initialEntry));
+  const [localExit, setLocalExit] = React.useState<WithRowId<ActionRow>[]>(() => withRowIds(initialExit));
+  const [localReactions, setLocalReactions] = React.useState<WithRowId<InternalEventActionRow>[]>(() => withRowIds(initialReactions));
 
   // Form state
   const [formMode, setFormMode] = React.useState<FormMode>('idle');
@@ -79,8 +174,10 @@ export function StateActionsPanel({
   const [isOpen, setIsOpen] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const channels = useHostAPIStore((s) => s.channels);
+  const showFeedback = useHostAPIStore((s) => s.showFeedback);
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -101,9 +198,9 @@ export function StateActionsPanel({
 
   // Reset local lists and form when the selected state changes
   React.useEffect(() => {
-    setLocalEntry(initialEntry);
-    setLocalExit(initialExit);
-    setLocalReactions(initialReactions);
+    setLocalEntry(withRowIds(initialEntry));
+    setLocalExit(withRowIds(initialExit));
+    setLocalReactions(withRowIds(initialReactions));
     resetForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateId]);
@@ -140,20 +237,33 @@ export function StateActionsPanel({
     if (formMode === 'idle') return;
 
     if (activeTab === 'reactions') {
-      const newRow: InternalEventActionRow = { event: formEvent, location: formLocation, expr: formExpr, type: formReactionType };
-      const updatedList: InternalEventActionRow[] =
+      const rowId = formMode === 'editing' && editingRowIndex !== null
+        ? localReactions[editingRowIndex]._rowId
+        : uuidv4();
+      const newRow: WithRowId<InternalEventActionRow> = {
+        _rowId: rowId,
+        event: formEvent,
+        location: formLocation,
+        expr: formExpr,
+        type: formReactionType,
+      };
+      const updatedList: WithRowId<InternalEventActionRow>[] =
         formMode === 'adding'
           ? [...localReactions, newRow]
           : localReactions.map((r, i) => (i === editingRowIndex ? newRow : r));
       setLocalReactions(updatedList);
       onApplyReactions(updatedList);
       resetForm();
+      showFeedback('Reaction saved.', 'info');
       return;
     }
 
-    const newRow: AssignActionRow = { type: 'assign', location: formLocation, expr: formExpr };
+    const rowId = formMode === 'editing' && editingRowIndex !== null
+      ? currentList[editingRowIndex]._rowId
+      : uuidv4();
+    const newRow: WithRowId<AssignActionRow> = { _rowId: rowId, type: 'assign', location: formLocation, expr: formExpr };
 
-    const updatedList: ActionRow[] = formMode === 'adding'
+    const updatedList: WithRowId<ActionRow>[] = formMode === 'adding'
       ? [...currentList, newRow]
       : currentList.map((r, i) => (i === editingRowIndex ? newRow : r));
 
@@ -166,6 +276,7 @@ export function StateActionsPanel({
     }
 
     resetForm();
+    showFeedback('Action saved.', 'info');
   };
 
   const handleDelete = (index: number) => {
@@ -186,6 +297,27 @@ export function StateActionsPanel({
       setLocalExit(updated);
       onApply(toStrings(localEntry), toStrings(updated));
     }
+  };
+
+  const handleActionsDragEnd = (event: DragEndEvent) => {
+    const reordered = reorderByDragEvent(currentList, (r) => r._rowId, event.active.id, event.over?.id);
+    if (reordered === currentList) return;
+
+    if (activeTab === 'onentry') {
+      setLocalEntry(reordered);
+      onApply(toStrings(reordered), toStrings(localExit));
+    } else {
+      setLocalExit(reordered);
+      onApply(toStrings(localEntry), toStrings(reordered));
+    }
+  };
+
+  const handleReactionsDragEnd = (event: DragEndEvent) => {
+    const reordered = reorderByDragEvent(localReactions, (r) => r._rowId, event.active.id, event.over?.id);
+    if (reordered === localReactions) return;
+
+    setLocalReactions(reordered);
+    onApplyReactions(reordered);
   };
 
   const handleRowClick = (row: ActionRow, index: number) => {
@@ -346,16 +478,19 @@ export function StateActionsPanel({
       </div>
       <div>
         <label className='text-[10px] text-muted block mb-0.5'>Expression</label>
-        <input
-          type='text'
+        <textarea
           value={formExpr}
           onChange={(e) => setFormExpr(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleApply();
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleApply();
+            }
             if (e.key === 'Escape') resetForm();
           }}
           placeholder='expression'
-          className={inputClass}
+          rows={3}
+          className={`${inputClass} resize-y font-mono`}
         />
       </div>
 
@@ -371,7 +506,7 @@ export function StateActionsPanel({
   if (!isVisible) return null;
 
   return (
-    <Panel title='State Actions' onClose={onClose} widthClass='w-[380px]'>
+    <Panel title='State Actions' onClose={onClose} widthClass='w-[520px]'>
       <div className='flex flex-col h-full'>
         {/* Sub-header: stateId + add button */}
         <div className='flex items-center justify-between px-3 py-1.5 border-b border-default bg-muted flex-shrink-0'>
@@ -444,38 +579,40 @@ export function StateActionsPanel({
             {localReactions.length === 0 && formMode !== 'adding' && (
               <PanelEmptyState><p>No reactions yet.</p></PanelEmptyState>
             )}
-            {localReactions.map((row, index) =>
-              formMode === 'editing' && editingRowIndex === index ? (
-                <div key={index}>{inlineForm}</div>
-              ) : (
-                <div
-                  key={index}
-                  onClick={() => handleReactionsRowClick(row, index)}
-                  className='flex items-start justify-between px-2 py-1.5 rounded text-xs cursor-pointer group hover:bg-muted'
-                >
-                  <div className='flex flex-col min-w-0'>
-                    <div className='flex items-center gap-1'>
-                      <span className='text-primary text-[10px] font-medium'>{row.event}</span>
-                      <span className='text-[9px] px-1 rounded border border-default text-dimmed'>{row.type}</span>
-                    </div>
-                    <span className='font-mono text-xs text-default pl-2 break-all'>
-                      <span className='text-default'>{row.location || '…'}</span>
-                      <span className='text-default'> = </span>
-                      <span className='text-muted'>{row.expr || '…'}</span>
-                    </span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(index);
-                    }}
-                    className='ml-2 mt-0.5 flex-shrink-0 text-dimmed hover:text-error opacity-0 group-hover:opacity-100 transition-opacity'
-                  >
-                    <X className='h-3 w-3' />
-                  </button>
-                </div>
-              )
-            )}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleReactionsDragEnd}>
+              <SortableContext
+                items={localReactions.map((r) => r._rowId)}
+                strategy={verticalListSortingStrategy}
+              >
+                {localReactions.map((row, index) =>
+                  formMode === 'editing' && editingRowIndex === index ? (
+                    <div key={row._rowId}>{inlineForm}</div>
+                  ) : (
+                    <SortableActionRow
+                      key={row._rowId}
+                      id={row._rowId}
+                      index={index}
+                      disabled={formMode !== 'idle'}
+                      align='start'
+                      onClick={() => handleReactionsRowClick(row, index)}
+                      onDelete={() => handleDelete(index)}
+                    >
+                      <div className='flex flex-col min-w-0'>
+                        <div className='flex items-center gap-1'>
+                          <span className='text-primary text-[10px] font-medium'>{row.event}</span>
+                          <span className='text-[9px] px-1 rounded border border-default text-dimmed'>{row.type}</span>
+                        </div>
+                        <span className='font-mono text-xs text-default pl-2 break-all'>
+                          <span className='text-default'>{row.location || '…'}</span>
+                          <span className='text-default'> = </span>
+                          <span className='text-muted'>{row.expr || '…'}</span>
+                        </span>
+                      </div>
+                    </SortableActionRow>
+                  )
+                )}
+              </SortableContext>
+            </DndContext>
             {formMode === 'adding' && <div>{inlineForm}</div>}
           </>
         ) : (
@@ -484,46 +621,47 @@ export function StateActionsPanel({
               <PanelEmptyState><p>No actions yet.</p></PanelEmptyState>
             )}
 
-            {currentList.map((row, index) =>
-              formMode === 'editing' && editingRowIndex === index ? (
-                <div key={index}>{inlineForm}</div>
-              ) : (
-                <div
-                  key={index}
-                  onClick={() => handleRowClick(row, index)}
-                  className='flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer group hover:bg-muted'
-                >
-                  {row.type === 'assign' && (
-                    <span className='font-mono truncate text-default'>
-                      <span className='text-primary'>{row.location || '…'}</span>
-                      <span className='text-dimmed'> = </span>
-                      <span className='text-default'>{row.expr || '…'}</span>
-                    </span>
-                  )}
-                  {row.type === 'send' && (
-                    <span className='font-mono text-default flex flex-col min-w-0'>
-                      <span className='text-primary truncate'>{row.event || '…'}</span>
-                      <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
-                    </span>
-                  )}
-                  {row.type === 'cancel' && (
-                    <span className='font-mono truncate text-default'>
-                      <span className='text-dimmed'>cancel: </span>
-                      <span className='text-primary'>{row.sendid || '…'}</span>
-                    </span>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(index);
-                    }}
-                    className='ml-2 flex-shrink-0 text-dimmed hover:text-error opacity-0 group-hover:opacity-100 transition-opacity'
-                  >
-                    <X className='h-3 w-3' />
-                  </button>
-                </div>
-              ),
-            )}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleActionsDragEnd}>
+              <SortableContext
+                items={currentList.map((r) => r._rowId)}
+                strategy={verticalListSortingStrategy}
+              >
+                {currentList.map((row, index) =>
+                  formMode === 'editing' && editingRowIndex === index ? (
+                    <div key={row._rowId}>{inlineForm}</div>
+                  ) : (
+                    <SortableActionRow
+                      key={row._rowId}
+                      id={row._rowId}
+                      index={index}
+                      disabled={formMode !== 'idle'}
+                      onClick={() => handleRowClick(row, index)}
+                      onDelete={() => handleDelete(index)}
+                    >
+                      {row.type === 'assign' && (
+                        <span className='font-mono truncate text-default'>
+                          <span className='text-primary'>{row.location || '…'}</span>
+                          <span className='text-dimmed'> = </span>
+                          <span className='text-default'>{row.expr || '…'}</span>
+                        </span>
+                      )}
+                      {row.type === 'send' && (
+                        <span className='font-mono text-default flex flex-col min-w-0'>
+                          <span className='text-primary truncate'>{row.event || '…'}</span>
+                          <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
+                        </span>
+                      )}
+                      {row.type === 'cancel' && (
+                        <span className='font-mono truncate text-default'>
+                          <span className='text-dimmed'>cancel: </span>
+                          <span className='text-primary'>{row.sendid || '…'}</span>
+                        </span>
+                      )}
+                    </SortableActionRow>
+                  ),
+                )}
+              </SortableContext>
+            </DndContext>
 
             {/* New action form appended at bottom when adding */}
             {formMode === 'adding' && <div>{inlineForm}</div>}

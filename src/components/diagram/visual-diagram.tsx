@@ -11,7 +11,6 @@ import {
   addStateToDocument,
   createStateElement,
   findStateById,
-  getNextTransitionEventName,
   removeTransitionByEdgeId,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
@@ -20,6 +19,11 @@ import {
 } from '@/lib/utils/transition-slot-rules';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
+import {
+  ALWAYS_TRANSITION_COLOR,
+  EVENT_TRANSITION_COLOR,
+  getTransitionColor,
+} from '@/lib/consts/transition-colors';
 import { ActionType } from '@/types/history';
 import type { SCXMLDocument, TransitionElement } from '@/types/scxml';
 import {
@@ -43,6 +47,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
@@ -219,6 +224,23 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const [connectionBlockedMessage, setConnectionBlockedMessage] = React.useState<string | null>(null);
 
+  // React-flow's default wheelDelta only boosts pinch-zoom (ctrlKey wheel
+  // events) on macOS, leaving pinch zoom on Windows using the tiny raw
+  // deltaY the trackpad reports. We only target Windows, so drop that
+  // check and boost pinch zoom the same way scroll zoom is boosted.
+  const d3ZoomInstance = useStore((s) => s.d3Zoom);
+  React.useEffect(() => {
+    if (!d3ZoomInstance) return;
+    d3ZoomInstance.wheelDelta((event: WheelEvent) => {
+      const factor = event.ctrlKey ? 10 : 1;
+      return (
+        -event.deltaY *
+        (event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002) *
+        factor
+      );
+    });
+  }, [d3ZoomInstance]);
+
   React.useEffect(() => {
     if (!connectionBlockedMessage) return;
     const timer = setTimeout(() => setConnectionBlockedMessage(null), 4000);
@@ -357,7 +379,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             const candidate: TransitionElement =
               editingField === 'cond'
                 ? { '@_cond': newValue, '@_target': selectedEdgeForEdit.target }
-                : { '@_event': newValue, '@_target': selectedEdgeForEdit.target };
+                : editingField === 'event'
+                  ? { '@_event': newValue, '@_target': selectedEdgeForEdit.target }
+                  : { '@_target': selectedEdgeForEdit.target };
             const slotCheck = checkTransitionEditSlotConflict(
               preCheck.data,
               selectedEdgeForEdit.source,
@@ -389,8 +413,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         else console.error('Failed to update transition:', transResult.error);
 
         // Step 2: apply delay/cancel actions on the already-updated content
-        // Runs in event mode (add/remove) and when switching to cond (cleanup old send/cancel)
-        if (editingField === 'event' || (editingField === 'cond' && originalEventName)) {
+        // Runs in event mode (add/remove), when switching to cond (cleanup old send/cancel),
+        // and when clearing to eventless (cleanup old send/cancel; a no-op when there was no delay)
+        if (editingField === 'event' || editingField === 'none' || (editingField === 'cond' && originalEventName)) {
           const sourceNodeId = selectedEdgeForEdit.source;
           const sourceNode = nodes.find((n) => n.id === sourceNodeId);
           if (sourceNode) {
@@ -869,11 +894,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const onConnect = useCallback(
     (params: Connection) => {
-      let preParsedDoc: SCXMLDocument | undefined;
       if (params.source && params.target && parserRef.current && scxmlContent) {
         const preCheck = parserRef.current.parse(scxmlContent);
         if (preCheck.success && preCheck.data) {
-          preParsedDoc = preCheck.data;
           const { blocked, reason } = wouldMergeDistinctGroups(
             preCheck.data,
             params.source,
@@ -897,9 +920,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       // Set intelligent defaults: outgoing from bottom, incoming to top
       const sourceHandle = params.sourceHandle || 'bottom';
       const targetHandle = params.targetHandle || 'top';
-      const nextEventName = preParsedDoc
-        ? getNextTransitionEventName(preParsedDoc)
-        : 'event1';
 
       const newEdge: Edge = {
         id: `${params.source}-${params.target}-${Date.now()}`,
@@ -915,7 +935,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         //   color: '#6b7280',
         // },
         data: {
-          event: nextEventName,
+          event: undefined,
           condition: undefined,
           actions: [],
           sourceHandle: sourceHandle,
@@ -924,10 +944,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         style: {
           strokeWidth: 2,
           zIndex: 1,
-          stroke: '#3b82f6',
+          stroke: ALWAYS_TRANSITION_COLOR,
         },
         zIndex: 1,
-        animated: true,
+        animated: false,
       };
 
       setEdges((eds) => addEdge(newEdge, eds));
@@ -941,7 +961,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
             if (sourceState) {
               const newTransition: TransitionElement = {
-                '@_event': nextEventName,
                 '@_target': params.target!,
               };
 
@@ -965,7 +984,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const handleCommand = new UpdateTransitionHandlesCommand(
                 params.source!,
                 params.target!,
-                nextEventName, // The event we just created
+                undefined, // No event — eventless by default
                 undefined, // No condition
                 sourceHandle,
                 targetHandle
@@ -995,6 +1014,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [setEdges, scxmlContent, onSCXMLChange]
   );
 
+  // Set for the duration of a drag on an existing edge's endpoint (onReconnectStart ->
+  // onReconnectEnd), so isValidConnection can tell "moving this edge's own handle" apart
+  // from "drawing a brand new connection" — otherwise the transition being dragged shows
+  // up as its own conflicting duplicate in the same-target slot check below, since it's
+  // still present, untouched, in the parsed scxmlContent at validation time.
+  const reconnectingEdgeRef = React.useRef<Edge | null>(null);
+
+  const onReconnectStart = useCallback((_event: unknown, edge: Edge) => {
+    reconnectingEdgeRef.current = edge;
+  }, []);
+
+  const onReconnectEnd = useCallback(() => {
+    reconnectingEdgeRef.current = null;
+  }, []);
+
   const isValidConnection = useCallback(
     (connection: Connection | Edge) => {
       if (!connection.source || !connection.target) return true;
@@ -1017,7 +1051,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         return false;
       }
 
-      const slotCheck = checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
+      const reconnecting = reconnectingEdgeRef.current;
+      const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
+      const slotCheck =
+        reconnecting && reconnecting.source === connection.source
+          ? checkTransitionEditSlotConflict(
+              parseResult.data,
+              connection.source,
+              parseTransitionIndexFromEdgeId(reconnecting.id),
+              {
+                '@_event': reconnecting.data?.event,
+                '@_cond': reconnecting.data?.condition,
+                '@_target': connection.target,
+              }
+            )
+          : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
       if (slotCheck.blocked) {
         setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
         return false;
@@ -1218,13 +1266,28 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         return;
       }
 
-      // Only process nodes that were actually dragged
-      const positionChanges = dragEndChanges.filter((change) =>
-        isDraggingRef.current.has(change.id)
-      );
+      // Only process nodes that were actually dragged (mouse) or moved via
+      // keyboard (ReactFlow's built-in arrow-key nudging never sets
+      // dragging: true, so it would otherwise be dropped here as "just a
+      // click" and the moved node would snap back to its stale SCXML
+      // position the next time something re-syncs from the source of truth,
+      // e.g. selecting another node).
+      const positionChanges = dragEndChanges.filter((change) => {
+        if (isDraggingRef.current.has(change.id)) {
+          return true;
+        }
+        const currentNode = nodes.find((n) => n.id === change.id);
+        if (!currentNode?.position || !change.position) {
+          return false;
+        }
+        return (
+          Math.abs(currentNode.position.x - change.position.x) >= 1 ||
+          Math.abs(currentNode.position.y - change.position.y) >= 1
+        );
+      });
 
       if (positionChanges.length === 0) {
-        // This was a click, not a drag - don't update SCXML
+        // This was a click, not a drag or keyboard move - don't update SCXML
         return;
       }
 
@@ -2377,7 +2440,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         };
 
         // Determine selection color based on edge type
-        const selectionColor = edge.data?.condition ? '#ef4444' : '#3b82f6';
+        const selectionColor = getTransitionColor(edge.data?.condition, edge.data?.event);
         return {
           ...edge,
           selected: true, // CRITICAL: This prop enables waypoint handles to show
@@ -2541,12 +2604,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // Handle keyboard events for edge deletion
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Delete' && activePanel !== 'validation' && selectedTransitions.size > 0) {
+      if (event.key === 'Delete' && !activePanel && selectedTransitions.size > 0) {
         event.preventDefault();
         const edgeId = Array.from(selectedTransitions)[0];
         handleEdgesChange([{ id: edgeId, type: 'remove' }]);
       }
-      if (event.key === 'Delete' && activePanel !== 'validation' && activeStates.size > 0) {
+      if (event.key === 'Delete' && !activePanel && activeStates.size > 0) {
         event.preventDefault();
         const stateId = Array.from(activeStates);
         handleNodesChange(stateId.map((id) => ({ id, type: 'remove' })));
@@ -2600,6 +2663,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             onConnect={onConnect}
             isValidConnection={isValidConnection}
             onReconnect={onReconnect}
+            onReconnectStart={onReconnectStart}
+            onReconnectEnd={onReconnectEnd}
             onNodeClick={(event, node) =>
               handleStateClick(node.id, event, node.type)
             }
@@ -2691,7 +2756,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                   markerHeight='12'
                   orient='auto'
                 >
-                  <path d='M 2 2 L 18 10 L 2 18 L 7 10 Z' fill='#3b82f6' />
+                  <path d='M 2 2 L 18 10 L 2 18 L 7 10 Z' fill={EVENT_TRANSITION_COLOR} />
                 </marker>
               </defs>
             </svg>

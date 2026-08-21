@@ -82,6 +82,87 @@ describe('validateTransitionSlotConflicts', () => {
     });
   });
 
+  it('reports one error per transition when two timer-event transitions target the same state', () => {
+    const scxml: SCXMLElement = {
+      state: [
+        {
+          '@_id': 'A',
+          transition: [
+            { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' },
+            { '@_event': 'A_t_1_timeEvent_1', '@_target': 'B' },
+          ],
+        },
+        { '@_id': 'B' },
+      ],
+    } as any;
+    const errors: ValidationError[] = [];
+    validateTransitionSlotConflicts(scxml, undefined, errors);
+    expect(errors.length).toBe(2);
+    errors.forEach((e) => {
+      expect(e.severity).toBe('error');
+      expect(e.message).toMatch(/only one timer-based transition/i);
+    });
+  });
+
+  it('reports no errors for a timer event and a plain event transition to the same target (independent slots)', () => {
+    const scxml: SCXMLElement = {
+      state: [
+        {
+          '@_id': 'A',
+          transition: [
+            { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' },
+            { '@_event': 'e1', '@_target': 'B' },
+          ],
+        },
+        { '@_id': 'B' },
+      ],
+    } as any;
+    const errors: ValidationError[] = [];
+    validateTransitionSlotConflicts(scxml, undefined, errors);
+    expect(errors).toEqual([]);
+  });
+
+  it('reports one error per transition when two eventless (bare) transitions target the same state', () => {
+    const scxml: SCXMLElement = {
+      state: [
+        {
+          '@_id': 'A',
+          transition: [
+            { '@_target': 'B' },
+            { '@_target': 'B' },
+          ],
+        },
+        { '@_id': 'B' },
+      ],
+    } as any;
+    const errors: ValidationError[] = [];
+    validateTransitionSlotConflicts(scxml, undefined, errors);
+    expect(errors.length).toBe(2);
+    errors.forEach((e) => {
+      expect(e.severity).toBe('error');
+      expect(e.message).toMatch(/only one eventless transition/i);
+    });
+  });
+
+  it('reports no errors for an eventless, an event-slot, and a cond-slot transition all to the same target (three independent slots)', () => {
+    const scxml: SCXMLElement = {
+      state: [
+        {
+          '@_id': 'A',
+          transition: [
+            { '@_target': 'B' },
+            { '@_event': 'e1', '@_target': 'B' },
+            { '@_cond': 'x>1', '@_target': 'B' },
+          ],
+        },
+        { '@_id': 'B' },
+      ],
+    } as any;
+    const errors: ValidationError[] = [];
+    validateTransitionSlotConflicts(scxml, undefined, errors);
+    expect(errors).toEqual([]);
+  });
+
   it('reports no errors for clean, non-conflicting transitions across multiple states', () => {
     const scxml: SCXMLElement = {
       state: [

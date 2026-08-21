@@ -288,7 +288,7 @@ export function findTransitionPosition(
     if (line.includes('<transition')) {
       // Check if this transition matches our criteria
       const hasTarget = line.includes(`target="${targetStateId}"`);
-      const hasEvent = event ? line.includes(`event="${event}"`) : true;
+      const hasEvent = event ? line.includes(`event="${event}"`) : !line.includes('event=');
       const hasCond = cond
         ? line.includes(`cond="${cond}"`)
         : !line.includes('cond=');

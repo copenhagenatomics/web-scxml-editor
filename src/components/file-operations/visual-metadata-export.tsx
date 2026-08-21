@@ -121,7 +121,7 @@ export const VisualMetadataExport: React.FC<VisualMetadataExportProps> = ({
         title='Download SCXML file with visual metadata (for Visual SCXML Editor)'
       >
         <Download className='h-4 w-4' />
-        <span>With Visual Data</span>
+        <span>Download</span>
       </button>
 
       {/* Export clean SCXML */}

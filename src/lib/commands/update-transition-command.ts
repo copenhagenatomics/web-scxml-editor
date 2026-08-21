@@ -16,7 +16,7 @@ export class UpdateTransitionCommand extends BaseCommand {
     private originalEvent: string | undefined,
     private originalCond: string | undefined,
     private newValue: string,
-    private editingField: 'event' | 'cond',
+    private editingField: 'event' | 'cond' | 'none',
     transitionIndex?: number
   ) {
     super();
@@ -67,9 +67,13 @@ export class UpdateTransitionCommand extends BaseCommand {
           this.oldValue = transitionCond || '';
           transition.setAttribute('cond', this.newValue);
           transition.removeAttribute('event');
-        } else {
+        } else if (this.editingField === 'event') {
           this.oldValue = transitionEvent || '';
           transition.setAttribute('event', this.newValue);
+          transition.removeAttribute('cond');
+        } else {
+          // 'none' — revert to eventless: remove both, set neither.
+          transition.removeAttribute('event');
           transition.removeAttribute('cond');
         }
         transitionFound = true;
@@ -99,9 +103,13 @@ export class UpdateTransitionCommand extends BaseCommand {
             this.oldValue = transitionCond || '';
             transition.setAttribute('cond', this.newValue);
             transition.removeAttribute('event');
-          } else {
+          } else if (this.editingField === 'event') {
             this.oldValue = transitionEvent || '';
             transition.setAttribute('event', this.newValue);
+            transition.removeAttribute('cond');
+          } else {
+            // 'none' — revert to eventless: remove both, set neither.
+            transition.removeAttribute('event');
             transition.removeAttribute('cond');
           }
           transitionFound = true;
@@ -124,6 +132,28 @@ export class UpdateTransitionCommand extends BaseCommand {
   }
 
   undo(scxmlContent: string): CommandResult {
+    if (this.editingField === 'none') {
+      // Cleared to eventless — restore whichever of event/cond was present before the clear.
+      const hadCond = !!this.originalCond;
+      const hadEvent = !!this.originalEvent;
+      if (!hadCond && !hadEvent) {
+        return this.createFailureResult(
+          'No previous value to restore',
+          scxmlContent
+        );
+      }
+      const inverseCommand = new UpdateTransitionCommand(
+        this.sourceId,
+        this.targetId,
+        undefined,
+        undefined,
+        hadCond ? this.originalCond! : this.originalEvent!,
+        hadCond ? 'cond' : 'event',
+        this.transitionIndex
+      );
+      return inverseCommand.execute(scxmlContent);
+    }
+
     if (this.oldValue === undefined) {
       return this.createFailureResult(
         'No previous value to restore',
@@ -146,6 +176,7 @@ export class UpdateTransitionCommand extends BaseCommand {
   }
 
   getDescription(): string {
+    if (this.editingField === 'none') return 'Clear transition to eventless';
     const field = this.editingField === 'cond' ? 'condition' : 'event';
     return `Update transition ${field} to "${this.newValue}"`;
   }

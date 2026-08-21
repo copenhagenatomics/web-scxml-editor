@@ -10,8 +10,10 @@ import type { Edge, Node } from 'reactflow';
 
 // Import converter modules
 import {
+  buildActionOrderMap,
   collectAllTransitions,
   extractActionsText,
+  type ActionTag,
 } from './converter-modules/edge-conversion';
 import { toSafeId } from './converter-modules/id-mapping';
 import {
@@ -63,6 +65,10 @@ export class SCXMLToXStateConverter {
   // Store original SCXML content for write-back
   private originalScxmlContent: string = '';
 
+  // True document order of onentry/onexit action children per state id,
+  // used to fix up the type-grouped order the primary XML parser produces.
+  private actionOrderMap: Map<string, { onentry: ActionTag[]; onexit: ActionTag[] }> = new Map();
+
   // Store initialized SCXML content (with viz:xywh added)
   private initializedSCXML: string | null = null;
 
@@ -105,6 +111,7 @@ export class SCXMLToXStateConverter {
     // Store original content for potential write-back
     if (originalXmlContent) {
       this.originalScxmlContent = originalXmlContent;
+      this.actionOrderMap = buildActionOrderMap(originalXmlContent);
     }
 
     // Reset initialized SCXML
@@ -557,11 +564,12 @@ export class SCXMLToXStateConverter {
     // Extract actions
     const onentry = this.getElements(state, 'onentry');
     const onexit = this.getElements(state, 'onexit');
+    const order = this.actionOrderMap.get(getAttribute(state, 'id') || '');
     const entryActions = onentry
-      ? extractActionsText(onentry, getAttribute, getElements)
+      ? extractActionsText(onentry, getAttribute, getElements, order?.onentry)
       : [];
     const exitActions = onexit
-      ? extractActionsText(onexit, getAttribute, getElements)
+      ? extractActionsText(onexit, getAttribute, getElements, order?.onexit)
       : [];
 
     // Extract internal event actions (targetless transitions with type="internal")

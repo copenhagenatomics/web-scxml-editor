@@ -127,6 +127,14 @@ describe('isSameTransitionFamily', () => {
   it('treats explicit type="external" as equal to an absent type attribute', () => {
     expect(isSameTransitionFamily(base({ '@_type': 'external' }), base())).toBe(true);
   });
+
+  it('does not match an eventless transition with an event-bearing transition to the same target', () => {
+    expect(isSameTransitionFamily(base(), base({ '@_event': 'e1' }))).toBe(false);
+  });
+
+  it('does not match an eventless transition with a cond-bearing transition to the same target', () => {
+    expect(isSameTransitionFamily(base(), base({ '@_cond': 'x>1' }))).toBe(false);
+  });
 });
 
 describe('isSameTransitionFamilyByEvent', () => {
@@ -166,6 +174,13 @@ describe('isSameTransitionFamilyByEvent', () => {
     expect(
       isSameTransitionFamilyByEvent(base({ '@_target': 'B' }), base({ '@_target': 'C' }))
     ).toBe(false);
+  });
+
+  it('does not match an eventless transition with an event-bearing transition sharing the same (absent) cond', () => {
+    // Both have no cond (condsAreEqual holds), but only isSameTransitionFamilyByEvent's
+    // eventless-parity check (inherited from isSameTransitionFamily) should block this pairing —
+    // otherwise a bare transition would be silently folded into an event-only one on merge.
+    expect(isSameTransitionFamilyByEvent(base(), base({ '@_event': 'e1' }))).toBe(false);
   });
 });
 
@@ -401,6 +416,24 @@ describe('mergeDuplicateTransitionsInDocument', () => {
     expect(toC?.['@_cond']).toBe('z==1');
     expect(toC?.['@_event']).toBe('e3');
   });
+
+  it('never folds a bare/eventless transition into an event-bearing transition to the same target', () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="A">
+        <transition target="B"/>
+        <transition event="e1" target="B"/>
+      </state>
+      <state id="B"/>
+    </scxml>`;
+
+    const result = mergeDuplicateTransitionsInDocument(xml);
+    const a = parseState(result, 'A');
+    expect(Array.isArray(a.transition)).toBe(true);
+    const transitions = a.transition as TransitionElement[];
+    expect(transitions.length).toBe(2);
+    expect(transitions.some((t) => !t['@_event'] && !t['@_cond'])).toBe(true);
+    expect(transitions.some((t) => t['@_event'] === 'e1')).toBe(true);
+  });
 });
 
 describe('mergeDuplicateTransitionsByEventInDocument', () => {
@@ -507,6 +540,24 @@ describe('mergeDuplicateTransitionsByEventInDocument', () => {
     const a = parseState(result, 'A');
     const t = a.transition as TransitionElement;
     expect(t['@_event']).toBe('a, b');
+  });
+
+  it('never folds a bare/eventless transition into an event-bearing transition sharing the same (absent) cond', () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="A">
+        <transition target="B"/>
+        <transition event="e1" target="B"/>
+      </state>
+      <state id="B"/>
+    </scxml>`;
+
+    const result = mergeDuplicateTransitionsByEventInDocument(xml);
+    const a = parseState(result, 'A');
+    expect(Array.isArray(a.transition)).toBe(true);
+    const transitions = a.transition as TransitionElement[];
+    expect(transitions.length).toBe(2);
+    expect(transitions.some((t) => !t['@_event'] && !t['@_cond'])).toBe(true);
+    expect(transitions.some((t) => t['@_event'] === 'e1')).toBe(true);
   });
 });
 

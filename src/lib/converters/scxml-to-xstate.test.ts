@@ -48,3 +48,31 @@ describe('SCXMLToXStateConverter node width recalculation', () => {
     expect(node!.width).toBe(400);
   });
 });
+
+describe('SCXMLToXStateConverter onentry/onexit action ordering', () => {
+  // fast-xml-parser's default parse groups <onentry> children by tag name
+  // (all <assign> together, then all <send> together), which silently
+  // reorders an interleaved assign/send/assign/send sequence. The converter
+  // must recover the original document order.
+  it('preserves interleaved assign/send order from the source document', async () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="s1">
+        <onentry>
+          <assign location="a" expr="1"/>
+          <send event="ev0" delayexpr="d0"/>
+          <assign location="b" expr="2"/>
+          <send event="ev1" delayexpr="d1"/>
+        </onentry>
+      </state>
+    </scxml>`;
+    const { nodes } = await convert(xml);
+    const node = nodes.find((n) => n.id === 's1');
+    expect(node).toBeDefined();
+    expect(node!.data.entryActions).toEqual([
+      'assign|a|1',
+      'send|ev0|delayexpr|d0',
+      'assign|b|2',
+      'send|ev1|delayexpr|d1',
+    ]);
+  });
+});

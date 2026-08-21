@@ -1,5 +1,6 @@
 import type { TransitionElement, StateElement, ParallelElement } from '@/types/scxml';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
+import { isPresent } from '@/lib/utils/transition-slot-rules';
 
 /**
  * Combines a merge group's `@_cond` values into a single boolean expression via OR.
@@ -12,15 +13,24 @@ export function combineConditions(conds: (string | undefined)[]): string | undef
   return trimmed.map((c) => `(${c})`).join(' || ');
 }
 
+/** True for a bare/eventless transition — neither `@_event` nor `@_cond` present. */
+function isEventless(t: TransitionElement): boolean {
+  return !isPresent(t['@_event']) && !isPresent(t['@_cond']);
+}
+
 /**
  * Two transitions belong to the same merge family when they share a target and a type
  * (internal/external, defaulting to external). The `event` attribute is deliberately not
  * compared — merging is driven purely by combining conditions via OR, not by event names.
+ * A bare/eventless transition (no event, no cond) is only ever a family member of another
+ * bare transition — otherwise merging would silently fold it into an event- or cond-bearing
+ * transition, discarding one of the two.
  */
 export function isSameTransitionFamily(a: TransitionElement, b: TransitionElement): boolean {
   if (a['@_target'] !== b['@_target']) return false;
   const typeOf = (t: TransitionElement) => t['@_type'] || 'external';
-  return typeOf(a) === typeOf(b);
+  if (typeOf(a) !== typeOf(b)) return false;
+  return isEventless(a) === isEventless(b);
 }
 
 /**

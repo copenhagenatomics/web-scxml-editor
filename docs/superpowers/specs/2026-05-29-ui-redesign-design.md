@@ -90,7 +90,7 @@ Install only what is needed. Do **not** install the full component library.
   - Load new file (lucide `Upload`)  
   - ─ separator ─  
   - Download (lucide `Download`) — shown when no visual metadata  
-  - Download with visual data (lucide `Eye`) — shown when `hasVisualMetadata`  
+  - Download Download (lucide `Eye`) — shown when `hasVisualMetadata`  
   - Clean SCXML (lucide `EyeOff`) — shown when `hasVisualMetadata`
   - ─ separator ─  
   - Validation (lucide `AlertCircle`) — toggles validation panel; shows error/warning count as a `Badge`

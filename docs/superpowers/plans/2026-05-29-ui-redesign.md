@@ -817,7 +817,7 @@ export const VisualMetadataExport: React.FC<VisualMetadataExportProps> = ({
       <>
         <DropdownMenuItem onClick={handleExportWithMetadata}>
           <Eye className='h-4 w-4 mr-2' />
-          Download with visual data
+          Download Download
         </DropdownMenuItem>
         <DropdownMenuItem onClick={handleExportClean}>
           <EyeOff className='h-4 w-4 mr-2' />
@@ -849,7 +849,7 @@ export const VisualMetadataExport: React.FC<VisualMetadataExportProps> = ({
         title='Download with visual metadata'
       >
         <Download className='h-4 w-4' />
-        <span>With Visual Data</span>
+        <span>Download</span>
       </button>
       <button
         onClick={handleExportClean}

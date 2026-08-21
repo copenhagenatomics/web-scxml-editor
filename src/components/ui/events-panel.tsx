@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Eye, EyeOff, Trash2 } from 'lucide-react';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import type { EventEntry } from '@/types/host-api';
@@ -18,6 +18,8 @@ interface EventsPanelProps {
 export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
   const events = useHostAPIStore(state => state.events);
   const setEvents = useHostAPIStore(state => state.setEvents);
+  const showFeedback = useHostAPIStore(state => state.showFeedback);
+  const fieldOriginalRef = useRef('');
   const [isAdding, setIsAdding] = useState<false | 'plain' | 'arg'>(false);
   const [newName, setNewName] = useState('');
   const [newDefaultValue, setNewDefaultValue] = useState('0');
@@ -29,8 +31,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
   const update = (index: number, patch: Partial<EventEntry>) =>
     setEvents(events.map((e, i) => i === index ? { ...e, ...patch } : e));
 
-  const handleDelete = (index: number) =>
+  const handleDelete = (index: number) => {
     setEvents(events.filter((_, i) => i !== index));
+    showFeedback('User action deleted.', 'info');
+  };
 
   const handleConfirmAdd = () => {
     const trimmed = newName.trim();
@@ -47,6 +51,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
       hidden: newHidden || undefined,
     }]);
     resetForm();
+    showFeedback('User action added.', 'info');
   };
 
   const parseLimit = (s: string) => { const n = parseFloat(s.trim()); return isNaN(n) ? undefined : n; };
@@ -62,6 +67,18 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
   };
 
   const argInputClass = `min-w-0 ${inputClass}`;
+
+  const trackFieldFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    fieldOriginalRef.current = e.target.value;
+  };
+
+  const notifyIfFieldChanged = (e: React.FocusEvent<HTMLInputElement>, message: string) => {
+    if (e.target.value !== fieldOriginalRef.current) showFeedback(message, 'info');
+  };
+
+  const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') e.currentTarget.blur();
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleConfirmAdd();
@@ -97,7 +114,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 <input
                   type='text'
                   value={event.name}
+                  onFocus={trackFieldFocus}
                   onChange={e => update(index, { name: e.target.value })}
+                  onBlur={e => notifyIfFieldChanged(e, 'User action renamed.')}
+                  onKeyDown={blurOnEnter}
                   className={`flex-1 ${inputClass}`}
                 />
                 <button
@@ -120,33 +140,55 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 </button>
               </div>
               {event.hasArgument && (
-                <div className='flex items-center gap-1.5 mt-1.5'>
-                  <input
-                    type='text'
-                    value={event.defaultValue ?? '0'}
-                    onChange={e => update(index, { defaultValue: e.target.value })}
-                    placeholder='default'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <input
-                    type='number'
-                    value={event.min ?? ''}
-                    onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
-                    placeholder='min'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <input
-                    type='number'
-                    value={event.max ?? ''}
-                    onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
-                    placeholder='max'
-                    className={`flex-1 ${argInputClass}`}
-                  />
-                  <div className='flex-1'>
+                <div className='flex items-start gap-1.5 mt-1.5'>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Default</label>
+                    <input
+                      type='text'
+                      value={event.defaultValue ?? '0'}
+                      onFocus={trackFieldFocus}
+                      onChange={e => update(index, { defaultValue: e.target.value })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Default value updated.')}
+                      onKeyDown={blurOnEnter}
+                      placeholder='default'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Min</label>
+                    <input
+                      type='number'
+                      value={event.min ?? ''}
+                      onFocus={trackFieldFocus}
+                      onChange={e => update(index, { min: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Min updated.')}
+                      onKeyDown={blurOnEnter}
+                      placeholder='min'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Max</label>
+                    <input
+                      type='number'
+                      value={event.max ?? ''}
+                      onFocus={trackFieldFocus}
+                      onChange={e => update(index, { max: isNaN(e.target.valueAsNumber) ? undefined : e.target.valueAsNumber })}
+                      onBlur={e => notifyIfFieldChanged(e, 'Max updated.')}
+                      onKeyDown={blurOnEnter}
+                      placeholder='max'
+                      className={argInputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Unit</label>
                     <SearchableSelect
                       value={event.unit ?? ''}
                       options={UNITS}
-                      onChange={v => update(index, { unit: v || undefined })}
+                      onChange={v => {
+                        update(index, { unit: v || undefined });
+                        if (v !== (event.unit ?? '')) showFeedback('Unit updated.', 'info');
+                      }}
                       placeholder='?'
                     />
                   </div>
@@ -181,32 +223,42 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
                 </button>
               </div>
               {isAdding === 'arg' && (
-                <div className='flex items-center gap-1.5 mt-1.5'>
-                  <input
-                    type='text'
-                    value={newDefaultValue}
-                    onChange={e => setNewDefaultValue(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='default'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <input
-                    type='text'
-                    value={newMin}
-                    onChange={e => setNewMin(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='min'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <input
-                    type='text'
-                    value={newMax}
-                    onChange={e => setNewMax(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    placeholder='max'
-                    className={`min-w-0 flex-1 ${inputClass}`}
-                  />
-                  <div className='flex-1'>
+                <div className='flex items-start gap-1.5 mt-1.5'>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Default</label>
+                    <input
+                      type='text'
+                      value={newDefaultValue}
+                      onChange={e => setNewDefaultValue(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='default'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Min</label>
+                    <input
+                      type='text'
+                      value={newMin}
+                      onChange={e => setNewMin(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='min'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Max</label>
+                    <input
+                      type='text'
+                      value={newMax}
+                      onChange={e => setNewMax(e.target.value)}
+                      onKeyDown={onKeyDown}
+                      placeholder='max'
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0'>
+                    <label className='text-[10px] text-muted block mb-0.5'>Unit</label>
                     <SearchableSelect
                       value={newUnit}
                       options={UNITS}

@@ -7,7 +7,6 @@ import { BADGE_COLORS, getVariableType } from '@/lib';
 import { Panel } from '@/components/ui/primitives/panel';
 import {
   parseAfterSyntax,
-  isTimeEventName,
   generateTimeEventName,
   findTimeEventToken,
   resolveTimeEventDisplay,
@@ -21,7 +20,7 @@ const MAX_TEXTAREA_HEIGHT = 200;
 
 export interface TransitionApplyArgs {
   newValue: string;
-  editingField: 'event' | 'cond';
+  editingField: 'event' | 'cond' | 'none';
   delay: { type: 'delay' | 'delayexpr'; value: string } | null;
   cancelSendId: string | null;
   originalEventName: string | undefined;
@@ -76,22 +75,23 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     );
   })();
 
-  // Pure single time-transition (no comma) keeps the dedicated "after X" flow (initSelectionMode
-  // 'undecided'); a merged list containing a time-event token alongside other events is edited
-  // as a plain comma event list instead, since its raw text already shows "after X, other-event".
+  // Explicit switch, always one of the two — no more inferred "undecided" state. A transition
+  // with @_cond set starts on Condition, one with @_event set (including time-transitions)
+  // starts on Event, and a fresh/eventless transition defaults to Event.
   const initSelectionMode = (() => {
-    if (event && !event.includes(',') && isTimeEventName(event)) return 'undecided' as const;
-    if (event) return 'event' as const;
     if (cond) return 'cond' as const;
-    return 'undecided' as const;
+    return 'event' as const;
   })();
 
-  const [selectionMode, setSelectionMode] = React.useState<'undecided' | 'event' | 'cond'>(initSelectionMode);
+  const [selectionMode, setSelectionMode] = React.useState<'event' | 'cond'>(initSelectionMode);
   const [applyError, setApplyError] = React.useState<string | null>(null);
   const [rawValue, setRawValue] = React.useState(initRawValue);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [isOpen, setIsOpen] = React.useState(false);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Delays onClose() after a successful apply so the panel doesn't vanish on the same tick as
+  // the keypress — gives the confirmation toast a moment to register before the panel closes.
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Remembers the auto-generated _t_ event name after the first save so rapid double-clicks
   // reuse the same name instead of incrementing the index again before the prop updates.
   const appliedTimeEventRef = React.useRef<string | null>(null);
@@ -107,12 +107,14 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   React.useEffect(() => {
     return () => {
       if (blurTimerRef.current !== null) clearTimeout(blurTimerRef.current);
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
     };
   }, []);
 
   const channels = useHostAPIStore((state) => state.channels);
   const channelMappings = useHostAPIStore((state) => state.channelMappings);
   const events = useHostAPIStore((state) => state.events);
+  const showFeedback = useHostAPIStore((state) => state.showFeedback);
 
   // ── main search suggestions ──
   const suggestions: Suggestion[] = React.useMemo(() => {
@@ -120,9 +122,6 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     const channelSet = new Set(channels.map((c) => c.name));
     const scxmlRefSet = new Set(channelMappings.map((m) => m.scxmlRef));
     const eventNames = events.map((e) => e.name);
-    const eventSet = new Set(eventNames);
-    const kindOf = (item: string): Suggestion['kind'] =>
-      channelSet.has(item) ? 'channel' : scxmlRefSet.has(item) ? 'mapped-channel' : eventSet.has(item) ? 'event' : 'variable';
 
     // Suppress suggestions when user is typing an "after X" time transition
     if (rawValue.trimStart().startsWith('after')) return [];
@@ -137,13 +136,6 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       return eventNames
         .filter((n) => n.toLowerCase().includes(prefix))
         .map((n) => ({ label: n, kind: 'event' as const }));
-    }
-
-    if (selectionMode === 'undecided') {
-      const allNames = Array.from(new Set([...Array.from(vars), ...channels.map((c) => c.name), ...channelMappings.map((m) => m.scxmlRef), ...eventNames]));
-      const filtered = allNames.filter((i) => i.toLowerCase().includes(rawValue.toLowerCase()));
-      if (filtered.length === 0 && rawValue.startsWith('this_')) return [{ label: rawValue, kind: 'new-channel' }];
-      return filtered.map((i) => ({ label: i, kind: kindOf(i) }));
     }
 
     // cond mode
@@ -182,23 +174,40 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   };
 
   const acceptSuggestion = (s: Suggestion) => {
-    if (selectionMode === 'undecided') {
-      setSelectionMode(s.kind === 'event' ? 'event' : 'cond');
-      setRawValue(s.label);
-    } else if (selectionMode === 'cond') {
+    if (selectionMode === 'cond') {
       setRawValue(buildCondValue(s.label));
-    } else if (selectionMode === 'event') {
-      setRawValue(buildEventValue(s.label));
     } else {
-      setRawValue(s.label);
+      setRawValue(buildEventValue(s.label));
     }
     setIsOpen(false);
     setActiveIndex(-1);
   };
 
+  const reportApplyResult = (result: TransitionApplyResult) => {
+    if (result && result.blocked) {
+      setApplyError(result.reason ?? 'This change is not allowed.');
+      return;
+    }
+    setApplyError(null);
+    showFeedback('Transition updated.', 'info');
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => onClose(), 400);
+  };
+
   const handleApply = () => {
     const trimmed = rawValue.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      const result = onApply({
+        newValue: '',
+        editingField: 'none',
+        delay: null,
+        cancelSendId: null,
+        originalEventName: event,
+        originalCancelSendId: initCancelId || undefined,
+      });
+      reportApplyResult(result);
+      return;
+    }
 
     const timeParsed = parseAfterSyntax(trimmed);
 
@@ -217,7 +226,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
         originalEventName: event,
         originalCancelSendId: initCancelId || undefined,
       });
-      setApplyError(timeResult && timeResult.blocked ? timeResult.reason ?? 'This change is not allowed.' : null);
+      reportApplyResult(timeResult);
       return;
     }
 
@@ -244,7 +253,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
         originalEventName: event,
         originalCancelSendId: initCancelId || undefined,
       });
-      setApplyError(timeResult && timeResult.blocked ? timeResult.reason ?? 'This change is not allowed.' : null);
+      reportApplyResult(timeResult);
       return;
     }
 
@@ -253,26 +262,22 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       return;
     }
 
-    // Regular event or condition
-    const resolvedField: 'event' | 'cond' =
-      selectionMode !== 'undecided' ? editingField :
-      events.some((e) => e.name === trimmed) ? 'event' : 'cond';
-
+    // Regular event or condition — always driven by the explicit switch, never guessed.
     const isNewChannel = suggestions.length === 1 && suggestions[0].kind === 'new-channel';
     if (isNewChannel && onNewChannel) {
-      onNewChannel(trimmed, source, target, event, cond, resolvedField, edgeId);
+      onNewChannel(trimmed, source, target, event, cond, editingField, edgeId);
       return;
     }
 
     const result = onApply({
       newValue: trimmed,
-      editingField: resolvedField,
+      editingField,
       delay: null,
       cancelSendId: null,
       originalEventName: event,
       originalCancelSendId: initCancelId || undefined,
     });
-    setApplyError(result && result.blocked ? result.reason ?? 'This change is not allowed.' : null);
+    reportApplyResult(result);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -299,7 +304,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     if (!isOpen || rawValue.length === 0) return null;
     // Guide user if they've started typing "after" but the format isn't complete yet
     if (rawValue.trimStart().startsWith('after') && parseAfterSyntax(rawValue.trim()) === null) {
-      return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s';
+      return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s  ·  after (expression) ms';
     }
     if (selectionMode === 'event' || suggestions.length > 0) return null;
     return 'No match — type "this_" to create a new channel, or "after Xs" for a time transition';
@@ -364,6 +369,30 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       </div>
 
       <div className='px-3 py-2.5'>
+        <div role='tablist' className='flex mb-1.5 w-fit rounded-md border border-default overflow-hidden'>
+          <button
+            role='tab'
+            aria-selected={selectionMode === 'event'}
+            aria-label='Event'
+            onClick={() => setSelectionMode('event')}
+            className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+              selectionMode === 'event' ? 'bg-primary text-primary-fg' : 'text-muted hover:text-default'
+            }`}
+          >
+            Event
+          </button>
+          <button
+            role='tab'
+            aria-selected={selectionMode === 'cond'}
+            aria-label='Condition'
+            onClick={() => setSelectionMode('cond')}
+            className={`px-2.5 py-1 text-xs font-medium border-l border-default transition-colors ${
+              selectionMode === 'cond' ? 'bg-primary text-primary-fg' : 'text-muted hover:text-default'
+            }`}
+          >
+            Condition
+          </button>
+        </div>
         <div className='relative'>
           <textarea
             ref={textareaRef}
@@ -372,7 +401,6 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
             onChange={(e) => {
               const v = e.target.value;
               setRawValue(v);
-              if (v === '') setSelectionMode('undecided');
               setIsOpen(true);
               setActiveIndex(-1);
               setApplyError(null);
@@ -380,7 +408,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
             onFocus={() => setIsOpen(true)}
             onBlur={() => { blurTimerRef.current = setTimeout(() => setIsOpen(false), 100); }}
             onKeyDown={handleKeyDown}
-            placeholder={selectionMode === 'event' ? 'Enter event' : selectionMode === 'cond' ? 'Enter condition' : 'Search events, channels, or type "after Xs"...'}
+            placeholder={selectionMode === 'event' ? 'Enter event, or "after Xs"...' : 'Enter condition'}
             className='w-full px-3 py-1.5 text-sm text-default bg-elevated border border-default rounded-md placeholder:text-dimmed focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none overflow-y-auto scrollbar-thin'
           />
           {showDropdown && (

@@ -13,9 +13,9 @@ describe('classifyTransitionSlot', () => {
     expect(classifyTransitionSlot(t)).toBe('event');
   });
 
-  it('classifies a bare transition with neither event nor cond as the event slot', () => {
+  it('classifies a bare transition with neither event nor cond as the always slot', () => {
     const t: TransitionElement = { '@_target': 'B' };
-    expect(classifyTransitionSlot(t)).toBe('event');
+    expect(classifyTransitionSlot(t)).toBe('always');
   });
 
   it('classifies a cond-only transition as the cond slot', () => {
@@ -36,6 +36,16 @@ describe('classifyTransitionSlot', () => {
   it('treats a whitespace-only cond as absent (falls into event slot)', () => {
     const t: TransitionElement = { '@_event': 'click', '@_cond': '  ', '@_target': 'B' };
     expect(classifyTransitionSlot(t)).toBe('event');
+  });
+
+  it('classifies an auto-generated timer event as the timer slot, distinct from the event slot', () => {
+    const t: TransitionElement = { '@_event': 'Idle_t_0_timeEvent_0', '@_target': 'B' };
+    expect(classifyTransitionSlot(t)).toBe('timer');
+  });
+
+  it('classifies a comma-merged list containing a timer token as the timer slot', () => {
+    const t: TransitionElement = { '@_event': 'click, Idle_t_0_timeEvent_0', '@_target': 'B' };
+    expect(classifyTransitionSlot(t)).toBe('timer');
   });
 });
 
@@ -73,16 +83,85 @@ describe('findTransitionSlotConflict', () => {
     expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
   });
 
+  it('blocks a second always-slot (eventless) transition when one already exists', () => {
+    const existing: TransitionElement = { '@_target': 'B' };
+    const candidate: TransitionElement = { '@_target': 'B' };
+    const result = findTransitionSlotConflict([existing], candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one eventless transition/i);
+  });
+
+  it('does not block an always-slot candidate when only event- and cond-slot transitions exist', () => {
+    const existing: TransitionElement[] = [
+      { '@_event': 'e1', '@_target': 'B' },
+      { '@_cond': 'x>1', '@_target': 'B' },
+    ];
+    const candidate: TransitionElement = { '@_target': 'B' };
+    expect(findTransitionSlotConflict(existing, candidate)).toEqual({ blocked: false });
+  });
+
+  it('does not block an event-slot candidate when only an always-slot (eventless) transition exists', () => {
+    const existing: TransitionElement = { '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'e1', '@_target': 'B' };
+    expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
+  });
+
   it('blocks a candidate with both event and cond, even with no existing transitions', () => {
     const candidate: TransitionElement = { '@_event': 'e1', '@_cond': 'x>1', '@_target': 'B' };
     const result = findTransitionSlotConflict([], candidate);
     expect(result.blocked).toBe(true);
     expect(result.reason).toMatch(/both an event and a condition/i);
   });
+
+  it('blocks a second timer-slot transition when one already exists', () => {
+    const existing: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'A_t_1_timeEvent_1', '@_target': 'B' };
+    const result = findTransitionSlotConflict([existing], candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one timer-based transition/i);
+  });
+
+  it('does not block a timer-slot candidate when only a plain event-slot transition exists', () => {
+    const existing: TransitionElement = { '@_event': 'e1', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
+  });
+
+  it('does not block an event-slot candidate when only a timer-slot transition exists', () => {
+    const existing: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    const candidate: TransitionElement = { '@_event': 'e1', '@_target': 'B' };
+    expect(findTransitionSlotConflict([existing], candidate)).toEqual({ blocked: false });
+  });
+
+  it('does not block a timer-slot candidate when only cond- and always-slot transitions exist', () => {
+    const existing: TransitionElement[] = [
+      { '@_cond': 'x>1', '@_target': 'B' },
+      { '@_target': 'B' },
+    ];
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    expect(findTransitionSlotConflict(existing, candidate)).toEqual({ blocked: false });
+  });
 });
 
 describe('checkNewConnectionSlotConflict', () => {
-  it('blocks a new connection when an event-slot transition to the same target already exists', () => {
+  // A freshly-drawn diagram connection is now constructed as a bare/eventless candidate
+  // (see onConnect in visual-diagram.tsx), so it only ever conflicts with an existing
+  // eventless transition to the same target — event- and cond-slot transitions coexist.
+  it('blocks a new connection when an eventless transition to the same target already exists', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          { '@_id': 'A', transition: { '@_target': 'B' } },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    const result = checkNewConnectionSlotConflict(doc, 'A', 'B');
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one eventless transition/i);
+  });
+
+  it('does not block a new connection when only an event-slot transition to the target exists', () => {
     const doc: SCXMLDocument = {
       scxml: {
         state: [
@@ -91,9 +170,7 @@ describe('checkNewConnectionSlotConflict', () => {
         ],
       } as any,
     };
-    const result = checkNewConnectionSlotConflict(doc, 'A', 'B');
-    expect(result.blocked).toBe(true);
-    expect(result.reason).toMatch(/only one event-based transition/i);
+    expect(checkNewConnectionSlotConflict(doc, 'A', 'B')).toEqual({ blocked: false });
   });
 
   it('does not block a new connection when only a cond-slot transition to the target exists', () => {
@@ -201,17 +278,102 @@ describe('checkTransitionEditSlotConflict', () => {
     const result = checkTransitionEditSlotConflict(doc, 'A', undefined, candidate);
     expect(result.blocked).toBe(true);
   });
+
+  it('blocks clearing a transition to eventless when a sibling is already eventless', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_event': 'e1', '@_target': 'B' },
+              { '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    // Clearing transition index 0 (currently event-slot) to eventless collides with index 1 (already eventless).
+    const candidate: TransitionElement = { '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one eventless transition/i);
+  });
+
+  it('does not block clearing a transition to eventless when siblings are event/cond-slot', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_event': 'e1', '@_target': 'B' },
+              { '@_cond': 'x>1', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    const candidate: TransitionElement = { '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result).toEqual({ blocked: false });
+  });
+
+  it('blocks switching a transition into a timer slot already occupied by a sibling', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_event': 'e1', '@_target': 'B' },
+              { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    // Editing transition index 0 (currently a plain event) into a timer event collides
+    // with index 1's existing timer-slot transition.
+    const candidate: TransitionElement = { '@_event': 'A_t_1_timeEvent_1', '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/only one timer-based transition/i);
+  });
+
+  it('does not block switching a transition into a timer slot when the sibling is a plain event-slot transition', () => {
+    const doc: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'A',
+            transition: [
+              { '@_cond': 'x>1', '@_target': 'B' },
+              { '@_event': 'e1', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    };
+    const candidate: TransitionElement = { '@_event': 'A_t_0_timeEvent_0', '@_target': 'B' };
+    const result = checkTransitionEditSlotConflict(doc, 'A', 0, candidate);
+    expect(result).toEqual({ blocked: false });
+  });
 });
 
 describe('slot conflict checks correctly reach into <parallel> regions', () => {
-  it('checkNewConnectionSlotConflict blocks a duplicate event-slot connection from a state inside a <parallel> region', () => {
+  it('checkNewConnectionSlotConflict blocks a duplicate eventless connection from a state inside a <parallel> region', () => {
     const doc: SCXMLDocument = {
       scxml: {
         parallel: [
           {
             '@_id': 'P',
             state: [
-              { '@_id': 'A', transition: { '@_event': 'e1', '@_target': 'B' } },
+              { '@_id': 'A', transition: { '@_target': 'B' } },
               { '@_id': 'B' },
             ],
           },
@@ -220,7 +382,7 @@ describe('slot conflict checks correctly reach into <parallel> regions', () => {
     };
     const result = checkNewConnectionSlotConflict(doc, 'A', 'B');
     expect(result.blocked).toBe(true);
-    expect(result.reason).toMatch(/only one event-based transition/i);
+    expect(result.reason).toMatch(/only one eventless transition/i);
   });
 
   it('checkTransitionEditSlotConflict blocks a sibling-slot collision for a source state inside a <parallel> region', () => {
@@ -270,7 +432,7 @@ describe('slot conflict checks correctly reach into <parallel> regions', () => {
               {
                 '@_id': 'P',
                 state: [
-                  { '@_id': 'A', transition: { '@_event': 'e1', '@_target': 'B' } },
+                  { '@_id': 'A', transition: { '@_target': 'B' } },
                   { '@_id': 'B' },
                 ],
               },

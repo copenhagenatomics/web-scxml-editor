@@ -5,8 +5,8 @@ import { classifyTransitionSlot } from '@/lib/utils/transition-slot-rules';
 
 /**
  * Flags, per (source state, target, type) family, any transition with both event and
- * cond set (always invalid), and any slot ('event' or 'cond') occupied by more than one
- * transition. This is the code-editor-visible counterpart to the live blocking already
+ * cond set (always invalid), and any slot ('event', 'timer', 'cond', or 'always'/eventless)
+ * occupied by more than one transition. This is the code-editor-visible counterpart to the live blocking already
  * done in the diagram connect gesture and the transition panel — it only ever fires on
  * violations introduced after load, since legacy duplicates are silently merged away by
  * transition-merge-utils.ts before this validator ever sees the content.
@@ -39,7 +39,7 @@ export function validateTransitionSlotConflicts(
       }
 
       for (const group of groups.values()) {
-        const bySlot = new Map<'event' | 'cond', TransitionElement[]>();
+        const bySlot = new Map<'event' | 'timer' | 'cond' | 'always', TransitionElement[]>();
 
         for (const t of group) {
           const slot = classifyTransitionSlot(t);
@@ -82,7 +82,11 @@ export function validateTransitionSlotConflicts(
               message:
                 slot === 'event'
                   ? `Only one event-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`
-                  : `Only one condition-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`,
+                  : slot === 'timer'
+                    ? `Only one timer-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`
+                    : slot === 'cond'
+                      ? `Only one condition-based transition is allowed from '${sourceId}' to '${t['@_target']}'.`
+                      : `Only one eventless transition is allowed from '${sourceId}' to '${t['@_target']}'.`,
               severity: 'error',
               line: position?.line,
               column: position?.column,

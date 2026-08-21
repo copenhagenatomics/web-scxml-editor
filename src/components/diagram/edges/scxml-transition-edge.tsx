@@ -32,6 +32,8 @@ import {
   type HandleSide,
   type Rect,
 } from '@/lib/layout/edge-obstacle-utils';
+import { getTransitionColor } from '@/lib/consts/transition-colors';
+import { isNoteId } from '@/types/visual-metadata';
 
 export interface SCXMLTransitionEdgeData {
   event?: string;
@@ -129,7 +131,8 @@ const WaypointHandle: React.FC<{
   onDragEnd?: (edgeId: string, index: number) => void;
   onDelete?: (edgeId: string, index: number) => void;
   condition?: string;
-}> = ({ edgeId, index, x, y, onDrag, onDragEnd, onDelete, condition }) => {
+  event?: string;
+}> = ({ edgeId, index, x, y, onDrag, onDragEnd, onDelete, condition, event }) => {
   const [isDragging, setIsDragging] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const { screenToFlowPosition } = useReactFlow();
@@ -167,7 +170,7 @@ const WaypointHandle: React.FC<{
     e.preventDefault();
     onDelete?.(edgeId, index);
   };
-  const waypointColor = condition ? '#ef4444' : '#3b82f6';
+  const waypointColor = getTransitionColor(condition, event);
   return (
     <g>
       {/* Larger invisible hit area for easier interaction */}
@@ -179,7 +182,7 @@ const WaypointHandle: React.FC<{
         style={{
           cursor: isDragging ? 'grabbing' : 'grab',
           pointerEvents: 'all',
-          // stroke: condition ? '#ef4444' : '#3b82f6',
+          // stroke: getTransitionColor(condition, event),
         }}
         onMouseDown={handleMouseDown}
         onMouseEnter={() => setIsHovered(true)}
@@ -271,8 +274,13 @@ export const SCXMLTransitionEdge: React.FC<
 
     // Only nodes at the edge's own hierarchy level count as obstacles —
     // including an enclosing container would wall off routing inside it.
+    // Notes are annotations, not diagram structure, so edges must ignore
+    // them entirely rather than routing around them.
     const siblings = nodes.filter(
-      (n) => n.parentNode === sourceNode.parentNode && !n.hidden
+      (n) =>
+        n.parentNode === sourceNode.parentNode &&
+        !n.hidden &&
+        !isNoteId(n.id)
     );
 
     const nodeRect = (n: Node): Rect | null => {
@@ -377,11 +385,7 @@ export const SCXMLTransitionEdge: React.FC<
   }
 
   // Determine edge styling based on transition properties
-  const getEdgeColor = () => {
-    if (selected) return condition ? '#ef4444' : '#3b82f6'; // Keep color based on type when selected
-    if (condition) return '#ef4444'; // red-500 (conditional transitions)
-    return '#3b82f6'; // blue-500 (non-conditional/event transitions)
-  };
+  const getEdgeColor = () => getTransitionColor(condition, event); // Keep color based on type, selected or not
 
   const getStrokeStyle = () => {
     if (selected) return 'solid'; // Solid when selected
@@ -472,6 +476,7 @@ export const SCXMLTransitionEdge: React.FC<
               onDragEnd={onWaypointDragEnd}
               onDelete={onWaypointDelete}
               condition={condition}
+              event={event}
             />
           ))}
         </g>
@@ -512,7 +517,7 @@ export const SCXMLTransitionEdge: React.FC<
                   width: 'fit-content',
                   maxWidth: '100%',
                   zIndex: 10000,
-                backgroundColor: condition ? '#ef4444' : '#3b82f6', // Red for conditional, blue for non-conditional
+                backgroundColor: getTransitionColor(condition, event),
                   color: '#fff',
                   opacity: 0.95,
                   cursor: 'pointer',
