@@ -31,8 +31,10 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
   const update = (index: number, patch: Partial<EventEntry>) =>
     setEvents(events.map((e, i) => i === index ? { ...e, ...patch } : e));
 
-  const handleDelete = (index: number) =>
+  const handleDelete = (index: number) => {
     setEvents(events.filter((_, i) => i !== index));
+    showFeedback('User action deleted.', 'info');
+  };
 
   const handleConfirmAdd = () => {
     const trimmed = newName.trim();
@@ -49,6 +51,7 @@ export function EventsPanel({ isVisible, onClose }: EventsPanelProps) {
       hidden: newHidden || undefined,
     }]);
     resetForm();
+    showFeedback('User action added.', 'info');
   };
 
   const parseLimit = (s: string) => { const n = parseFloat(s.trim()); return isNaN(n) ? undefined : n; };
