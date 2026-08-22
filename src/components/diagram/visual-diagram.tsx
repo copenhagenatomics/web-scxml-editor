@@ -782,6 +782,39 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [scxmlContent, onSCXMLChange]
   );
 
+  const handleNewChannelForStateActions = React.useCallback(
+    (
+      channelName: string,
+      apply:
+        | { kind: 'actions'; entryActions: string[]; exitActions: string[] }
+        | { kind: 'reactions'; actions: Array<{ event: string; location: string; expr: string; type: 'internal' | 'external' }> }
+    ) => {
+      if (!onSCXMLChange || !scxmlContent || !selectedStateForActions) return;
+      try {
+        const { AddDataCommand, UpdateActionsCommand, UpdateInternalEventsCommand } = require('@/lib/commands');
+
+        // Step 1: insert the data element for the new channel
+        const addResult = new AddDataCommand(channelName).execute(scxmlContent);
+        const base = addResult.success ? addResult.newContent : scxmlContent;
+
+        // Step 2: apply the actions/reactions change on the already-patched content
+        const stateId = selectedStateForActions.id;
+        const result = apply.kind === 'actions'
+          ? new UpdateActionsCommand(stateId, apply.entryActions, apply.exitActions).execute(base)
+          : new UpdateInternalEventsCommand(stateId, apply.actions).execute(base);
+
+        if (result.success) {
+          onSCXMLChange(result.newContent, 'structure');
+        } else {
+          console.error('Failed to update state actions after adding channel:', result.error);
+        }
+      } catch (error) {
+        console.error('Failed to add channel:', error);
+      }
+    },
+    [scxmlContent, onSCXMLChange, selectedStateForActions]
+  );
+
   const handleEdgeMouseEnter = useCallback(
     (event: React.MouseEvent, edge: Edge) => {
       if (edge.data?.fullLabel) {
@@ -2862,6 +2895,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             handleNodeInternalEventsChange(selectedStateForActions.id, actions);
           }
         }}
+        onNewChannel={handleNewChannelForStateActions}
       />
     </div>
   );

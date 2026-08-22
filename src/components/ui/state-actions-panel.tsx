@@ -33,7 +33,7 @@ interface InternalEventActionRow {
 
 type Tab = 'onentry' | 'onexit' | 'reactions';
 type FormMode = 'idle' | 'editing' | 'adding';
-type Suggestion = { label: string; kind: 'channel' | 'variable' };
+type Suggestion = { label: string; kind: 'channel' | 'variable' | 'new-channel' };
 
 interface StateActionsPanelProps {
   isVisible: boolean;
@@ -49,6 +49,12 @@ interface StateActionsPanelProps {
   onToggleInitial: () => void;
   onApply: (entryActions: string[], exitActions: string[]) => void;
   onApplyReactions: (actions: InternalEventActionRow[]) => void;
+  onNewChannel?: (
+    channelName: string,
+    apply:
+      | { kind: 'actions'; entryActions: string[]; exitActions: string[] }
+      | { kind: 'reactions'; actions: InternalEventActionRow[] }
+  ) => void;
 }
 
 function toStrings(rows: ActionRow[]): string[] {
@@ -156,6 +162,7 @@ export function StateActionsPanel({
   onToggleInitial,
   onApply,
   onApplyReactions,
+  onNewChannel,
 }: StateActionsPanelProps) {
   const [activeTab, setActiveTab] = React.useState<Tab>('onentry');
   const [localEntry, setLocalEntry] = React.useState<WithRowId<ActionRow>[]>(() => withRowIds(initialEntry));
@@ -174,6 +181,7 @@ export function StateActionsPanel({
   const [isOpen, setIsOpen] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const formRef = React.useRef<HTMLDivElement>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const channels = useHostAPIStore((s) => s.channels);
@@ -222,7 +230,11 @@ export function StateActionsPanel({
     const chans = channels
       .filter((c) => c.name.toLowerCase().includes(prefix))
       .map((c): Suggestion => ({ label: c.name, kind: 'channel' }));
-    return [...vars, ...chans];
+    const combined = [...vars, ...chans];
+    if (combined.length === 0 && formLocation.startsWith('this_')) {
+      return [{ label: formLocation, kind: 'new-channel' }];
+    }
+    return combined;
   }, [formLocation, dataVars, channels, formMode]);
 
   const showSuggestions = isOpen && suggestions.length > 0;
@@ -235,6 +247,7 @@ export function StateActionsPanel({
 
   const handleApply = () => {
     if (formMode === 'idle') return;
+    const isNewChannel = suggestions.length === 1 && suggestions[0].kind === 'new-channel';
 
     if (activeTab === 'reactions') {
       const rowId = formMode === 'editing' && editingRowIndex !== null
@@ -252,7 +265,11 @@ export function StateActionsPanel({
           ? [...localReactions, newRow]
           : localReactions.map((r, i) => (i === editingRowIndex ? newRow : r));
       setLocalReactions(updatedList);
-      onApplyReactions(updatedList);
+      if (isNewChannel && onNewChannel) {
+        onNewChannel(formLocation, { kind: 'reactions', actions: updatedList });
+      } else {
+        onApplyReactions(updatedList);
+      }
       resetForm();
       showFeedback('Reaction saved.', 'info');
       return;
@@ -269,10 +286,18 @@ export function StateActionsPanel({
 
     if (activeTab === 'onentry') {
       setLocalEntry(updatedList);
-      onApply(toStrings(updatedList), toStrings(localExit));
+      if (isNewChannel && onNewChannel) {
+        onNewChannel(formLocation, { kind: 'actions', entryActions: toStrings(updatedList), exitActions: toStrings(localExit) });
+      } else {
+        onApply(toStrings(updatedList), toStrings(localExit));
+      }
     } else {
       setLocalExit(updatedList);
-      onApply(toStrings(localEntry), toStrings(updatedList));
+      if (isNewChannel && onNewChannel) {
+        onNewChannel(formLocation, { kind: 'actions', entryActions: toStrings(localEntry), exitActions: toStrings(updatedList) });
+      } else {
+        onApply(toStrings(localEntry), toStrings(updatedList));
+      }
     }
 
     resetForm();
@@ -364,9 +389,9 @@ export function StateActionsPanel({
         setActiveIndex((p) => (p > 0 ? p - 1 : suggestions.length - 1));
         return;
       }
-      if ((e.key === 'Tab' || e.key === 'Enter') && activeIndex >= 0) {
+      if (e.key === 'Tab' || e.key === 'Enter') {
         e.preventDefault();
-        selectSuggestion(suggestions[activeIndex]);
+        selectSuggestion(suggestions[activeIndex >= 0 ? activeIndex : 0]);
         return;
       }
       if (e.key === 'Escape') {
@@ -379,13 +404,23 @@ export function StateActionsPanel({
     if (e.key === 'Escape') resetForm();
   };
 
+  // Discard an in-progress add/edit when the user clicks anywhere in the
+  // panel outside the inline form itself (e.g. another tab's blank area,
+  // the sub-header, or empty list space) — mirrors clicking Discard.
+  const handlePanelMouseDown = (e: React.MouseEvent) => {
+    if (formMode === 'idle') return;
+    if (formRef.current && !formRef.current.contains(e.target as Node)) {
+      resetForm();
+    }
+  };
+
   const isApplyDisabled =
     (activeTab === 'reactions' && (!formEvent || !formLocation || !formExpr)) ||
     (activeTab !== 'reactions' && (!formLocation || !formExpr));
 
   // Inline form shared between expanded rows and the new-action form
   const inlineForm = (
-    <div className='bg-primary-muted rounded p-2 space-y-1.5'>
+    <div ref={formRef} className='bg-primary-muted rounded p-2 space-y-1.5'>
       {/* reactions: event field + type toggle */}
       {activeTab === 'reactions' && (
         <>
@@ -451,25 +486,30 @@ export function StateActionsPanel({
                 key={s.label}
                 onMouseDown={() => selectSuggestion(s)}
                 className={`px-2 py-1 text-xs cursor-pointer flex items-center gap-2 ${
-                  i === activeIndex
-                    ? 'bg-primary text-primary-fg'
-                    : 'hover:bg-primary-muted text-default'
+                  s.kind === 'new-channel'
+                    ? 'bg-amber-50 text-amber-800 border-l-2 border-amber-400'
+                    : i === activeIndex
+                      ? 'bg-primary text-primary-fg'
+                      : 'hover:bg-primary-muted text-default'
                 }`}
               >
-                <span
-                  className='text-xs px-1 rounded font-mono text-black'
-                  style={{
-                    backgroundColor: BADGE_COLORS[
-                      s.kind === 'variable'
-                        ? getVariableType(s.label)
-                        : channels.find((c) => c.name === s.label)?.type ?? EVENT_FALLBACK_VALUE
-                    ],
-                  }}
-                >
-                  {s.kind === 'variable'
-                    ? getVariableType(s.label)
-                    : channels.find((c) => c.name === s.label)?.type ?? EVENT_FALLBACK_VALUE}
-                </span>
+                {s.kind === 'new-channel' && <span className='text-xs text-amber-600'>(new channel)</span>}
+                {s.kind !== 'new-channel' && (
+                  <span
+                    className='text-xs px-1 rounded font-mono text-black'
+                    style={{
+                      backgroundColor: BADGE_COLORS[
+                        s.kind === 'channel'
+                          ? (channels.find((c) => c.name === s.label)?.type ?? EVENT_FALLBACK_VALUE)
+                          : getVariableType(s.label)
+                      ],
+                    }}
+                  >
+                    {s.kind === 'channel'
+                      ? (channels.find((c) => c.name === s.label)?.type ?? EVENT_FALLBACK_VALUE)
+                      : getVariableType(s.label)}
+                  </span>
+                )}
                 {s.label}
               </div>
             ))}
@@ -507,7 +547,7 @@ export function StateActionsPanel({
 
   return (
     <Panel title='State Actions' onClose={onClose} widthClass='w-[520px]'>
-      <div className='flex flex-col h-full'>
+      <div className='flex flex-col h-full' onMouseDown={handlePanelMouseDown}>
         {/* Sub-header: stateId + add button */}
         <div className='flex items-center justify-between px-3 py-1.5 border-b border-default bg-muted flex-shrink-0'>
           <p className='text-xs text-primary'>{stateId}</p>
