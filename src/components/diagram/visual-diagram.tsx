@@ -1971,21 +1971,25 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 offset = (edgeIndex - (parallelEdges.length - 1) / 2) * 60;
               }
 
-              // The path bows perpendicular to its connection axis, so the label needs
-              // to separate along that same perpendicular axis: a vertical connection
-              // (top/bottom handles) bows left/right, so the label must offset in X;
-              // a horizontal connection (left/right handles) bows up/down, so it must
-              // offset in Y.
-              const labelSpread = (edgeIndex - (parallelEdges.length - 1) / 2) * 25;
+              // The path bows perpendicular to its connection axis (left/right for a
+              // vertical top/bottom connection, up/down for a horizontal left/right
+              // connection). Horizontal connections separate their labels along that
+              // same bow axis (Y). Vertical connections bow left/right too, but two
+              // stacked nodes leave little horizontal room — an X spread isn't wide
+              // enough to clear a label pill, so those labels stack vertically (Y)
+              // instead, regardless of the path's own bow direction.
               const isVerticalConnection =
                 edge.sourceHandle === 'top' || edge.sourceHandle === 'bottom';
+              const labelSpread =
+                (edgeIndex - (parallelEdges.length - 1) / 2) *
+                (isVerticalConnection ? 24 : 25);
 
               pathOptions = {
                 offset,
                 borderRadius: 20 + edgeIndex * 10,
                 curvature: 0.25 + edgeIndex * 0.1,
-                labelOffsetX: isVerticalConnection ? labelSpread : 0,
-                labelOffsetY: isVerticalConnection ? 0 : labelSpread,
+                labelOffsetX: 0,
+                labelOffsetY: labelSpread,
               };
             }
 
