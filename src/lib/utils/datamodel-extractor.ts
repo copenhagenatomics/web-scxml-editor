@@ -256,3 +256,39 @@ export function extractUnresolvedChannelRefs(xmlContent: string, channels: strin
     .filter(r => !r.startsWith('this_') && !r.startsWith('conf_') && r !== 'data' && !channelSet.has(r))
     .sort();
 }
+
+/**
+ * Returns "main_"-prefixed variable names referenced anywhere in SCXML expressions
+ * (cond, expr, location, namelist, targetexpr, srcexpr), across every element - not just
+ * <data> declarations. Unlike extractUnresolvedChannelRefs, this does not exclude <data>'s
+ * own expr, since a reference to a "main_" variable there is just as non-portable.
+ */
+export function extractMainPrefixedExpressionRefs(xmlContent: string): string[] {
+  const refs = new Set<string>();
+
+  let parsed: unknown;
+  try {
+    parsed = xmlParser.parse(xmlContent);
+  } catch {
+    return [];
+  }
+
+  function walk(node: unknown): void {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (SCXML_EXPR_ATTRS.has(key) && typeof val === 'string') {
+        const stripped = val.replace(/_event\./g, '');
+        for (const v of ConditionEvaluator.extractVariables(stripped)) {
+          if (v.startsWith('main_')) refs.add(v);
+        }
+      } else if (key !== ':@') {
+        if (Array.isArray(val)) val.forEach(item => walk(item));
+        else walk(val);
+      }
+    }
+  }
+
+  walk(parsed);
+
+  return Array.from(refs).sort();
+}

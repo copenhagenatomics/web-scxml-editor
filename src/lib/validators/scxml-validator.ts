@@ -4,13 +4,16 @@ import {
   parseElementPositions,
   deduplicateErrors,
   findDataIdPositions,
+  findIdentifierPositions,
   parseStateIdList,
 } from './validator-utils';
+import { extractMainPrefixedExpressionRefs } from '@/lib/utils/datamodel-extractor';
 import {
   collectStateIds,
   buildStateHierarchy,
   findDuplicateIds,
   findDuplicateDataIds,
+  findMainPrefixedDataIds,
   validateCompoundStates,
   findReachableStates,
 } from './state-validator';
@@ -245,6 +248,27 @@ export class SCXMLValidator {
         severity: 'error',
         line: last?.line,
         column: last?.column,
+      });
+    });
+
+    // Warn about "main_" prefixed variables, which aren't portable across state machines.
+    // Covers both <data id="main_..."> declarations and references anywhere in expression
+    // attributes (cond, expr, location, namelist, targetexpr, srcexpr).
+    const declaredMainIds = findMainPrefixedDataIds(scxml);
+    const referencedMainIds = this.xmlContent
+      ? extractMainPrefixedExpressionRefs(this.xmlContent)
+      : [];
+    const mainPrefixedIds = Array.from(new Set([...declaredMainIds, ...referencedMainIds])).sort();
+    mainPrefixedIds.forEach((id) => {
+      const positions = this.xmlContent ? findIdentifierPositions(id, this.xmlContent) : [];
+      const suggestedId = `this_${id.slice('main_'.length)}`;
+      positions.forEach((position) => {
+        errors.push({
+          message: `Variable '${id}' uses the 'main_' prefix, which ties it to this specific state machine. If this state or action is copied into a different machine, '${id}' won't resolve there. Rename it to '${suggestedId}' so it stays portable.`,
+          severity: 'warning',
+          line: position.line,
+          column: position.column,
+        });
       });
     });
 
