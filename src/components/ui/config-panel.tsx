@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { extractConfigFields, type ConfigField } from '@/lib/utils/datamodel-extractor';
 import { mergeConfigEntries, type OverrideEntry } from '@/lib/utils/config-overrides';
 import type { ConfigValue } from '@/types/host-api';
@@ -79,10 +79,11 @@ interface ConfigPanelProps {
   onAddField: (name: string, defaultValue: string) => void;
   onFieldChange: (name: string, newDefaultValue: string) => void;
   onTypeChange: (name: string, newType: ConfigField['type']) => void;
+  onDeleteField: (name: string) => void;
   onEntriesChange?: (values: ConfigValue[]) => void;
 }
 
-export function ConfigPanel({ isVisible, onClose, scxmlContent, onAddField, onFieldChange, onTypeChange, onEntriesChange }: ConfigPanelProps) {
+export function ConfigPanel({ isVisible, onClose, scxmlContent, onAddField, onFieldChange, onTypeChange, onDeleteField, onEntriesChange }: ConfigPanelProps) {
   const configOverrides = useHostAPIStore(state => state.configOverrides);
   const configOverridesLoaded = useHostAPIStore(state => state.configOverridesLoaded);
   const [entries, setEntries] = useState<OverrideEntry[]>([]);
@@ -163,17 +164,27 @@ export function ConfigPanel({ isVisible, onClose, scxmlContent, onAddField, onFi
                 <span className='font-medium text-default text-xs truncate' title={field.name}>
                   {field.name}
                 </span>
-                <TypeSelect
-                  value={field.type}
-                  onChange={newType => {
-                    setEntries(prev =>
-                      prev.map(en =>
-                        en.field.name === field.name ? { ...en, field: { ...en.field, type: newType } } : en,
-                      ),
-                    );
-                    onTypeChange(field.name, newType);
-                  }}
-                />
+                <div className='flex items-center gap-1.5 shrink-0'>
+                  <TypeSelect
+                    value={field.type}
+                    onChange={newType => {
+                      setEntries(prev =>
+                        prev.map(en =>
+                          en.field.name === field.name ? { ...en, field: { ...en.field, type: newType } } : en,
+                        ),
+                      );
+                      onTypeChange(field.name, newType);
+                    }}
+                  />
+                  <button
+                    onClick={() => onDeleteField(field.name)}
+                    className='p-1 rounded text-dimmed hover:text-error hover:bg-muted transition-colors'
+                    title='Delete config value'
+                    aria-label='Delete config value'
+                  >
+                    <Trash2 className='h-3 w-3' />
+                  </button>
+                </div>
               </div>
               <div className='flex items-center gap-1.5'>
                 <span className='text-[10px] text-dimmed whitespace-nowrap shrink-0'>Data Model</span>
