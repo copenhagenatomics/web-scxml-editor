@@ -3,7 +3,8 @@
 import { BADGE_COLORS, EVENT_FALLBACK_VALUE, getVariableType } from '@/lib';
 import { extractDatamodelVariables } from '@/lib/utils/datamodel-extractor';
 import { useHostAPIStore } from '@/stores/host-api-store';
-import { GripVertical, Plus, X } from 'lucide-react';
+import { useActionClipboardStore } from '@/stores/action-clipboard-store';
+import { ClipboardPaste, Copy, GripVertical, Plus, X } from 'lucide-react';
 import React from 'react';
 import { Panel, inputClass, FormActions, PanelEmptyState } from '@/components/ui/primitives';
 import {
@@ -26,12 +27,12 @@ import {
 import { getCaretCoordinates } from '@/lib/utils/textarea-caret';
 import type { ChannelInfo, ChannelMapping } from '@/types/host-api';
 
-interface AssignActionRow { type: 'assign'; location: string; expr: string; }
+export interface AssignActionRow { type: 'assign'; location: string; expr: string; }
 interface SendActionRow   { type: 'send'; event: string; delayType: 'delay' | 'delayexpr'; delayValue: string; }
 interface CancelActionRow { type: 'cancel'; sendid: string; }
 type ActionRow = AssignActionRow | SendActionRow | CancelActionRow;
 
-interface InternalEventActionRow {
+export interface InternalEventActionRow {
   event: string;
   location: string;
   expr: string;
@@ -90,6 +91,7 @@ interface SortableActionRowProps {
   disabled: boolean;
   align?: 'center' | 'start';
   onClick: () => void;
+  onCopy?: () => void;
   onDelete: () => void;
   children: React.ReactNode;
 }
@@ -100,6 +102,7 @@ function SortableActionRow({
   disabled,
   align = 'center',
   onClick,
+  onCopy,
   onDelete,
   children,
 }: SortableActionRowProps) {
@@ -140,17 +143,35 @@ function SortableActionRow({
         </span>
         <div className='min-w-0 flex-1'>{children}</div>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        className={`ml-2 flex-shrink-0 text-dimmed hover:text-error opacity-0 group-hover:opacity-100 transition-opacity ${
+      <div
+        className={`ml-2 flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${
           align === 'start' ? 'mt-0.5' : ''
         }`}
       >
-        <X className='h-3 w-3' />
-      </button>
+        {onCopy && (
+          <button
+            type='button'
+            title='Copy action'
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy();
+            }}
+            className='text-dimmed hover:text-primary'
+          >
+            <Copy className='h-3 w-3' />
+          </button>
+        )}
+        <button
+          type='button'
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className='text-dimmed hover:text-error'
+        >
+          <X className='h-3 w-3' />
+        </button>
+      </div>
     </div>
   );
 }
@@ -283,6 +304,8 @@ export function StateActionsPanel({
   const channels = useHostAPIStore((s) => s.channels);
   const channelMappings = useHostAPIStore((s) => s.channelMappings);
   const showFeedback = useHostAPIStore((s) => s.showFeedback);
+  const copied = useActionClipboardStore((s) => s.copied);
+  const canPaste = copied !== null && copied.kind === (activeTab === 'reactions' ? 'reaction' : 'action');
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -485,6 +508,49 @@ export function StateActionsPanel({
       setLocalExit(updated);
       onApply(toStrings(localEntry), toStrings(updated));
     }
+  };
+
+  const handleCopyRow = (row: ActionRow) => {
+    if (row.type !== 'assign') return;
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: row.location, expr: row.expr },
+    });
+    showFeedback('Action copied.', 'info');
+  };
+
+  const handleCopyReaction = (row: InternalEventActionRow) => {
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: row.event, location: row.location, expr: row.expr, type: row.type },
+    });
+    showFeedback('Action copied.', 'info');
+  };
+
+  const handlePaste = () => {
+    if (!copied) return;
+
+    if (activeTab === 'reactions') {
+      if (copied.kind !== 'reaction') return;
+      const newRow: WithRowId<InternalEventActionRow> = { ...copied.row, _rowId: uuidv4() };
+      const updated = [...localReactions, newRow];
+      setLocalReactions(updated);
+      onApplyReactions(updated);
+      showFeedback('Action pasted.', 'info');
+      return;
+    }
+
+    if (copied.kind !== 'action') return;
+    const newRow: WithRowId<ActionRow> = { ...copied.row, _rowId: uuidv4() };
+    const updated = [...currentList, newRow];
+    if (activeTab === 'onentry') {
+      setLocalEntry(updated);
+      onApply(toStrings(updated), toStrings(localExit));
+    } else {
+      setLocalExit(updated);
+      onApply(toStrings(localEntry), toStrings(updated));
+    }
+    showFeedback('Action pasted.', 'info');
   };
 
   const handleActionsDragEnd = (event: DragEndEvent) => {
@@ -764,13 +830,27 @@ export function StateActionsPanel({
         {/* Sub-header: stateId + add button */}
         <div className='flex items-center justify-between px-3 py-1.5 border-b border-default bg-muted flex-shrink-0'>
           <p className='text-xs text-primary'>{stateId}</p>
-          <button
-            onClick={handleAddClick}
-            title='Add action'
-            className='text-dimmed hover:text-primary p-0.5 rounded hover:bg-primary-muted transition-colors'
-          >
-            <Plus className='h-4 w-4' />
-          </button>
+          <div className='flex items-center gap-1'>
+            <button
+              onClick={handlePaste}
+              disabled={!canPaste}
+              title={canPaste ? 'Paste action' : 'Copy an action first'}
+              className={`p-0.5 rounded transition-colors ${
+                canPaste
+                  ? 'text-dimmed hover:text-primary hover:bg-primary-muted'
+                  : 'text-dimmed opacity-30 cursor-not-allowed'
+              }`}
+            >
+              <ClipboardPaste className='h-4 w-4' />
+            </button>
+            <button
+              onClick={handleAddClick}
+              title='Add action'
+              className='text-dimmed hover:text-primary p-0.5 rounded hover:bg-primary-muted transition-colors'
+            >
+              <Plus className='h-4 w-4' />
+            </button>
+          </div>
         </div>
 
         {/* Initial State toggle — only markable for simple/compound states.
@@ -848,6 +928,7 @@ export function StateActionsPanel({
                       disabled={formMode !== 'idle'}
                       align='start'
                       onClick={() => handleReactionsRowClick(row, index)}
+                      onCopy={() => handleCopyReaction(row)}
                       onDelete={() => handleDelete(index)}
                     >
                       <div className='flex flex-col min-w-0'>
@@ -888,11 +969,13 @@ export function StateActionsPanel({
                       id={row._rowId}
                       index={index}
                       disabled={formMode !== 'idle'}
+                      align='start'
                       onClick={() => handleRowClick(row, index)}
+                      onCopy={row.type === 'assign' ? () => handleCopyRow(row) : undefined}
                       onDelete={() => handleDelete(index)}
                     >
                       {row.type === 'assign' && (
-                        <span className='font-mono truncate text-default'>
+                        <span className='block font-mono break-all text-default'>
                           <span className='text-primary'>{row.location || '…'}</span>
                           <span className='text-dimmed'> = </span>
                           <span className='text-default'>{row.expr || '…'}</span>
@@ -900,12 +983,12 @@ export function StateActionsPanel({
                       )}
                       {row.type === 'send' && (
                         <span className='font-mono text-default flex flex-col min-w-0'>
-                          <span className='text-primary truncate'>{row.event || '…'}</span>
+                          <span className='text-primary break-all'>{row.event || '…'}</span>
                           <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
                         </span>
                       )}
                       {row.type === 'cancel' && (
-                        <span className='font-mono truncate text-default'>
+                        <span className='block font-mono break-all text-default'>
                           <span className='text-dimmed'>cancel: </span>
                           <span className='text-primary'>{row.sendid || '…'}</span>
                         </span>

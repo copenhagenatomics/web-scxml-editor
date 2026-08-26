@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { StateActionsPanel } from './state-actions-panel';
 import { useHostAPIStore } from '@/stores/host-api-store';
+import { useActionClipboardStore } from '@/stores/action-clipboard-store';
 
 const noop = () => {};
 
@@ -446,5 +447,242 @@ describe('StateActionsPanel expression field mapped-channel suggestions', () => 
 
     expect(screen.getByText('aliasName')).toBeInTheDocument();
     expect(screen.getByText('→ physical_out_1')).toBeInTheDocument();
+  });
+});
+
+describe('StateActionsPanel copy action', () => {
+  afterEach(() => {
+    useActionClipboardStore.setState({ copied: null });
+    useHostAPIStore.setState({ feedbackQueue: [] });
+  });
+
+  it('copies an assign row to the clipboard store when its Copy button is clicked', () => {
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    fireEvent.click(screen.getByTitle('Copy action'));
+
+    expect(useActionClipboardStore.getState().copied).toEqual({
+      kind: 'action',
+      row: { type: 'assign', location: 'a', expr: '1' },
+    });
+  });
+
+  it('shows a confirmation toast after copying', () => {
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    fireEvent.click(screen.getByTitle('Copy action'));
+
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => f.message)).toContain('Action copied.');
+  });
+
+  it('clicking Copy does not open the row for editing', () => {
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    fireEvent.click(screen.getByTitle('Copy action'));
+
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+
+  it('renders one Copy button per assign row', () => {
+    renderPanel({
+      entryActions: [
+        { type: 'assign', location: 'a', expr: '1' },
+        { type: 'assign', location: 'b', expr: '2' },
+      ],
+    });
+
+    expect(screen.getAllByTitle('Copy action')).toHaveLength(2);
+  });
+
+  it('copies a reaction row to the clipboard store when its Copy button is clicked', () => {
+    renderPanel({
+      internalEventActions: [{ event: 'evtA', location: 'x', expr: '1', type: 'internal' }],
+    });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Copy action'));
+
+    expect(useActionClipboardStore.getState().copied).toEqual({
+      kind: 'reaction',
+      row: { event: 'evtA', location: 'x', expr: '1', type: 'internal' },
+    });
+  });
+});
+
+describe('StateActionsPanel paste action', () => {
+  afterEach(() => {
+    useActionClipboardStore.setState({ copied: null });
+    useHostAPIStore.setState({ feedbackQueue: [] });
+  });
+
+  it('disables Paste when nothing has been copied', () => {
+    renderPanel();
+
+    expect(screen.getByTitle('Copy an action first')).toBeDisabled();
+  });
+
+  it('pastes a copied assign action as a new onentry row and calls onApply', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|copied|42'], []);
+  });
+
+  it('shows a confirmation toast after pasting', () => {
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => f.message)).toContain('Action pasted.');
+  });
+
+  it('pastes a copied assign action from onentry into onexit (cross-tab)', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel({ onApply, entryActions: [{ type: 'assign', location: 'a', expr: '1' }] });
+
+    fireEvent.click(screen.getByText(/onexit/));
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|a|1'], ['assign|copied|42']);
+  });
+
+  it('pastes the same copied action twice, producing two independent rows', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApply).toHaveBeenLastCalledWith(['assign|copied|42', 'assign|copied|42'], []);
+  });
+
+  it('disables Paste on the reactions tab when an assign action (not a reaction) is copied', () => {
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel();
+
+    fireEvent.click(screen.getByText(/event reactions/));
+
+    expect(screen.getByTitle('Copy an action first')).toBeDisabled();
+  });
+
+  it('pastes a copied reaction as a new reaction row and calls onApplyReactions', () => {
+    const onApplyReactions = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: 'evtA', location: 'x', expr: '1', type: 'internal' },
+    });
+    renderPanel({ onApplyReactions });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApplyReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'evtA', location: 'x', expr: '1', type: 'internal' }),
+    ]);
+  });
+
+  it('a pasted row can be clicked afterward to edit it like any other row', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'copied = 42'),
+    );
+
+    expect(screen.getByPlaceholderText('variable or channel')).toHaveValue('copied');
+    expect(screen.getByPlaceholderText('expression')).toHaveValue('42');
+  });
+
+  it('supports copying an action in one state and pasting it into a different state (headline use case)', () => {
+    const onApplyStateA = vi.fn();
+    const onApplyStateB = vi.fn();
+
+    const { rerender } = render(
+      <StateActionsPanel
+        isVisible
+        onClose={noop}
+        stateId='StateA'
+        entryActions={[{ type: 'assign', location: 'copied', expr: '42' }]}
+        exitActions={[]}
+        internalEventActions={[]}
+        scxmlContent='<scxml xmlns="http://www.w3.org/2005/07/scxml"><state id="StateA"/></scxml>'
+        stateType='simple'
+        isInitial={false}
+        canMarkInitial
+        onToggleInitial={noop}
+        onApply={onApplyStateA}
+        onApplyReactions={noop}
+      />
+    );
+
+    // Copy the row from StateA.
+    fireEvent.click(screen.getByTitle('Copy action'));
+    expect(useActionClipboardStore.getState().copied).toEqual({
+      kind: 'action',
+      row: { type: 'assign', location: 'copied', expr: '42' },
+    });
+
+    // Switch to StateB — same component instance, new stateId/props, exactly
+    // how VisualDiagram drives this panel in the real app (single instance,
+    // no `key`, state switch is purely a prop change).
+    rerender(
+      <StateActionsPanel
+        isVisible
+        onClose={noop}
+        stateId='StateB'
+        entryActions={[]}
+        exitActions={[]}
+        internalEventActions={[]}
+        scxmlContent='<scxml xmlns="http://www.w3.org/2005/07/scxml"><state id="StateB"/></scxml>'
+        stateType='simple'
+        isInitial={false}
+        canMarkInitial
+        onToggleInitial={noop}
+        onApply={onApplyStateB}
+        onApplyReactions={noop}
+      />
+    );
+
+    // The clipboard survived the state switch (it's a module-level store, not
+    // component state) — Paste should still be enabled.
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    // Pasted into StateB's (empty) onentry list, via StateB's onApply — not
+    // StateA's, and StateB's list didn't inherit anything from StateA beyond
+    // the pasted row itself.
+    expect(onApplyStateB).toHaveBeenCalledWith(['assign|copied|42'], []);
+    expect(onApplyStateA).not.toHaveBeenCalledWith(expect.arrayContaining(['assign|copied|42']), expect.anything());
   });
 });
