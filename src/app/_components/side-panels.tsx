@@ -2,8 +2,9 @@
 
 import { useCallback } from 'react';
 import { ChannelMappingPanel, ConfigPanel, EventsPanel, GithubPanel } from '@/components/ui';
-import { updateConfigFieldExpr, updateConfigFieldType } from '@/lib/utils/datamodel-extractor';
+import { deleteConfigField, getConfigFieldUsage, updateConfigFieldExpr, updateConfigFieldType } from '@/lib/utils/datamodel-extractor';
 import { useEditorStore } from '@/stores/editor-store';
+import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
 import type { ConfigValue } from '@/types/host-api';
 
@@ -15,6 +16,7 @@ export interface SidePanelsProps {
 export function SidePanels({ onEntriesChange, onContentChange }: SidePanelsProps) {
   const { activePanel, setActivePanel } = usePanelStore();
   const content = useEditorStore(state => state.content);
+  const showFeedback = useHostAPIStore(state => state.showFeedback);
   const handleClose = useCallback(() => setActivePanel(null), [setActivePanel]);
 
   return (
@@ -29,6 +31,15 @@ export function SidePanels({ onEntriesChange, onContentChange }: SidePanelsProps
         }}
         onTypeChange={(name, newType) => {
           onContentChange(updateConfigFieldType(content, name, newType));
+        }}
+        onDeleteField={(name) => {
+          const usage = getConfigFieldUsage(content, name);
+          if (usage.length > 0) {
+            showFeedback(`Cannot delete 'conf_${name}': still referenced in ${usage.join(', ')}`, 'error');
+            return;
+          }
+          onContentChange(deleteConfigField(content, name));
+          showFeedback('Config value deleted.', 'info');
         }}
         onAddField={(name, defaultValue) => {
           const node = `\n    <data id="conf_${name}" expr="${defaultValue}" confType="string"/>`;

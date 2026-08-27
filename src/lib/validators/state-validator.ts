@@ -397,6 +397,46 @@ export function findDuplicateDataIds(scxml: SCXMLElement): string[] {
 }
 
 /**
+ * Find data element IDs that use the non-portable "main_" prefix.
+ * A "main_"-prefixed variable is tied to this specific state machine by name; if the
+ * state/subtree that declares or references it is copied into a different machine, the
+ * reference won't resolve there. The "this_" prefix is the portable equivalent.
+ */
+export function findMainPrefixedDataIds(scxml: SCXMLElement): string[] {
+  const ids: string[] = [];
+
+  const collectDataIds = (datamodel: DataModelElement) => {
+    if (!datamodel.data) return;
+    const dataElements = Array.isArray(datamodel.data) ? datamodel.data : [datamodel.data];
+    dataElements.forEach((data) => {
+      if (data['@_id']?.startsWith('main_')) {
+        ids.push(data['@_id']);
+      }
+    });
+  };
+
+  const traverse = (element: SCXMLElement | StateElement | ParallelElement) => {
+    if ((element as StateElement | ParallelElement).datamodel) {
+      collectDataIds((element as StateElement | ParallelElement).datamodel as DataModelElement);
+    }
+
+    if (element.state) {
+      const states = Array.isArray(element.state) ? element.state : [element.state];
+      states.forEach((state) => traverse(state));
+    }
+
+    if (element.parallel) {
+      const parallels = Array.isArray(element.parallel) ? element.parallel : [element.parallel];
+      parallels.forEach((parallel) => traverse(parallel));
+    }
+  };
+
+  traverse(scxml);
+
+  return ids;
+}
+
+/**
  * Validate compound states have initial attributes or elements
  */
 export function validateCompoundStates(

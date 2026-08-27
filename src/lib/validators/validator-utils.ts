@@ -263,6 +263,32 @@ export function findDataIdPositions(
 }
 
 /**
+ * Find every line/column position where an identifier appears as a whole word anywhere
+ * in the XML - covers both declarations (e.g. a <data id="..."> attribute value) and
+ * references inside expression attributes (cond, expr, location, etc.).
+ */
+export function findIdentifierPositions(
+  name: string,
+  xmlContent: string
+): Array<{ line: number; column: number }> {
+  const positions: Array<{ line: number; column: number }> = [];
+  const lines = xmlContent.split('\n');
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`\\b${escaped}\\b`, 'g');
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(line)) !== null) {
+      positions.push({ line: lineIndex + 1, column: match.index + 1 });
+    }
+  }
+
+  return positions;
+}
+
+/**
  * Find the line/column position of a specific transition in the XML
  */
 export function findTransitionPosition(

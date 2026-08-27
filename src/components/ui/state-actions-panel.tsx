@@ -3,7 +3,8 @@
 import { BADGE_COLORS, EVENT_FALLBACK_VALUE, getVariableType } from '@/lib';
 import { extractDatamodelVariables } from '@/lib/utils/datamodel-extractor';
 import { useHostAPIStore } from '@/stores/host-api-store';
-import { GripVertical, Plus, X } from 'lucide-react';
+import { useActionClipboardStore } from '@/stores/action-clipboard-store';
+import { ClipboardPaste, Copy, GripVertical, Plus, X } from 'lucide-react';
 import React from 'react';
 import { Panel, inputClass, FormActions, PanelEmptyState } from '@/components/ui/primitives';
 import {
@@ -18,13 +19,20 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { v4 as uuidv4 } from 'uuid';
 import { reorderByDragEvent } from '@/lib/utils/reorder-by-drag-event';
+import {
+  getExpressionSuggestions,
+  applyExpressionSuggestion,
+  type ExpressionSuggestion,
+} from '@/lib/utils/expression-autocomplete';
+import { getCaretCoordinates } from '@/lib/utils/textarea-caret';
+import type { ChannelInfo, ChannelMapping } from '@/types/host-api';
 
-interface AssignActionRow { type: 'assign'; location: string; expr: string; }
+export interface AssignActionRow { type: 'assign'; location: string; expr: string; }
 interface SendActionRow   { type: 'send'; event: string; delayType: 'delay' | 'delayexpr'; delayValue: string; }
 interface CancelActionRow { type: 'cancel'; sendid: string; }
 type ActionRow = AssignActionRow | SendActionRow | CancelActionRow;
 
-interface InternalEventActionRow {
+export interface InternalEventActionRow {
   event: string;
   location: string;
   expr: string;
@@ -83,6 +91,7 @@ interface SortableActionRowProps {
   disabled: boolean;
   align?: 'center' | 'start';
   onClick: () => void;
+  onCopy?: () => void;
   onDelete: () => void;
   children: React.ReactNode;
 }
@@ -93,6 +102,7 @@ function SortableActionRow({
   disabled,
   align = 'center',
   onClick,
+  onCopy,
   onDelete,
   children,
 }: SortableActionRowProps) {
@@ -133,17 +143,115 @@ function SortableActionRow({
         </span>
         <div className='min-w-0 flex-1'>{children}</div>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        className={`ml-2 flex-shrink-0 text-dimmed hover:text-error opacity-0 group-hover:opacity-100 transition-opacity ${
+      <div
+        className={`ml-2 flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${
           align === 'start' ? 'mt-0.5' : ''
         }`}
       >
-        <X className='h-3 w-3' />
-      </button>
+        {onCopy && (
+          <button
+            type='button'
+            title='Copy action'
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy();
+            }}
+            className='text-dimmed hover:text-primary'
+          >
+            <Copy className='h-3 w-3' />
+          </button>
+        )}
+        <button
+          type='button'
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className='text-dimmed hover:text-error'
+        >
+          <X className='h-3 w-3' />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface ExpressionSuggestionDropdownProps {
+  textareaEl: HTMLTextAreaElement | null;
+  cursorPos: number;
+  suggestions: ExpressionSuggestion[];
+  activeIndex: number;
+  channels: ChannelInfo[];
+  channelMappings: ChannelMapping[];
+  onSelect: (s: ExpressionSuggestion) => void;
+}
+
+function ExpressionSuggestionDropdown({
+  textareaEl,
+  cursorPos,
+  suggestions,
+  activeIndex,
+  channels,
+  channelMappings,
+  onSelect,
+}: ExpressionSuggestionDropdownProps) {
+  const caret = textareaEl ? getCaretCoordinates(textareaEl, cursorPos) : null;
+
+  // Assumed dropdown width for clamping, matching the max-w set on the
+  // dropdown's own class below — keeps it from overflowing the panel's
+  // right edge when the caret is near the end of a long line.
+  const DROPDOWN_WIDTH = 200;
+  const containerWidth = textareaEl?.clientWidth ?? 0;
+  const clampedLeft = caret ? Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH)) : 0;
+
+  const positionStyle: React.CSSProperties = caret
+    ? { top: caret.top + caret.height + 4, left: clampedLeft }
+    : {};
+  const positionClassName = caret
+    ? 'absolute z-50 bg-elevated border border-default rounded shadow-lg max-h-36 w-[200px] overflow-y-auto'
+    : 'absolute top-full left-0 right-0 mt-1 z-50 bg-elevated border border-default rounded shadow-lg max-h-36 overflow-y-auto';
+
+  const renderBadge = (s: ExpressionSuggestion) => {
+    if (s.kind === 'operator' || s.kind === 'new-channel') return null;
+    const type =
+      s.kind === 'variable'
+        ? getVariableType(s.label)
+        : s.kind === 'channel'
+          ? channels.find((c) => c.name === s.label)?.type
+          : channels.find((c) => c.name === channelMappings.find((m) => m.scxmlRef === s.label)?.mappedChannel)?.type;
+    if (!type) return null;
+    return (
+      <span
+        className='text-xs px-1 rounded font-mono text-black'
+        style={{ backgroundColor: BADGE_COLORS[type] }}
+      >
+        {type}
+      </span>
+    );
+  };
+
+  return (
+    <div className={positionClassName} style={positionStyle}>
+      {suggestions.map((s, i) => (
+        <div
+          key={`${s.kind}-${s.label}`}
+          onMouseDown={() => onSelect(s)}
+          className={`px-2 py-1 text-xs cursor-pointer flex items-center gap-2 ${
+            s.kind === 'new-channel'
+              ? 'bg-amber-50 text-amber-800 border-l-2 border-amber-400'
+              : i === activeIndex
+                ? 'bg-primary text-primary-fg'
+                : 'hover:bg-primary-muted text-default'
+          }`}
+        >
+          {s.kind === 'new-channel' && <span className='text-xs text-amber-600'>(new channel)</span>}
+          {renderBadge(s)}
+          <span>{s.label}</span>
+          {s.kind === 'mapped-channel' && (
+            <span className='text-xs text-muted ml-1'>→ {channelMappings.find((m) => m.scxmlRef === s.label)?.mappedChannel}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -181,11 +289,23 @@ export function StateActionsPanel({
   const [isOpen, setIsOpen] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Autocomplete state — expression field (independent of the location
+  // field's: different token model — multi-token expression vs. a single
+  // identifier — and its own cursor position to track).
+  const [isExprOpen, setIsExprOpen] = React.useState(false);
+  const [exprActiveIndex, setExprActiveIndex] = React.useState(-1);
+  const [exprCursorPos, setExprCursorPos] = React.useState(0);
+  const exprBlurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exprTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const formRef = React.useRef<HTMLDivElement>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const channels = useHostAPIStore((s) => s.channels);
+  const channelMappings = useHostAPIStore((s) => s.channelMappings);
   const showFeedback = useHostAPIStore((s) => s.showFeedback);
+  const copied = useActionClipboardStore((s) => s.copied);
+  const canPaste = copied !== null && copied.kind === (activeTab === 'reactions' ? 'reaction' : 'action');
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -202,6 +322,8 @@ export function StateActionsPanel({
     setFormReactionType('internal');
     setIsOpen(false);
     setActiveIndex(-1);
+    setIsExprOpen(false);
+    setExprActiveIndex(-1);
   }, []);
 
   // Reset local lists and form when the selected state changes
@@ -217,6 +339,7 @@ export function StateActionsPanel({
   React.useEffect(() => {
     return () => {
       if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+      if (exprBlurTimerRef.current) clearTimeout(exprBlurTimerRef.current);
     };
   }, []);
 
@@ -243,6 +366,69 @@ export function StateActionsPanel({
     setFormLocation(s.label);
     setIsOpen(false);
     setActiveIndex(-1);
+  };
+
+  const exprSuggestionResult = React.useMemo(() => {
+    if (formMode === 'idle') return { suggestions: [] as ExpressionSuggestion[], tokenStart: 0, tokenEnd: 0 };
+    return getExpressionSuggestions(formExpr, exprCursorPos, {
+      variables: dataVars,
+      channels,
+      channelMappings,
+    });
+  }, [formExpr, exprCursorPos, dataVars, channels, channelMappings, formMode]);
+
+  const exprSuggestions = exprSuggestionResult.suggestions;
+  const showExprSuggestions = isExprOpen && exprSuggestions.length > 0;
+
+  // Live preview while arrow-cycling the dropdown, matching the Location
+  // field's existing preview-swap pattern — splices the highlighted
+  // suggestion into its token range without committing to formExpr/state
+  // until Tab/Enter actually accepts it.
+  const exprDisplayValue =
+    exprActiveIndex >= 0 && exprSuggestions[exprActiveIndex]
+      ? applyExpressionSuggestion(
+          formExpr,
+          exprSuggestionResult.tokenStart,
+          exprSuggestionResult.tokenEnd,
+          exprSuggestions[exprActiveIndex].label
+        ).newText
+      : formExpr;
+
+  const selectExprSuggestion = (s: ExpressionSuggestion) => {
+    const { newText, newCursorPos } = applyExpressionSuggestion(
+      formExpr,
+      exprSuggestionResult.tokenStart,
+      exprSuggestionResult.tokenEnd,
+      s.label
+    );
+    setFormExpr(newText);
+    setIsExprOpen(false);
+    setExprActiveIndex(-1);
+    requestAnimationFrame(() => {
+      exprTextareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+      exprTextareaRef.current?.focus();
+    });
+
+    // The channel just needs to exist as a <data> element for the expression
+    // to reference it — the assign row itself (location/expr) isn't
+    // committed until Apply, so we pass the *current*, unmodified action
+    // lists here rather than anything from the in-progress form. This makes
+    // the parent's list-update step a no-op re-write while still running its
+    // AddDataCommand step to register the channel.
+    if (s.kind === 'new-channel' && onNewChannel) {
+      if (activeTab === 'reactions') {
+        onNewChannel(s.label, {
+          kind: 'reactions',
+          actions: localReactions.map(({ _rowId, ...rest }) => rest),
+        });
+      } else {
+        onNewChannel(s.label, {
+          kind: 'actions',
+          entryActions: toStrings(localEntry),
+          exitActions: toStrings(localExit),
+        });
+      }
+    }
   };
 
   const handleApply = () => {
@@ -322,6 +508,49 @@ export function StateActionsPanel({
       setLocalExit(updated);
       onApply(toStrings(localEntry), toStrings(updated));
     }
+  };
+
+  const handleCopyRow = (row: ActionRow) => {
+    if (row.type !== 'assign') return;
+    useActionClipboardStore.getState().copy({
+      kind: 'action',
+      row: { type: 'assign', location: row.location, expr: row.expr },
+    });
+    showFeedback('Action copied.', 'info');
+  };
+
+  const handleCopyReaction = (row: InternalEventActionRow) => {
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: row.event, location: row.location, expr: row.expr, type: row.type },
+    });
+    showFeedback('Action copied.', 'info');
+  };
+
+  const handlePaste = () => {
+    if (!copied) return;
+
+    if (activeTab === 'reactions') {
+      if (copied.kind !== 'reaction') return;
+      const newRow: WithRowId<InternalEventActionRow> = { ...copied.row, _rowId: uuidv4() };
+      const updated = [...localReactions, newRow];
+      setLocalReactions(updated);
+      onApplyReactions(updated);
+      showFeedback('Action pasted.', 'info');
+      return;
+    }
+
+    if (copied.kind !== 'action') return;
+    const newRow: WithRowId<ActionRow> = { ...copied.row, _rowId: uuidv4() };
+    const updated = [...currentList, newRow];
+    if (activeTab === 'onentry') {
+      setLocalEntry(updated);
+      onApply(toStrings(updated), toStrings(localExit));
+    } else {
+      setLocalExit(updated);
+      onApply(toStrings(localEntry), toStrings(updated));
+    }
+    showFeedback('Action pasted.', 'info');
   };
 
   const handleActionsDragEnd = (event: DragEndEvent) => {
@@ -516,12 +745,51 @@ export function StateActionsPanel({
           </div>
         )}
       </div>
-      <div>
+      <div className='relative'>
         <label className='text-[10px] text-muted block mb-0.5'>Expression</label>
         <textarea
-          value={formExpr}
-          onChange={(e) => setFormExpr(e.target.value)}
+          ref={exprTextareaRef}
+          value={exprDisplayValue}
+          onChange={(e) => {
+            setFormExpr(e.target.value);
+            setExprCursorPos(e.target.selectionStart ?? e.target.value.length);
+            setIsExprOpen(true);
+            setExprActiveIndex(-1);
+          }}
+          onSelect={(e) => {
+            // Fires on any caret/selection change — arrow-left/right, Home/End,
+            // clicking elsewhere in the text — not just typing (onChange).
+            // Without this, exprCursorPos goes stale once the user moves the
+            // caret without editing, and the suggestion dropdown detaches from
+            // where the caret actually is until the next keystroke self-corrects it.
+            setExprCursorPos(e.currentTarget.selectionStart ?? 0);
+          }}
+          onBlur={() => {
+            exprBlurTimerRef.current = setTimeout(() => setIsExprOpen(false), 100);
+          }}
           onKeyDown={(e) => {
+            if (showExprSuggestions) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setExprActiveIndex((p) => (p < exprSuggestions.length - 1 ? p + 1 : 0));
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setExprActiveIndex((p) => (p > 0 ? p - 1 : exprSuggestions.length - 1));
+                return;
+              }
+              if (e.key === 'Tab' || e.key === 'Enter') {
+                e.preventDefault();
+                selectExprSuggestion(exprSuggestions[exprActiveIndex >= 0 ? exprActiveIndex : 0]);
+                return;
+              }
+              if (e.key === 'Escape') {
+                setIsExprOpen(false);
+                setExprActiveIndex(-1);
+                return;
+              }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               handleApply();
@@ -532,6 +800,17 @@ export function StateActionsPanel({
           rows={3}
           className={`${inputClass} resize-y font-mono`}
         />
+        {showExprSuggestions && (
+          <ExpressionSuggestionDropdown
+            textareaEl={exprTextareaRef.current}
+            cursorPos={exprCursorPos}
+            suggestions={exprSuggestions}
+            activeIndex={exprActiveIndex}
+            channels={channels}
+            channelMappings={channelMappings}
+            onSelect={selectExprSuggestion}
+          />
+        )}
       </div>
 
       <FormActions
@@ -551,13 +830,27 @@ export function StateActionsPanel({
         {/* Sub-header: stateId + add button */}
         <div className='flex items-center justify-between px-3 py-1.5 border-b border-default bg-muted flex-shrink-0'>
           <p className='text-xs text-primary'>{stateId}</p>
-          <button
-            onClick={handleAddClick}
-            title='Add action'
-            className='text-dimmed hover:text-primary p-0.5 rounded hover:bg-primary-muted transition-colors'
-          >
-            <Plus className='h-4 w-4' />
-          </button>
+          <div className='flex items-center gap-1'>
+            <button
+              onClick={handlePaste}
+              disabled={!canPaste}
+              title={canPaste ? 'Paste action' : 'Copy an action first'}
+              className={`p-0.5 rounded transition-colors ${
+                canPaste
+                  ? 'text-dimmed hover:text-primary hover:bg-primary-muted'
+                  : 'text-dimmed opacity-30 cursor-not-allowed'
+              }`}
+            >
+              <ClipboardPaste className='h-4 w-4' />
+            </button>
+            <button
+              onClick={handleAddClick}
+              title='Add action'
+              className='text-dimmed hover:text-primary p-0.5 rounded hover:bg-primary-muted transition-colors'
+            >
+              <Plus className='h-4 w-4' />
+            </button>
+          </div>
         </div>
 
         {/* Initial State toggle — only markable for simple/compound states.
@@ -635,6 +928,7 @@ export function StateActionsPanel({
                       disabled={formMode !== 'idle'}
                       align='start'
                       onClick={() => handleReactionsRowClick(row, index)}
+                      onCopy={() => handleCopyReaction(row)}
                       onDelete={() => handleDelete(index)}
                     >
                       <div className='flex flex-col min-w-0'>
@@ -675,11 +969,13 @@ export function StateActionsPanel({
                       id={row._rowId}
                       index={index}
                       disabled={formMode !== 'idle'}
+                      align='start'
                       onClick={() => handleRowClick(row, index)}
+                      onCopy={row.type === 'assign' ? () => handleCopyRow(row) : undefined}
                       onDelete={() => handleDelete(index)}
                     >
                       {row.type === 'assign' && (
-                        <span className='font-mono truncate text-default'>
+                        <span className='block font-mono break-all text-default'>
                           <span className='text-primary'>{row.location || '…'}</span>
                           <span className='text-dimmed'> = </span>
                           <span className='text-default'>{row.expr || '…'}</span>
@@ -687,12 +983,12 @@ export function StateActionsPanel({
                       )}
                       {row.type === 'send' && (
                         <span className='font-mono text-default flex flex-col min-w-0'>
-                          <span className='text-primary truncate'>{row.event || '…'}</span>
+                          <span className='text-primary break-all'>{row.event || '…'}</span>
                           <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
                         </span>
                       )}
                       {row.type === 'cancel' && (
-                        <span className='font-mono truncate text-default'>
+                        <span className='block font-mono break-all text-default'>
                           <span className='text-dimmed'>cancel: </span>
                           <span className='text-primary'>{row.sendid || '…'}</span>
                         </span>

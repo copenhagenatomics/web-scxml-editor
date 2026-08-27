@@ -11,11 +11,10 @@ import {
   findTimeEventToken,
   resolveTimeEventDisplay,
 } from '@/lib/utils/time-transition';
+import { getExpressionSuggestions, applyExpressionSuggestion } from '@/lib/utils/expression-autocomplete';
 
 type Suggestion = { label: string; kind: 'channel' | 'event' | 'variable' | 'new-channel' | 'mapped-channel' | 'operator' };
 
-const OPERATORS = ['==', '!=', '>=', '<=', '>', '<', '&&', '||'];
-const OPERATOR_SET = new Set([...OPERATORS, '!']);
 const MAX_TEXTAREA_HEIGHT = 200;
 
 export interface TransitionApplyArgs {
@@ -116,11 +115,22 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   const events = useHostAPIStore((state) => state.events);
   const showFeedback = useHostAPIStore((state) => state.showFeedback);
 
+  // Computed once per (rawValue, channels, channelMappings, scxmlContent) change for cond
+  // mode — shared by the `suggestions` memo below and by `buildCondValue`, so accepting or
+  // previewing a suggestion doesn't re-parse the SCXML doc and rebuild the candidate list
+  // from scratch on every keystroke/render (buildCondValue is also called directly from the
+  // render body via `displayValue`, so it must stay cheap).
+  const condExpressionResult = React.useMemo(() => {
+    if (selectionMode !== 'cond' || rawValue.trimStart().startsWith('after')) return null;
+    return getExpressionSuggestions(rawValue, rawValue.length, {
+      variables: extractDatamodelVariables(scxmlContent),
+      channels,
+      channelMappings,
+    });
+  }, [rawValue, channels, channelMappings, scxmlContent, selectionMode]);
+
   // ── main search suggestions ──
   const suggestions: Suggestion[] = React.useMemo(() => {
-    const vars = extractDatamodelVariables(scxmlContent);
-    const channelSet = new Set(channels.map((c) => c.name));
-    const scxmlRefSet = new Set(channelMappings.map((m) => m.scxmlRef));
     const eventNames = events.map((e) => e.name);
 
     // Suppress suggestions when user is typing an "after X" time transition
@@ -138,28 +148,13 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
         .map((n) => ({ label: n, kind: 'event' as const }));
     }
 
-    // cond mode
-    const allNames = Array.from(new Set([...Array.from(vars), ...channels.map((c) => c.name), ...channelMappings.map((m) => m.scxmlRef)]));
-    const condKindOf = (i: string): Suggestion['kind'] => channelSet.has(i) ? 'channel' : scxmlRefSet.has(i) ? 'mapped-channel' : 'variable';
-    const endsWithSpace = rawValue.endsWith(' ');
-    const tokens = rawValue.trimEnd().split(/\s+/);
-    const lastToken = endsWithSpace ? '' : (tokens[tokens.length - 1] ?? '');
-    const prevToken = endsWithSpace ? (tokens[tokens.length - 1] ?? '') : (tokens[tokens.length - 2] ?? '');
-    if (endsWithSpace) {
-      if (OPERATOR_SET.has(prevToken)) return allNames.map((i) => ({ label: i, kind: condKindOf(i) }));
-      return OPERATORS.map((op) => ({ label: op, kind: 'operator' as const }));
-    }
-    const filtered = allNames.filter((i) => i.toLowerCase().includes(lastToken.toLowerCase()));
-    if (filtered.length === 0 && lastToken.startsWith('this_')) return [{ label: lastToken, kind: 'new-channel' }];
-    return filtered.map((i) => ({ label: i, kind: condKindOf(i) }));
-  }, [rawValue, channels, channelMappings, events, scxmlContent, selectionMode]);
+    return condExpressionResult?.suggestions ?? [];
+  }, [rawValue, events, selectionMode, condExpressionResult]);
 
   const buildCondValue = (label: string) => {
-    const endsWithSpace = rawValue.endsWith(' ');
-    if (endsWithSpace) return rawValue + label;
-    const tokens = rawValue.split(/\s+/);
-    tokens[tokens.length - 1] = label;
-    return tokens.join(' ');
+    if (!condExpressionResult) return rawValue;
+    const { tokenStart, tokenEnd } = condExpressionResult;
+    return applyExpressionSuggestion(rawValue, tokenStart, tokenEnd, label).newText;
   };
 
   // Merged transitions carry a comma-separated event list. Appends a new event after a

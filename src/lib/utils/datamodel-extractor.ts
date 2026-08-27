@@ -256,3 +256,81 @@ export function extractUnresolvedChannelRefs(xmlContent: string, channels: strin
     .filter(r => !r.startsWith('this_') && !r.startsWith('conf_') && r !== 'data' && !channelSet.has(r))
     .sort();
 }
+
+/**
+ * Returns "main_"-prefixed variable names referenced anywhere in SCXML expressions
+ * (cond, expr, location, namelist, targetexpr, srcexpr), across every element - not just
+ * <data> declarations. Unlike extractUnresolvedChannelRefs, this does not exclude <data>'s
+ * own expr, since a reference to a "main_" variable there is just as non-portable.
+ */
+export function extractMainPrefixedExpressionRefs(xmlContent: string): string[] {
+  const refs = new Set<string>();
+
+  let parsed: unknown;
+  try {
+    parsed = xmlParser.parse(xmlContent);
+  } catch {
+    return [];
+  }
+
+  function walk(node: unknown): void {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (SCXML_EXPR_ATTRS.has(key) && typeof val === 'string') {
+        const stripped = val.replace(/_event\./g, '');
+        for (const v of ConditionEvaluator.extractVariables(stripped)) {
+          if (v.startsWith('main_')) refs.add(v);
+        }
+      } else if (key !== ':@') {
+        if (Array.isArray(val)) val.forEach(item => walk(item));
+        else walk(val);
+      }
+    }
+  }
+
+  walk(parsed);
+
+  return Array.from(refs).sort();
+}
+
+/**
+ * Returns the ids of elements that reference conf_<name> anywhere in the SCXML
+ * (cond, expr, location, namelist, targetexpr, srcexpr), excluding the field's own
+ * <data> declaration. Each entry is the nearest enclosing element id (e.g. the state
+ * containing the referencing transition), falling back to the element's tag name if
+ * no ancestor has an id. Empty array means the field is safe to delete.
+ */
+export function getConfigFieldUsage(xmlContent: string, name: string): string[] {
+  const targetId = `conf_${name}`;
+  const locations: string[] = [];
+
+  let parsed: unknown;
+  try {
+    parsed = xmlParser.parse(xmlContent);
+  } catch {
+    return [];
+  }
+
+  function walk(node: unknown, tag: string | undefined, ancestorId: string | undefined): void {
+    if (!node || typeof node !== 'object') return;
+    const nodeObj = node as Record<string, unknown>;
+    const ownId = typeof nodeObj['@_id'] === 'string' ? (nodeObj['@_id'] as string) : undefined;
+    const currentAncestorId = ownId ?? ancestorId;
+
+    for (const [key, val] of Object.entries(nodeObj)) {
+      if (SCXML_EXPR_ATTRS.has(key) && typeof val === 'string') {
+        if (key === '@_expr' && tag === 'data' && ownId === targetId) continue;
+        const stripped = val.replace(/_event\./g, '');
+        if (ConditionEvaluator.extractVariables(stripped).includes(targetId)) {
+          locations.push(currentAncestorId ?? tag ?? key);
+        }
+      } else if (key !== '@_id') {
+        if (Array.isArray(val)) val.forEach(item => walk(item, key, currentAncestorId));
+        else walk(val, key, currentAncestorId);
+      }
+    }
+  }
+
+  walk(parsed, undefined, undefined);
+  return Array.from(new Set(locations));
+}

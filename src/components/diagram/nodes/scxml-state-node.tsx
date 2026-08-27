@@ -60,6 +60,9 @@ export interface SCXMLStateNodeData {
   onNavigateInto?: () => void;
   // Resize capability
   onResize?: (x: number, y: number, width: number, height: number) => void;
+  // Drag-to-nest: true while another node is being dragged over this one as
+  // a valid reparent target.
+  isDropTarget?: boolean;
 }
 
 export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
@@ -91,6 +94,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       isCompound = false,
       onNavigateInto,
       onResize,
+      isDropTarget = false,
     } = data;
 
     const [editingLabel, setEditingLabel] = React.useState(false);
@@ -288,7 +292,16 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       ? getAdditionalClasses(visualStyles, isActive, selected)
       : 'shadow-lg hover:shadow-xl transition-[box-shadow,transform] duration-200 hover:scale-[1.02] hover:z-10 ring-2 ring-opacity-0 hover:ring-opacity-30 ring-blue-400';
 
-    const nodeClasses = `${getBaseClasses()} ${additionalClasses} backdrop-blur-sm border-2`;
+    // Only apply the drop-target ring when the node isn't already selected:
+    // the selection-driven ring classes above (either from getAdditionalClasses
+    // or the default branch's ring-2/ring-blue-400) share the same Tailwind
+    // ring-* custom properties, so stacking a second, differently-sized/colored
+    // ring on top wouldn't cleanly "win" by JSX order — which one actually
+    // renders would be decided by generated stylesheet order, not intent.
+    // Gating on !selected keeps the two indicators from ever competing.
+    const nodeClasses = `${getBaseClasses()} ${additionalClasses} backdrop-blur-sm border-2${
+      isDropTarget && !selected ? ' ring-4 ring-blue-500 ring-opacity-70' : ''
+    }`;
 
     // Apply border style - dashed for compound states
     if (visualStyles?.borderStyle) {
