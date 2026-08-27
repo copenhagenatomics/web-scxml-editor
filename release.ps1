@@ -41,10 +41,20 @@ git commit -m "chore: bump version to $version"
 # Tag the release
 git tag -a $tag -m "Release $tag"
 
+# Push the commit and the tag
+git push origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "git push origin main failed."
+    exit 1
+}
+
+git push origin $tag
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "git push origin $tag failed."
+    exit 1
+}
+
 Write-Host ""
-Write-Host "Version bumped to $version and tagged as $tag locally." -ForegroundColor Green
-Write-Host "Review the commit, then push when ready:"
-Write-Host ""
-Write-Host "  git push origin main"
-Write-Host "  git push origin $tag"
+Write-Host "Version bumped to $version, tagged as $tag, and pushed to origin." -ForegroundColor Green
+Write-Host "GitHub Actions will build the app and create a GitHub Release with scxml-editor-$tag.zip attached."
 Write-Host ""

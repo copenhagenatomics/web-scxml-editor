@@ -18,16 +18,9 @@ npm run release -- patch
 # replace "patch" with "minor" or "major" as needed
 ```
 This bumps the version in `package.json`/`package-lock.json`, commits with
-`chore: bump version to X.Y.Z`, and creates the annotated tag `vX.Y.Z` — all
-locally. It aborts if the working tree isn't clean or you're not on `main`.
+`chore: bump version to X.Y.Z`, creates the annotated tag `vX.Y.Z`, and pushes
+both the commit and the tag to `origin main`. It aborts if the working tree
+isn't clean or you're not on `main`.
 
-**4. Push the commit and the tag**
-
-The script prints the exact commands, e.g.:
-```bash
-git push origin main
-git push origin v0.1.2
-```
-
-GitHub Actions will automatically build the app and create a GitHub Release with `scxml-editor-v0.1.2.zip` attached.
+GitHub Actions will automatically build the app and create a GitHub Release with `scxml-editor-vX.Y.Z.zip` attached.
 Check progress at your repo's **Actions** tab (~1 min).
