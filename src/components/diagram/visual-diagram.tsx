@@ -12,6 +12,10 @@ import {
   createStateElement,
   findStateById,
   removeTransitionByEdgeId,
+  cloneStateSubtreeWithFreshIds,
+  rewriteOrDropTransitions,
+  detachStateFromParent,
+  isDescendantOf,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
@@ -25,7 +29,9 @@ import {
   getTransitionColor,
 } from '@/lib/consts/transition-colors';
 import { ActionType } from '@/types/history';
-import type { SCXMLDocument, TransitionElement } from '@/types/scxml';
+import type { SCXMLDocument, StateElement, TransitionElement } from '@/types/scxml';
+import { useStateClipboardStore } from '@/stores/state-clipboard-store';
+import { MultiSelectToolbar } from './multi-select-toolbar';
 import {
   SmartBezierEdge,
   SmartStepEdge,
@@ -41,6 +47,7 @@ import {
   Controls,
   MarkerType,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -193,6 +200,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const [selectedTransitions, setSelectedTransitions] = React.useState<
     Set<string>
   >(new Set());
+
+  // Drag-to-nest state: the node currently being hovered over as a valid
+  // reparent target, and the set of node ids being dragged together.
+  const [dropTargetId, setDropTargetId] = React.useState<string | null>(null);
+  const draggingNodeIdsRef = React.useRef<string[]>([]);
+
+  // Un-nest drop zone: a fixed "Back to parent" control (rendered only while
+  // drilled into a state) that lets a drag pull the dragged node(s) back out
+  // to the grandparent level. Tracked separately from dropTargetId because
+  // the zone is a screen-space DOM element, not a flow-space node.
+  const [isOverUnnestZone, setIsOverUnnestZone] = React.useState(false);
+  const unnestZoneRef = React.useRef<HTMLDivElement>(null);
 
   // Ref to always access latest selection state in callbacks
   const selectedTransitionsRef = React.useRef(selectedTransitions);
@@ -1251,9 +1270,97 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [nodes, scxmlContent]
   );
 
+  // ==================== MARQUEE (CTRL/CMD+DRAG) SELECTION HANDLER ====================
+  // Triggered via selectionKeyCode={['Control', 'Meta']} on <ReactFlow> below.
+  // React Flow only fires onSelectionStart for a mousedown that targets the
+  // Pane background itself (not a node) — so this ref is a reliable "a real
+  // marquee drag began" flag. onSelectionEnd, by contrast, fires on ANY
+  // mouseup while the selection key is held, even if the mousedown was on a
+  // node — so handleSelectionEnd must check this ref before acting, or a
+  // Ctrl/Cmd+click on a node self-cancels handleStateClick's deferred click
+  // logic.
+  const marqueeStartedRef = React.useRef(false);
+
+  // Root DOM element React Flow renders (`.react-flow`, the direct child of
+  // this wrapper div) is `overflow: hidden` but still a valid scroll
+  // container. Clicking a control button inside it (e.g. "Add State") keeps
+  // browser focus on that button; the resulting re-render/relayout then
+  // trips the browser's native "scroll focused element into view" behavior,
+  // permanently setting a nonzero scrollTop on `.react-flow` even though it
+  // has no visible scrollbar. That scroll offset silently shifts every
+  // descendant absolutely-positioned relative to it — including
+  // `.react-flow__pane`, which React Flow's own pane-background mousedown
+  // hit-testing (used by the Ctrl/Cmd+drag marquee) depends on being aligned
+  // with the visible canvas. Left uncorrected, the marquee's drop-in
+  // computations run against the wrong coordinates and silently select
+  // nothing. Force it back to 0 whenever it drifts.
+  const reactFlowWrapperRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const wrapper = reactFlowWrapperRef.current;
+    if (!wrapper) return;
+    const flowRoot = wrapper.querySelector<HTMLDivElement>('.react-flow');
+    if (!flowRoot) return;
+
+    const resetScroll = () => {
+      if (flowRoot.scrollTop !== 0 || flowRoot.scrollLeft !== 0) {
+        flowRoot.scrollTop = 0;
+        flowRoot.scrollLeft = 0;
+        window.dispatchEvent(new Event('resize'));
+      }
+    };
+
+    flowRoot.addEventListener('scroll', resetScroll);
+    return () => flowRoot.removeEventListener('scroll', resetScroll);
+  }, []);
+
+  const handleSelectionStart = useCallback(() => {
+    marqueeStartedRef.current = true;
+  }, []);
+
+  // Cleanup once the marquee gesture ends. The actual selection itself is
+  // now applied incrementally in handleNodesChange below, as React Flow
+  // reports 'select'-type changes during the drag — see the comment there
+  // for why reading getNodes().selected here doesn't work.
+  const handleSelectionEnd = useCallback(() => {
+    if (!marqueeStartedRef.current) return;
+    marqueeStartedRef.current = false;
+    setSelectedStateForActions(null);
+  }, []);
+
   // ==================== REACTFLOW NODE CHANGE HANDLER ====================
   const handleNodesChange = useCallback(
     (changes: any[]) => {
+      // React Flow's own box-select implementation (Pane's onMouseMove, in
+      // @reactflow/core) does NOT mutate node.selected internally for a
+      // controlled `nodes` prop — it computes the newly (de)selected ids and
+      // calls onNodesChange with 'select'-type changes, exactly like this
+      // handler receives here, EXPECTING the consumer to apply them (this is
+      // the only pathway that ever sets .selected in this app's controlled
+      // setup). The unconditional filter below intentionally discards
+      // 'select' changes everywhere else (Ctrl/Cmd+click multi-select is
+      // driven entirely by activeStates, not React Flow's native selection),
+      // but that means marquee-select can never mark anything selected
+      // unless we specifically consume its 'select' changes here — gated on
+      // marqueeStartedRef so an ordinary node click's own 'select' change
+      // (already handled by handleStateClick) isn't double-applied.
+      if (marqueeStartedRef.current) {
+        const selectChanges = changes.filter((c) => c.type === 'select');
+        if (selectChanges.length > 0) {
+          setActiveStates((prev) => {
+            const next = new Set(prev);
+            selectChanges.forEach((c) => {
+              if (isNoteId(c.id)) return;
+              if (c.selected) {
+                next.add(c.id);
+              } else {
+                next.delete(c.id);
+              }
+            });
+            return next;
+          });
+        }
+      }
+
       // Filter out selection changes - they don't affect SCXML structure
       const structuralChanges = changes.filter(
         (change) => change.type !== 'select'
@@ -1292,8 +1399,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       // Check for position changes where dragging ended
       const dragEndChanges = structuralChanges.filter(
-        (change) => change.type === 'position' && change.dragging === false
+        (change) =>
+          change.type === 'position' &&
+          change.dragging === false &&
+          !justReparentedIdsRef.current.has(change.id)
       );
+      justReparentedIdsRef.current = new Set();
 
       if (dragEndChanges.length === 0) {
         return;
@@ -2159,6 +2270,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // Update allNodesRef with original nodes (with parentId intact)
   allNodesRef.current = parsedData.nodes;
 
+  // The parent of the state we're currently drilled into, if any — the
+  // un-nest drop zone's target when un-nesting a child of currentParentId.
+  const grandparentId = React.useMemo(() => {
+    if (!currentParentId) return undefined;
+    const parentNode = parsedData.nodes.find((n) => n.id === currentParentId);
+    return parentNode?.parentId;
+  }, [currentParentId, parsedData.nodes]);
+
   // Keep the hierarchy index panel's tooltip data (editor-store) in sync
   // with the current node set, so it works from the toolbar without that
   // component needing direct access to the diagram's node graph.
@@ -2360,6 +2479,220 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     fitView,
   ]);
 
+  // ==================== COPY / PASTE SELECTION HANDLERS ====================
+  const lastPastedClipboardRef = React.useRef<StateElement[] | null>(null);
+  const pasteOffsetMultiplierRef = React.useRef(1);
+
+  const handleCopySelection = useCallback(() => {
+    if (!scxmlContent || activeStates.size === 0) return;
+    const parseResult = parserRef.current?.parse(scxmlContent);
+    if (!parseResult?.success || !parseResult.data) return;
+
+    const clones: StateElement[] = [];
+    activeStates.forEach((id) => {
+      const found = findStateById(parseResult.data as SCXMLDocument, id);
+      if (found) clones.push(JSON.parse(JSON.stringify(found)));
+    });
+    if (clones.length > 0) {
+      useStateClipboardStore.getState().copy(clones);
+    }
+  }, [scxmlContent, activeStates]);
+
+  const handlePasteClipboard = useCallback(() => {
+    const copied = useStateClipboardStore.getState().copied;
+    if (!copied || copied.length === 0 || !onSCXMLChange || !scxmlContent) return;
+
+    if (copied !== lastPastedClipboardRef.current) {
+      lastPastedClipboardRef.current = copied;
+      pasteOffsetMultiplierRef.current = 1;
+    } else {
+      pasteOffsetMultiplierRef.current += 1;
+    }
+    const offset = 40 * pasteOffsetMultiplierRef.current;
+
+    const parseResult = parserRef.current?.parse(scxmlContent);
+    if (!parseResult?.success || !parseResult.data) return;
+    const scxmlDoc = parseResult.data as SCXMLDocument;
+
+    const existingIds = new Set(parsedData.nodes.map((n) => n.id));
+    const combinedIdMap = new Map<string, string>();
+    const clones: StateElement[] = [];
+
+    copied.forEach((state) => {
+      const { clone, idMap } = cloneStateSubtreeWithFreshIds(state, existingIds, offset, offset);
+      idMap.forEach((newId, oldId) => combinedIdMap.set(oldId, newId));
+      clones.push(clone);
+    });
+
+    clones.forEach((clone) => {
+      rewriteOrDropTransitions(clone, combinedIdMap);
+      addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined);
+    });
+
+    const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
+    onSCXMLChange(updatedSCXML, 'structure');
+    setActiveStates(new Set(clones.map((c) => c['@_id'])));
+  }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId]);
+
+  // ==================== DRAG-TO-NEST ====================
+  const handleReparent = useCallback(
+    (stateIds: string[], targetParentId: string | undefined) => {
+      if (!onSCXMLChange || !scxmlContent) return;
+      const parseResult = parserRef.current?.parse(scxmlContent);
+      if (!parseResult?.success || !parseResult.data) return;
+      const scxmlDoc = parseResult.data as SCXMLDocument;
+
+      let changed = false;
+      stateIds.forEach((id) => {
+        if (id === targetParentId) return;
+        if (targetParentId && isDescendantOf(scxmlDoc, targetParentId, id)) return;
+        const detached = detachStateFromParent(scxmlDoc, id);
+        if (!detached) return;
+        addStateToDocument(scxmlDoc, detached, targetParentId);
+        changed = true;
+
+        if (targetParentId) {
+          const newParent = findStateById(scxmlDoc, targetParentId);
+          if (newParent && !newParent['@_initial'] && newParent.state) {
+            const children = Array.isArray(newParent.state) ? newParent.state : [newParent.state];
+            if (children.length === 1) {
+              newParent['@_initial'] = children[0]['@_id'];
+            }
+          }
+        }
+      });
+
+      if (!changed) return;
+      const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
+      onSCXMLChange(updatedSCXML, 'structure');
+      setActiveStates(new Set());
+    },
+    [scxmlContent, onSCXMLChange]
+  );
+
+  const rectsOverlap = (
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+
+  const handleNodeDragStart = useCallback(
+    (_event: React.MouseEvent, node: Node, draggedNodes: Node[]) => {
+      draggingNodeIdsRef.current = (draggedNodes.length > 0 ? draggedNodes : [node]).map((n) => n.id);
+    },
+    []
+  );
+
+  // React Flow drags a multi-node selection via a SEPARATE overlay element
+  // (`.react-flow__nodesselection-rect`, shown once 2+ nodes are selected)
+  // rather than through any individual node — that overlay fires its own
+  // onSelectionDragStart/onSelectionDrag/onSelectionDragStop props, distinct
+  // from onNodeDragStart/onNodeDrag/onNodeDragStop. Without wiring those too,
+  // dragging a marquee-selected group silently does nothing on the first
+  // attempt (the mousedown lands on the overlay, not a node, so none of the
+  // onNodeDrag* handlers below ever fire) until the selection is lost some
+  // other way and a subsequent drag happens to target a single node instead.
+  // Both paths share the same drop-target detection, factored out here.
+  const computeDropTarget = useCallback(
+    (
+      event: React.MouseEvent,
+      draggedRect: { x: number; y: number; width: number; height: number }
+    ) => {
+      if (currentParentId && unnestZoneRef.current) {
+        const zoneRect = unnestZoneRef.current.getBoundingClientRect();
+        const overZone =
+          event.clientX >= zoneRect.left &&
+          event.clientX <= zoneRect.right &&
+          event.clientY >= zoneRect.top &&
+          event.clientY <= zoneRect.bottom;
+        setIsOverUnnestZone(overZone);
+        if (overZone) {
+          setDropTargetId(null);
+          return;
+        }
+      } else {
+        setIsOverUnnestZone(false);
+      }
+
+      const candidate = nodes.find((n) => {
+        if (draggingNodeIdsRef.current.includes(n.id) || isNoteId(n.id)) return false;
+        const rect = { x: n.position.x, y: n.position.y, width: n.width || 120, height: n.height || 60 };
+        return rectsOverlap(draggedRect, rect);
+      });
+
+      if (!candidate || !scxmlContent) {
+        setDropTargetId((prev) => (prev === null ? prev : null));
+        return;
+      }
+
+      const parseResult = parserRef.current?.parse(scxmlContent);
+      if (!parseResult?.success || !parseResult.data) {
+        setDropTargetId(null);
+        return;
+      }
+      const scxmlDoc = parseResult.data as SCXMLDocument;
+      const invalid =
+        candidate.type !== 'scxmlState' ||
+        draggingNodeIdsRef.current.includes(candidate.id) ||
+        draggingNodeIdsRef.current.some((id) => isDescendantOf(scxmlDoc, candidate.id, id));
+
+      setDropTargetId(invalid ? null : candidate.id);
+    },
+    [nodes, scxmlContent, currentParentId]
+  );
+
+  const handleNodeDrag = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      computeDropTarget(event, {
+        x: node.position.x,
+        y: node.position.y,
+        width: node.width || 120,
+        height: node.height || 60,
+      });
+    },
+    [computeDropTarget]
+  );
+
+  const handleSelectionDragStart = useCallback(
+    (_event: React.MouseEvent, draggedNodes: Node[]) => {
+      draggingNodeIdsRef.current = draggedNodes.map((n) => n.id);
+    },
+    []
+  );
+
+  const handleSelectionDrag = useCallback(
+    (event: React.MouseEvent, draggedNodes: Node[]) => {
+      if (draggedNodes.length === 0) return;
+      const lefts = draggedNodes.map((n) => n.position.x);
+      const tops = draggedNodes.map((n) => n.position.y);
+      const rights = draggedNodes.map((n) => n.position.x + (n.width || 120));
+      const bottoms = draggedNodes.map((n) => n.position.y + (n.height || 60));
+      const left = Math.min(...lefts);
+      const top = Math.min(...tops);
+      computeDropTarget(event, {
+        x: left,
+        y: top,
+        width: Math.max(...rights) - left,
+        height: Math.max(...bottoms) - top,
+      });
+    },
+    [computeDropTarget]
+  );
+
+  const justReparentedIdsRef = React.useRef<Set<string>>(new Set());
+
+  const handleNodeDragStop = useCallback(() => {
+    if (isOverUnnestZone && currentParentId) {
+      justReparentedIdsRef.current = new Set(draggingNodeIdsRef.current);
+      handleReparent(draggingNodeIdsRef.current, grandparentId);
+    } else if (dropTargetId) {
+      justReparentedIdsRef.current = new Set(draggingNodeIdsRef.current);
+      handleReparent(draggingNodeIdsRef.current, dropTargetId);
+    }
+    setDropTargetId(null);
+    setIsOverUnnestZone(false);
+    draggingNodeIdsRef.current = [];
+  }, [dropTargetId, isOverUnnestZone, currentParentId, grandparentId, handleReparent]);
+
   const handleAddNote = React.useCallback(() => {
     if (!onSCXMLChange || !scxmlContent) {
       console.error('Cannot add note: SCXML not available');
@@ -2531,11 +2864,25 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
 
     // Always update nodes when:
-    // 1. Coming from history (undo/redo), OR
-    // 2. Not currently updating positions from a drag operation
-    // This runs whenever enhancedNodes changes (which happens after parsing)
+    // 1. Coming from history (undo/redo) — unconditional, even if a node
+    //    drag happens to be in flight (mouse still down): an undo/redo must
+    //    never be silently dropped waiting for a drag to end, since nothing
+    //    re-triggers this effect once draggingNodeIdsRef (a plain ref, not a
+    //    reactive dependency) later empties out. OR
+    // 2. Not currently updating positions from a drag operation, AND no node
+    //    drag gesture is in progress (mouse still down, tracked via
+    //    draggingNodeIdsRef — see drag-to-nest below): enhancedNodes' positions
+    //    come from parsedData (the last-committed SCXML), not the live drag
+    //    position, so firing this effect mid-drag for a non-history reason
+    //    (e.g. a drop-target highlight change) would snap the dragged node(s)
+    //    back to their pre-drag position while the user is still dragging.
+    //    (The drop-target highlight itself is applied via a separate,
+    //    position-preserving effect further below, specifically to avoid
+    //    routing through this resync.)
+    // This runs whenever enhancedNodes changes (which happens after parsing).
     if (
-      (isUpdatingFromHistory || !isUpdatingPositionRef.current) &&
+      (isUpdatingFromHistory ||
+        (!isUpdatingPositionRef.current && draggingNodeIdsRef.current.length === 0)) &&
       enhancedNodes.length > 0
     ) {
       if (historyActionType === 'node-resize') {
@@ -2570,6 +2917,31 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     setEdges,
     isUpdatingFromHistory,
   ]);
+
+  // Reflect the current drag-to-nest drop target directly onto the live
+  // `nodes` state's `data.isDropTarget`, deliberately NOT routed through
+  // nodeEnhancements/enhancedNodes above: that path feeds the resync effect
+  // just above, which replaces node positions from parsedData (the last
+  // COMMITTED SCXML) — firing that mid-drag would snap the actively-dragged
+  // node back to its pre-drag position on every hover-target change, since
+  // parsedData doesn't reflect the live, uncommitted drag position. This
+  // effect instead uses the functional setNodes form, which always starts
+  // from the latest live node state (including in-flight drag positions),
+  // and only ever touches the `isDropTarget` field.
+  React.useEffect(() => {
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        const isDropTarget = n.id === dropTargetId;
+        if (Boolean((n.data as any)?.isDropTarget) === isDropTarget) {
+          return n;
+        }
+        changed = true;
+        return { ...n, data: { ...n.data, isDropTarget } };
+      });
+      return changed ? next : nds;
+    });
+  }, [dropTargetId, setNodes]);
 
   // Runs strictly after the `nodes` state update above has committed and
   // React has painted the new (possibly resized) node — see the flag's
@@ -2657,6 +3029,33 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedTransitions, handleEdgesChange, activeStates, handleNodesChange]);
 
+  // Handle Ctrl/Cmd+C / Ctrl/Cmd+V for copy/paste of selected states
+  React.useEffect(() => {
+    const isTextInputFocused = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement).isContentEditable;
+    };
+
+    const handleCopyPasteKeys = (event: KeyboardEvent) => {
+      if (isTextInputFocused()) return;
+      const isMod = event.ctrlKey || event.metaKey;
+      if (!isMod) return;
+
+      if (event.key === 'c' && activeStates.size > 0) {
+        event.preventDefault();
+        handleCopySelection();
+      } else if (event.key === 'v') {
+        event.preventDefault();
+        handlePasteClipboard();
+      }
+    };
+
+    window.addEventListener('keydown', handleCopyPasteKeys);
+    return () => window.removeEventListener('keydown', handleCopyPasteKeys);
+  }, [activeStates, handleCopySelection, handlePasteClipboard]);
+
   // Cleanup timeout on unmount
   React.useEffect(() => {
     return () => {
@@ -2691,7 +3090,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           </div>
         )}
 
-        <div className='flex-1 relative'>
+        <div ref={reactFlowWrapperRef} className='flex-1 relative'>
           <ReactFlow
             nodes={nodes}
             edges={displayFilteredEdges}
@@ -2705,6 +3104,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             onNodeClick={(event, node) =>
               handleStateClick(node.id, event, node.type)
             }
+            onSelectionStart={handleSelectionStart}
+            onSelectionEnd={handleSelectionEnd}
+            onNodeDragStart={handleNodeDragStart}
+            onNodeDrag={handleNodeDrag}
+            onNodeDragStop={handleNodeDragStop}
+            onSelectionDragStart={handleSelectionDragStart}
+            onSelectionDrag={handleSelectionDrag}
+            onSelectionDragStop={handleNodeDragStop}
             onNodeDoubleClick={(event, node) => {
               event.stopPropagation();
               const nodeElement = nodes.find((n) => n.id === node.id);
@@ -2769,6 +3176,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             panOnScroll={false}
             panOnDrag={true}
             zoomOnDoubleClick={false}
+            selectionKeyCode={['Control', 'Meta']}
           >
             {/* Global SVG definitions for arrows */}
             <svg style={{ position: 'absolute', width: 0, height: 0 }}>
@@ -2834,11 +3242,35 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               maskColor='rgba(0, 0, 0, 0.05)'
               className='bg-white/90 border border-slate-200 rounded-lg shadow-sm'
             />
+            {currentParentId && (
+              <Panel position='top-left'>
+                <div
+                  ref={unnestZoneRef}
+                  className={`flex items-center gap-1 rounded-lg border px-3 py-2 text-xs shadow-sm transition-colors ${
+                    isOverUnnestZone
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                      : 'border-default bg-elevated text-muted'
+                  }`}
+                >
+                  ↑ Back to parent
+                </div>
+              </Panel>
+            )}
           </ReactFlow>
           <InitialGroupConflictBanner
             message={connectionBlockedMessage}
             onDismiss={() => setConnectionBlockedMessage(null)}
           />
+          {activeStates.size >= 2 && (
+            <MultiSelectToolbar
+              count={activeStates.size}
+              onCopy={handleCopySelection}
+              onDelete={() => {
+                const ids = Array.from(activeStates);
+                handleNodesChange(ids.map((id) => ({ id, type: 'remove' })));
+              }}
+            />
+          )}
         </div>
       </div>
 

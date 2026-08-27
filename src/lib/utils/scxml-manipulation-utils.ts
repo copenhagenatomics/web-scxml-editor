@@ -40,6 +40,32 @@ export function findStateById(
 }
 
 /**
+ * Whether candidateId is nested anywhere inside ancestorId's subtree
+ * (not counting ancestorId itself). Only walks <state> children, matching
+ * findStateById/removeStateFromDocument's existing scope.
+ */
+export function isDescendantOf(
+  scxmlDoc: SCXMLDocument,
+  candidateId: string,
+  ancestorId: string
+): boolean {
+  const ancestor = findStateById(scxmlDoc, ancestorId);
+  if (!ancestor) return false;
+
+  function search(states: StateElement | StateElement[] | undefined): boolean {
+    if (!states) return false;
+    const arr = Array.isArray(states) ? states : [states];
+    for (const s of arr) {
+      if (s['@_id'] === candidateId) return true;
+      if (search(s.state)) return true;
+    }
+    return false;
+  }
+
+  return search(ancestor.state);
+}
+
+/**
  * Generate the next unused "eventN" name (event1, event2, ...) by scanning
  * every transition's @_event value in the whole document, so new transitions
  * never default to a name already in use elsewhere.
@@ -613,4 +639,169 @@ export function updateStatePosition(
 
   // Add or update visual metadata attributes using the parser's attribute format
   (stateElement as any)['@_viz:xywh'] = `${x} ${y} ${w} ${h}`;
+}
+
+/**
+ * Removes a state's element from wherever it currently sits (root or
+ * nested), fixing up the OLD parent's @_initial bookkeeping the same way
+ * removeStateFromDocument does — but, unlike removeStateFromDocument, this
+ * does NOT touch any transitions, since reparenting must keep every
+ * transition targeting the moved state intact. Returns the detached
+ * StateElement for re-insertion elsewhere, or null if not found.
+ */
+export function detachStateFromParent(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): StateElement | null {
+  function fixInitial(
+    container: { '@_initial'?: string; state?: StateElement | StateElement[] },
+    isRoot: boolean
+  ): void {
+    if (container['@_initial']) {
+      const tokens = container['@_initial']
+        .split(/\s+/)
+        .filter((t) => t && t !== stateId);
+      if (tokens.length > 0) {
+        container['@_initial'] = tokens.join(' ');
+        return;
+      }
+      delete container['@_initial'];
+    }
+    if (!isRoot && !container['@_initial'] && container.state) {
+      const remaining = Array.isArray(container.state)
+        ? container.state
+        : [container.state];
+      if (remaining.length > 0) {
+        container['@_initial'] = remaining[0]['@_id'];
+      }
+    }
+  }
+
+  function detachFrom(
+    container: { state?: StateElement | StateElement[]; '@_initial'?: string },
+    isRoot: boolean
+  ): StateElement | null {
+    const states = container.state;
+    if (!states) return null;
+    const arr = Array.isArray(states) ? states : [states];
+    const idx = arr.findIndex((s) => s['@_id'] === stateId);
+
+    if (idx !== -1) {
+      const [removed] = arr.splice(idx, 1);
+      container.state = arr.length > 0 ? arr : undefined;
+      fixInitial(container, isRoot);
+      return removed;
+    }
+
+    for (const s of arr) {
+      const found = detachFrom(s, false);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  return detachFrom(scxmlDoc.scxml as any, true);
+}
+
+/**
+ * Deep-clones a state (and its whole descendant subtree) with a fresh
+ * unique id for every state in the clone, offsetting each cloned state's
+ * viz:xywh position and rewriting each cloned compound state's own
+ * @_initial to match. Descendant transitions are left as-is here — see
+ * rewriteOrDropTransitions, applied separately once the full paste-wide id
+ * map (across every top-level copied state) is known.
+ *
+ * existingIds is mutated as ids are claimed, so calling this once per
+ * top-level copied state in a multi-state paste avoids id collisions
+ * between the pasted states themselves.
+ */
+export function cloneStateSubtreeWithFreshIds(
+  state: StateElement,
+  existingIds: Set<string>,
+  offsetX: number,
+  offsetY: number
+): { clone: StateElement; idMap: Map<string, string> } {
+  const idMap = new Map<string, string>();
+  const rootClone: StateElement = JSON.parse(JSON.stringify(state));
+
+  function freshId(oldId: string): string {
+    let candidate = `${oldId}_copy`;
+    let n = 2;
+    while (existingIds.has(candidate)) {
+      candidate = `${oldId}_copy${n}`;
+      n++;
+    }
+    existingIds.add(candidate);
+    return candidate;
+  }
+
+  function offsetPosition(clone: StateElement): void {
+    const xywh = (clone as any)['@_viz:xywh'];
+    if (typeof xywh !== 'string') return;
+    const parts = xywh.split(',').map((p) => parseFloat(p.trim()));
+    if (parts.length < 4) return;
+    const [x, y, w, h] = parts;
+    (clone as any)['@_viz:xywh'] = `${x + offsetX},${y + offsetY},${w},${h}`;
+  }
+
+  function assignIds(clone: StateElement): void {
+    const oldId = clone['@_id'];
+    clone['@_id'] = freshId(oldId);
+    idMap.set(oldId, clone['@_id']);
+    offsetPosition(clone);
+
+    if (clone.state) {
+      const children = Array.isArray(clone.state) ? clone.state : [clone.state];
+      children.forEach(assignIds);
+    }
+  }
+
+  function rewriteInitial(clone: StateElement): void {
+    if (clone['@_initial']) {
+      const tokens = clone['@_initial'].split(/\s+/).filter(Boolean);
+      clone['@_initial'] = tokens.map((t) => idMap.get(t) || t).join(' ');
+    }
+    if (clone.state) {
+      const children = Array.isArray(clone.state) ? clone.state : [clone.state];
+      children.forEach(rewriteInitial);
+    }
+  }
+
+  assignIds(rootClone);
+  rewriteInitial(rootClone);
+
+  return { clone: rootClone, idMap };
+}
+
+/**
+ * Walks an already-cloned subtree's transitions at every depth: a
+ * transition whose @_target is in idMap is rewritten to the mapped id; one
+ * whose @_target is present but NOT in idMap (points outside the copied
+ * set) is dropped entirely; a targetless transition is always kept.
+ * Mutates the given clone in place.
+ */
+export function rewriteOrDropTransitions(
+  state: StateElement,
+  idMap: Map<string, string>
+): void {
+  function walk(s: StateElement): void {
+    if (s.transition) {
+      const arr = Array.isArray(s.transition) ? s.transition : [s.transition];
+      const kept = arr
+        .filter((t) => !t['@_target'] || idMap.has(t['@_target']))
+        .map((t) =>
+          t['@_target'] && idMap.has(t['@_target'])
+            ? { ...t, '@_target': idMap.get(t['@_target'])! }
+            : t
+        );
+      s.transition = kept.length === 0 ? undefined : kept.length === 1 ? kept[0] : kept;
+    }
+
+    if (s.state) {
+      const children = Array.isArray(s.state) ? s.state : [s.state];
+      children.forEach(walk);
+    }
+  }
+
+  walk(state);
 }
