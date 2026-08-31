@@ -8,6 +8,7 @@ import {
   detachStateFromParent,
   cloneStateSubtreeWithFreshIds,
   rewriteOrDropTransitions,
+  findStateById,
 } from './scxml-manipulation-utils';
 
 describe('updateTransitionTargets', () => {
@@ -326,5 +327,72 @@ describe('rewriteOrDropTransitions', () => {
     const state = { '@_id': 'Parent_copy', state: [child] } as any;
     rewriteOrDropTransitions(state, new Map([['Sibling', 'Sibling_copy']]));
     expect(child.transition['@_target']).toBe('Sibling_copy');
+  });
+});
+
+describe('findStateById', () => {
+  it('finds a <parallel> element by its own id', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'Airplane',
+            '@_initial': 'Engines',
+            parallel: [{ '@_id': 'Engines', state: [{ '@_id': 'Left' }, { '@_id': 'Right' }] }],
+          },
+        ],
+      } as any,
+    };
+    const found = findStateById(d, 'Engines');
+    expect(found?.['@_id']).toBe('Engines');
+  });
+
+  it('finds a region (<state> nested inside a <parallel>) by id', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'Airplane',
+            '@_initial': 'Engines',
+            parallel: [{ '@_id': 'Engines', state: [{ '@_id': 'Left' }, { '@_id': 'Right' }] }],
+          },
+        ],
+      } as any,
+    };
+    const found = findStateById(d, 'Left');
+    expect(found?.['@_id']).toBe('Left');
+  });
+
+  it('finds a state nested inside a region two levels deep', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'Airplane',
+            parallel: [
+              {
+                '@_id': 'Engines',
+                state: [{ '@_id': 'Left', '@_initial': 'LeftOff', state: [{ '@_id': 'LeftOff' }, { '@_id': 'LeftOn' }] }],
+              },
+            ],
+          },
+        ],
+      } as any,
+    };
+    const found = findStateById(d, 'LeftOn');
+    expect(found?.['@_id']).toBe('LeftOn');
+  });
+
+  it('finds a root-level <parallel> (no enclosing <state>)', () => {
+    const d: SCXMLDocument = {
+      scxml: { parallel: [{ '@_id': 'Engines', state: [{ '@_id': 'Left' }] }] } as any,
+    };
+    expect(findStateById(d, 'Engines')?.['@_id']).toBe('Engines');
+    expect(findStateById(d, 'Left')?.['@_id']).toBe('Left');
+  });
+
+  it('still returns null for an id that does not exist', () => {
+    const d: SCXMLDocument = { scxml: { state: [{ '@_id': 'A' }] } as any };
+    expect(findStateById(d, 'nope')).toBeNull();
   });
 });

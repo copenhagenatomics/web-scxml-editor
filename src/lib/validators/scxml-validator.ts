@@ -15,6 +15,7 @@ import {
   findDuplicateDataIds,
   findMainPrefixedDataIds,
   validateCompoundStates,
+  validateParallelRegions,
   findReachableStates,
 } from './state-validator';
 import {
@@ -274,5 +275,6 @@ export class SCXMLValidator {
 
     // Validate compound state requirements
     validateCompoundStates(scxml, errors);
+    validateParallelRegions(scxml, errors);
   }
 }

@@ -437,6 +437,28 @@ export function findMainPrefixedDataIds(scxml: SCXMLElement): string[] {
 }
 
 /**
+ * Push an error if a compound state (one with any state/parallel/final/history
+ * children) lacks an 'initial' attribute or <initial> child element. Shared by
+ * validateCompoundStates and validateParallelRegions, which walk disjoint parts
+ * of the tree but enforce the same rule.
+ */
+function pushMissingInitialError(
+  state: StateElement,
+  errors: ValidationError[]
+): void {
+  const hasChildren =
+    state.state || state.parallel || state.final || state.history;
+
+  if (hasChildren && !state['@_initial'] && !state.initial) {
+    errors.push({
+      message: `Compound state '${state['@_id']}' must have either an 'initial' attribute or an <initial> child element`,
+      severity: 'error',
+      stateId: state['@_id'],
+    });
+  }
+}
+
+/**
  * Validate compound states have initial attributes or elements
  */
 export function validateCompoundStates(
@@ -444,19 +466,7 @@ export function validateCompoundStates(
   errors: ValidationError[]
 ): void {
   const validateCompoundState = (state: StateElement) => {
-    const hasChildren =
-      state.state || state.parallel || state.final || state.history;
-
-    if (hasChildren) {
-      // Compound state must have initial attribute or initial element
-      if (!state['@_initial'] && !state.initial) {
-        errors.push({
-          message: `Compound state '${state['@_id']}' must have either an 'initial' attribute or an <initial> child element`,
-          severity: 'error',
-          stateId: state['@_id'],
-        });
-      }
-    }
+    pushMissingInitialError(state, errors);
 
     // Recursively validate nested states
     if (state.state) {
@@ -469,6 +479,67 @@ export function validateCompoundStates(
     const states = Array.isArray(scxml.state) ? scxml.state : [scxml.state];
     states.forEach((state) => validateCompoundState(state));
   }
+}
+
+/**
+ * Validate <parallel> elements: each region (a direct <state>/<parallel>
+ * child of the parallel) that has its own children must declare an initial
+ * state, exactly like an ordinary compound state — validateCompoundStates
+ * above never visits .parallel subtrees at all, so this is the only place
+ * that requirement is checked for anything reached through a <parallel>.
+ * Also warns when a parallel has fewer than 2 regions, since a single-region
+ * "parallel" state has no concurrency to speak of.
+ */
+export function validateParallelRegions(
+  scxml: SCXMLElement,
+  errors: ValidationError[]
+): void {
+  const validateCompoundStateRecursive = (state: StateElement) => {
+    pushMissingInitialError(state, errors);
+
+    if (state.state) {
+      const nested = Array.isArray(state.state) ? state.state : [state.state];
+      nested.forEach((s) => validateCompoundStateRecursive(s));
+    }
+    if (state.parallel) {
+      const nested = Array.isArray(state.parallel) ? state.parallel : [state.parallel];
+      nested.forEach((p) => validateRegionsOf(p));
+    }
+  };
+
+  const validateRegionsOf = (parallel: ParallelElement) => {
+    const stateRegions = parallel.state
+      ? Array.isArray(parallel.state) ? parallel.state : [parallel.state]
+      : [];
+    const parallelRegions = parallel.parallel
+      ? Array.isArray(parallel.parallel) ? parallel.parallel : [parallel.parallel]
+      : [];
+    const regionCount = stateRegions.length + parallelRegions.length;
+
+    if (regionCount < 2) {
+      errors.push({
+        message: `Parallel state '${parallel['@_id']}' has ${regionCount} region${regionCount === 1 ? '' : 's'}; a parallel state needs at least 2 regions to run anything concurrently.`,
+        severity: 'warning',
+        stateId: parallel['@_id'],
+      });
+    }
+
+    stateRegions.forEach((region) => validateCompoundStateRecursive(region));
+    parallelRegions.forEach((nested) => validateRegionsOf(nested));
+  };
+
+  const walk = (element: SCXMLElement | StateElement) => {
+    if (element.parallel) {
+      const parallels = Array.isArray(element.parallel) ? element.parallel : [element.parallel];
+      parallels.forEach((p) => validateRegionsOf(p));
+    }
+    if (element.state) {
+      const states = Array.isArray(element.state) ? element.state : [element.state];
+      states.forEach((s) => walk(s));
+    }
+  };
+
+  walk(scxml);
 }
 
 /**

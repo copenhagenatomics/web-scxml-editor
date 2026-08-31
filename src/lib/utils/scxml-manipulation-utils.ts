@@ -9,34 +9,54 @@ import type {
 } from '@/types/scxml';
 
 /**
- * Find a state element by its ID in the SCXML document
+ * Find a state element by its ID in the SCXML document. Searches both
+ * <state> and <parallel> subtrees (a <parallel>'s regions are <state>/
+ * <parallel> elements, and the parallel itself is a valid search target —
+ * e.g. addStateToDocument needs to find it to add a new region).
  */
 export function findStateById(
   scxmlDoc: SCXMLDocument,
   stateId: string
-): StateElement | null {
+): StateElement | ParallelElement | null {
   function searchInStates(
     states: StateElement | StateElement[] | undefined
-  ): StateElement | null {
+  ): StateElement | ParallelElement | null {
     if (!states) return null;
-
     const stateArray = Array.isArray(states) ? states : [states];
 
     for (const state of stateArray) {
-      if (state['@_id'] === stateId) {
-        return state;
-      }
+      if (state['@_id'] === stateId) return state;
 
-      // Search in nested states
-      const found = searchInStates(state.state);
-      if (found) return found;
+      const foundInChildStates = searchInStates(state.state);
+      if (foundInChildStates) return foundInChildStates;
+
+      const foundInChildParallels = searchInParallels(state.parallel);
+      if (foundInChildParallels) return foundInChildParallels;
     }
 
     return null;
   }
 
-  // Search in root states
-  return searchInStates(scxmlDoc.scxml.state);
+  function searchInParallels(
+    parallels: ParallelElement | ParallelElement[] | undefined
+  ): StateElement | ParallelElement | null {
+    if (!parallels) return null;
+    const parallelArray = Array.isArray(parallels) ? parallels : [parallels];
+
+    for (const parallel of parallelArray) {
+      if (parallel['@_id'] === stateId) return parallel;
+
+      const foundInRegionStates = searchInStates(parallel.state);
+      if (foundInRegionStates) return foundInRegionStates;
+
+      const foundInNestedParallels = searchInParallels(parallel.parallel);
+      if (foundInNestedParallels) return foundInNestedParallels;
+    }
+
+    return null;
+  }
+
+  return searchInStates(scxmlDoc.scxml.state) ?? searchInParallels(scxmlDoc.scxml.parallel);
 }
 
 /**

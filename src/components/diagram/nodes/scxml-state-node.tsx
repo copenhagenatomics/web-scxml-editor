@@ -63,6 +63,11 @@ export interface SCXMLStateNodeData {
   // Drag-to-nest: true while another node is being dragged over this one as
   // a valid reparent target.
   isDropTarget?: boolean;
+  // Parallel-region grouping (set only when this node's parent, one level
+  // up, is a <parallel> region — see useHierarchyNavigation's region mode)
+  regionId?: string;
+  regionLabel?: string;
+  regionIndex?: number;
 }
 
 export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(

@@ -5,6 +5,7 @@
 import { useHierarchyNavigation } from '@/hooks/use-hierarchy-navigation';
 import { SCXMLToXStateConverter } from '@/lib/converters/scxml-to-xstate';
 import { nodeDimensionCalculator } from '@/lib/layout/node-dimension-calculator';
+import { REGION_COLUMN_WIDTH, REGION_COLUMN_GAP } from '@/lib/layout/region-layout';
 import { VisualMetadataManager } from '@/lib/metadata';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
@@ -71,6 +72,7 @@ import { StickyNoteNode } from './nodes/sticky-note-node';
 import { StateActionsPanel } from '@/components/ui/state-actions-panel';
 import { TransitionPanel, type TransitionApplyArgs, type TransitionApplyResult } from './transition-panel';
 import { InitialGroupConflictBanner } from './initial-group-conflict-banner';
+import { ParallelRegionOverlay } from './parallel/parallel-region-overlay';
 import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
@@ -2262,10 +2264,24 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     navigateToRoot: originalNavigateToRoot,
     navigateIntoState: originalNavigateIntoState,
     currentParentId,
+    isParallelRegionMode,
+    regions,
+    regionColumns,
+    regionContentBottom,
   } = useHierarchyNavigation({
     allNodes: parsedData.nodes,
     allEdges: parsedData.edges,
   });
+
+  const regionStateCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    filteredNodes.forEach((node) => {
+      const regionId = (node.data as { regionId?: string }).regionId;
+      if (!regionId) return;
+      counts.set(regionId, (counts.get(regionId) ?? 0) + 1);
+    });
+    return counts;
+  }, [filteredNodes]);
 
   // Update allNodesRef with original nodes (with parentId intact)
   allNodesRef.current = parsedData.nodes;
@@ -2352,8 +2368,24 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     setFocusTarget,
   ]);
 
-  // ==================== ADD ROOT STATE HANDLER ====================
-  const handleAddRootState = React.useCallback(() => {
+  // Whether `id` refers to a <parallel> element, per the currently-parsed
+  // node graph (parsedData.nodes still carries every node with its real
+  // parentId/stateType, unlike the hierarchy-nav-filtered `nodes`/`regions`
+  // which only cover the current level).
+  const isParallelStateId = React.useCallback(
+    (id: string | undefined | null) =>
+      !!id && parsedData.nodes.find((n) => n.id === id)?.data?.stateType === 'parallel',
+    [parsedData.nodes]
+  );
+
+  // ==================== ADD ROOT STATE / ADD REGION HANDLER ====================
+  // `regionParentIdOverride`, when given, is a region's own id: the new
+  // state is added INSIDE that region (an ordinary child), used by the
+  // per-region "Add State" button. Without it, the new state is added
+  // under `currentParentId` as usual — which, when currentParentId is a
+  // <parallel>, means adding a new REGION (a direct child of the parallel),
+  // used by the "Add Region" control.
+  const handleAddRootState = React.useCallback((regionParentIdOverride?: string) => {
     if (!onSCXMLChange || !scxmlContent) {
       console.error('Cannot add state: SCXML not available');
       return;
@@ -2371,18 +2403,22 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const parseResult = parserRef.current?.parse(scxmlContent);
       if (parseResult?.success && parseResult.data) {
         const scxmlDoc = parseResult.data;
-        let parentId: string | undefined = undefined;
 
-        // Only set parentId if we're inside a specific parent (hierarchy navigation)
-        // Otherwise leave it undefined to add at true root level
-        if (currentParentId) {
-          parentId = currentParentId;
-        }
+        const addingRegionToParallel =
+          !regionParentIdOverride && isParallelStateId(currentParentId);
+        const parentId: string | undefined =
+          regionParentIdOverride ?? currentParentId ?? undefined;
 
         let x = 100;
         let y = 100;
 
-        if (parentId) {
+        if (addingRegionToParallel) {
+          // New region: place it as the next column so it doesn't overlap existing
+          // regions on the canvas before the hierarchy-nav hook (which derives the
+          // real region-mode layout independently, from content width) re-renders.
+          x = 50 + regions.length * (REGION_COLUMN_WIDTH + REGION_COLUMN_GAP);
+          y = 100;
+        } else if (parentId) {
           const childNodes = nodes.length;
 
           if (childNodes) {
@@ -2420,9 +2456,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        // Check if this will be the initial state (parent has no children)
+        // Check if this will be the initial state (parent has no children).
+        // A <parallel> has no "initial" concept at all — regions are all
+        // active simultaneously — so a new region never gets this treatment.
         let isInitial = false;
-        if (parentId) {
+        if (parentId && !isParallelStateId(parentId)) {
           const parentState = findStateById(scxmlDoc, parentId);
           if (parentState && !parentState.state) {
             isInitial = true;
@@ -2448,7 +2486,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         if (isInitial && parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
           if (parentState) {
-            parentState['@_initial'] = newStateId;
+            (parentState as StateElement)['@_initial'] = newStateId;
           }
         }
 
@@ -2477,6 +2515,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     currentParentId,
     nodes,
     fitView,
+    isParallelStateId,
+    regions,
   ]);
 
   // ==================== COPY / PASTE SELECTION HANDLERS ====================
@@ -2553,10 +2593,15 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
         if (targetParentId) {
           const newParent = findStateById(scxmlDoc, targetParentId);
-          if (newParent && !newParent['@_initial'] && newParent.state) {
+          if (
+            newParent &&
+            !isParallelStateId(targetParentId) &&
+            !(newParent as StateElement)['@_initial'] &&
+            newParent.state
+          ) {
             const children = Array.isArray(newParent.state) ? newParent.state : [newParent.state];
             if (children.length === 1) {
-              newParent['@_initial'] = children[0]['@_id'];
+              (newParent as StateElement)['@_initial'] = children[0]['@_id'];
             }
           }
         }
@@ -2567,7 +2612,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       onSCXMLChange(updatedSCXML, 'structure');
       setActiveStates(new Set());
     },
-    [scxmlContent, onSCXMLChange]
+    [scxmlContent, onSCXMLChange, isParallelStateId]
   );
 
   const rectsOverlap = (
@@ -3211,6 +3256,15 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               size={1}
               variant={BackgroundVariant.Dots}
             />
+            {isParallelRegionMode && regionColumns.length > 0 && (
+              <ParallelRegionOverlay
+                columns={regionColumns}
+                regionStateCounts={regionStateCounts}
+                contentBottom={regionContentBottom}
+                onAddRegion={() => handleAddRootState()}
+                onAddStateToRegion={(regionId) => handleAddRootState(regionId)}
+              />
+            )}
             <Controls
               position='bottom-left'
               showZoom={true}
@@ -3218,9 +3272,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               showInteractive={true}
             >
               <ControlButton
-                onClick={handleAddRootState}
-                title='Add State'
-                aria-label='Add State'
+                onClick={() => handleAddRootState()}
+                title={isParallelRegionMode ? 'Add Region' : 'Add State'}
+                aria-label={isParallelRegionMode ? 'Add Region' : 'Add State'}
                 className='text-muted hover:text-default'
               >
                 S
