@@ -34,6 +34,44 @@ describe('RenameStateCommand', () => {
     expect(result.newContent).toContain('initial="A B"');
   });
 
+  describe('time-event token renaming', () => {
+    it('rewrites the transition @event token generated for this state', () => {
+      const xml = `${SCXML_HEADER}><state id="A"><transition event="A_t_0_timeEvent_0" target="A"/></state></scxml>`;
+      const result = new RenameStateCommand('A', 'A2').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="A2_t_0_timeEvent_0"');
+    });
+
+    it('rewrites the onentry send @event and onexit cancel @sendid tokens together', () => {
+      const xml = `${SCXML_HEADER}><state id="A"><onentry><send event="A_t_0_timeEvent_0" delay="2s"/></onentry><onexit><cancel sendid="A_t_0_timeEvent_0"/></onexit><transition event="A_t_0_timeEvent_0" target="A"/></state></scxml>`;
+      const result = new RenameStateCommand('A', 'A2').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="A2_t_0_timeEvent_0"');
+      expect(result.newContent).toContain('sendid="A2_t_0_timeEvent_0"');
+    });
+
+    it('only renames the time-event token inside a comma-merged event list, leaving the plain event alone', () => {
+      const xml = `${SCXML_HEADER}><state id="A"><transition event="A_t_0_timeEvent_0, clicked" target="A"/></state></scxml>`;
+      const result = new RenameStateCommand('A', 'A2').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="A2_t_0_timeEvent_0, clicked"');
+    });
+
+    it('leaves a plain (non-time-event) event name untouched', () => {
+      const xml = `${SCXML_HEADER}><state id="A"><transition event="clicked" target="A"/></state></scxml>`;
+      const result = new RenameStateCommand('A', 'A2').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="clicked"');
+    });
+
+    it('does not touch a time-event token belonging to a different state', () => {
+      const xml = `${SCXML_HEADER}><state id="A"><transition event="B_t_0_timeEvent_0" target="A"/></state><state id="B"/></scxml>`;
+      const result = new RenameStateCommand('A', 'A2').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="B_t_0_timeEvent_0"');
+    });
+  });
+
   describe('waypoint invalidation', () => {
     // A longer/shorter id changes the node's rendered width (label length),
     // so stale persisted viz:waypoints on transitions touching it must be

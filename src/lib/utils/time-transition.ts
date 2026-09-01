@@ -136,6 +136,36 @@ export function resolveTimeEventDisplay(
 }
 
 /**
+ * Rewrites a single auto-generated time-event token (`{oldId}_t_{N}_timeEvent_{N}`)
+ * to carry `newId` instead, if — and only if — it was generated for `oldId`.
+ * A plain event name, or a time-event token belonging to some other state, is
+ * returned unchanged.
+ */
+export function renameTimeEventToken(
+  token: string,
+  oldId: string,
+  newId: string
+): string {
+  const pattern = new RegExp(`^${escapeRegExp(oldId)}_t_\\d+_timeEvent_\\d+$`);
+  return pattern.test(token) ? newId + token.slice(oldId.length) : token;
+}
+
+/**
+ * Applies renameTimeEventToken across a possibly comma-merged `@_event` value,
+ * preserving the original string (spacing included) when nothing changed.
+ */
+export function renameTimeEventTokensInEventList(
+  value: string | undefined,
+  oldId: string,
+  newId: string
+): string | undefined {
+  if (!value) return value;
+  const tokens = value.split(',').map((t) => t.trim());
+  const renamed = tokens.map((t) => renameTimeEventToken(t, oldId, newId));
+  return renamed.some((t, i) => t !== tokens[i]) ? renamed.join(', ') : value;
+}
+
+/**
  * Generate the next available time-event name for a source state.
  * Scans the SCXML string for existing {sourceId}_t_{N}_timeEvent_ occurrences
  * and uses max(N)+1 (starting from 0).

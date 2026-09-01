@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base-command';
 import { clearWaypointsForTouchingTransitions } from './waypoint-invalidation';
+import { renameTimeEventTokensInEventList } from '../utils/time-transition';
 
 /**
  * RenameStateCommand
@@ -8,6 +9,9 @@ import { clearWaypointsForTouchingTransitions } from './waypoint-invalidation';
  * - Updates the state's @id attribute
  * - Updates all transition @target attributes pointing to this state
  * - Updates parent's @initial attribute if it points to this state
+ * - Updates auto-generated time-event tokens ({oldId}_t_N_timeEvent_N) that
+ *   this state's own transitions/send/cancel elements carry, since that
+ *   naming bakes the id in as a literal string rather than deriving it live
  *
  * A longer/shorter id also changes the node's rendered width (see
  * NodeDimensionCalculator, which sizes by label length — the label is the
@@ -49,6 +53,40 @@ export class RenameStateCommand extends BaseCommand {
 
     // Update the state's ID
     stateElement.setAttribute('id', this.newId);
+
+    // Rewrite this state's own time-event tokens (transition @event, onentry
+    // send @event, onexit cancel @sendid) — auto-generated names bake the
+    // state id in literally, so a rename leaves them stale otherwise.
+    Array.from(stateElement.children).forEach((child) => {
+      const tag = child.tagName.toLowerCase();
+
+      if (tag === 'transition') {
+        const eventAttr = child.getAttribute('event');
+        const renamed = renameTimeEventTokensInEventList(eventAttr ?? undefined, this.stateId, this.newId);
+        if (renamed !== undefined && renamed !== eventAttr) {
+          child.setAttribute('event', renamed);
+        }
+      }
+
+      if (tag === 'onentry' || tag === 'onexit') {
+        Array.from(child.children).forEach((action) => {
+          const actionTag = action.tagName.toLowerCase();
+          if (actionTag === 'send') {
+            const eventAttr = action.getAttribute('event');
+            const renamed = renameTimeEventTokensInEventList(eventAttr ?? undefined, this.stateId, this.newId);
+            if (renamed !== undefined && renamed !== eventAttr) {
+              action.setAttribute('event', renamed);
+            }
+          } else if (actionTag === 'cancel') {
+            const sendidAttr = action.getAttribute('sendid');
+            const renamed = renameTimeEventTokensInEventList(sendidAttr ?? undefined, this.stateId, this.newId);
+            if (renamed !== undefined && renamed !== sendidAttr) {
+              action.setAttribute('sendid', renamed);
+            }
+          }
+        });
+      }
+    });
 
     // Update all transitions that target this state
     const transitions = doc.querySelectorAll(`transition[target="${this.stateId}"]`);
