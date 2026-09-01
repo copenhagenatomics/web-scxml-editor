@@ -18,7 +18,7 @@ describe('validateTransitionSemantics event name validation', () => {
     expect(errors).toEqual([]);
   });
 
-  it('still validates a legacy space-separated event list (backward compatibility)', () => {
+  it('treats a space-separated value as a single event name containing spaces (no longer split on whitespace)', () => {
     const scxml: SCXMLElement = {
       state: [{ '@_id': 'A', transition: { '@_event': 'event1 event2', '@_target': 'A' } }],
     } as any;

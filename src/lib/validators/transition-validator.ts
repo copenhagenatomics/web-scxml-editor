@@ -174,11 +174,11 @@ export function validateTransitionSemantics(
 
         // Validate event names (basic check for valid event syntax)
         if (transition['@_event']) {
-          const events = transition['@_event'].split(/[\s,]+/).map((e) => e.trim()).filter(Boolean);
+          const events = transition['@_event'].split(/,+/).map((e) => e.trim()).filter(Boolean);
           events.forEach((event: string) => {
             if (
               event !== '*' &&
-              !/^[a-zA-Z_][a-zA-Z0-9_\-\.]*(\.\*)?$/.test(event)
+              !/^[a-zA-Z_][a-zA-Z0-9_\-\. ]*(\.\*)?$/.test(event)
             ) {
               errors.push({
                 message: `Invalid event name '${event}'. Event names must be valid identifiers`,
