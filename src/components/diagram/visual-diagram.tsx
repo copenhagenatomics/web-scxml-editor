@@ -1004,6 +1004,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       setEdges((eds) => addEdge(newEdge, eds));
 
+      setActiveStates(new Set());
+      setSelectedStateForActions(null);
+      setSelectedTransitions(new Set([newEdge.id]));
+      setActivePanel('transition');
+      setSelectedEdgeForEdit({
+        id: newEdge.id,
+        source: newEdge.source,
+        target: newEdge.target,
+        event: undefined,
+        cond: undefined,
+      });
+
       if (parserRef.current && scxmlContent) {
         try {
           const parseResult = parserRef.current.parse(scxmlContent);
@@ -1063,7 +1075,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
       }
     },
-    [setEdges, scxmlContent, onSCXMLChange]
+    [setEdges, scxmlContent, onSCXMLChange, setActivePanel]
   );
 
   // Set for the duration of a drag on an existing edge's endpoint (onReconnectStart ->
