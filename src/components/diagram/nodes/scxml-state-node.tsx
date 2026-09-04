@@ -10,14 +10,7 @@ import {
   NodeResizer,
   useReactFlow,
 } from 'reactflow';
-import {
-  Circle,
-  Square,
-  Target,
-  Trash2,
-  ArrowDownCircle,
-  Plus,
-} from 'lucide-react';
+import { Trash2, ArrowDownCircle, Plus } from 'lucide-react';
 import {
   visualStylesToCSS,
   getAdditionalClasses,
@@ -431,49 +424,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       inlineStyles.borderStyle = 'solid';
     }
 
-    // Get icon for state type with matching colors
-    const getStateIcon = () => {
-      const iconColor = stateChar.color;
-
-      // Special handling for history states
-      if (label.toLowerCase().includes('history')) {
-        return (
-          <Circle
-            className='h-4 w-4'
-            style={{ color: iconColor }}
-            fill='currentColor'
-          />
-        );
-      }
-
-      switch (stateType) {
-        case 'final':
-          return <Target className='h-4 w-4' style={{ color: iconColor }} />;
-        case 'compound':
-          return <Square className='h-4 w-4' style={{ color: iconColor }} />;
-        case 'parallel':
-          return (
-            <div className='flex items-center space-x-1'>
-              <div className='flex'>
-                <Square
-                  className='h-3 w-3'
-                  style={{ color: iconColor, fill: `${iconColor}33` }}
-                />
-                <Square
-                  className='h-3 w-3 -ml-1'
-                  style={{ color: iconColor, fill: `${iconColor}33` }}
-                />
-              </div>
-              <span className='text-xs font-bold' style={{ color: iconColor }}>
-                ⚡
-              </span>
-            </div>
-          );
-        default:
-          return <Circle className='h-4 w-4' style={{ color: iconColor }} />;
-      }
-    };
-
     const actionCountIndicator = (() => {
       const entryCount = visibleEntryActions.length;
       const exitCount = visibleExitActions.length;
@@ -656,7 +606,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
             {/* State header with icon and name */}
             <div className='flex items-center justify-between mb-2'>
               <div className='flex items-center space-x-2 flex-1'>
-                {getStateIcon()}
                 {editingLabel ? (
                   <input
                     type='text'
