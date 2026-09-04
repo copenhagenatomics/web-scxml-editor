@@ -245,6 +245,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...the Transition panel has an explicit Event/Condition switch | [editing.md](decisions/editing.md) #6 (Superseded: auto-inferred mode) |
 | ...opening an old file doesn't show duplicate-transition errors | [editing.md](decisions/editing.md) #7 |
 | ...editing actions can silently delete a `<raise>`/`<script>`/`<if>` | [editing.md](decisions/editing.md) #8 (Inferred gap) |
+| ...a timer transition's send/cancel rows don't show up in the State Actions panel or the state's action-count badge | [editing.md](decisions/editing.md) #9 |
 | ...validation passes must run in a specific order | [validation.md](decisions/validation.md) #1 |
 | ...there are two "parser" classes (`SCXMLParser` vs `SCXMLValidator`) | [validation.md](decisions/validation.md) #2 |
 | ...validation checks for C# reserved words / digit-leading event names | [validation.md](decisions/validation.md) #3 |

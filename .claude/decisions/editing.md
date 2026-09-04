@@ -201,3 +201,28 @@ N/A — no evidence of a considered-and-rejected alternative; this reads as an i
 
 ### Status
 Inferred behavior — a real gap, not a stated design decision.
+
+---
+
+## 9. Timer transitions' auto-generated onentry/onexit actions are hidden from the State Actions panel and the state node's action-count indicator
+
+### Context
+An "after X" time transition (see `time-transition-syntax.md`) is implemented as a `send` action in the source state's `onentry` and a paired `cancel` in its `onexit`, using a synthetic event name matching `{stateId}_t_N_timeEvent_N`. Before this change, these rows appeared as ordinary, editable `send`/`cancel` rows in the State Actions panel's onentry/onexit tabs and counted toward the state node's `entry:N`/`exit:N` canvas badge, even though the intended authoring surface for them is the Transition panel's "after X" field.
+
+### Decision
+`visual-diagram.tsx` filters any onentry/onexit action string matching the timer-generated pattern (`isTimerGeneratedActionString`, `src/lib/utils/time-transition.ts`) out of what's passed to `StateActionsPanel` and out of what's passed to `SCXMLStateNode`'s action-count display. The filtered-out raw strings are retained (`selectedStateForActions.hiddenEntryActions`/`hiddenExitActions`) and re-appended to whatever the panel commits (`onApply`, `onNewChannel`'s "new channel" path), so editing an unrelated action row never drops the timer's `send`/`cancel` elements from the document. The underlying SCXML is untouched — the elements are still written, and remain fully visible/editable in the Monaco code editor.
+
+### Reason
+Explicit product requirement: timer transitions should not expose their internal `onentry`/`onexit` implementation as user-editable rows, since editing them directly (rather than through the Transition panel) risks silently breaking the `send`/`cancel` pairing (see `time-transition-syntax.md`'s Known limitations).
+
+### Constraints
+Any new site that reads a state's raw `entryActions`/`exitActions` for **display** purposes must apply the same filter, or a timer's rows will leak back into view there. Any site that **writes** a state's onentry/onexit from a UI-sourced action list (not just `StateActionsPanel`) must merge back any timer-generated rows it didn't include, or it will silently delete the timer — see the `onApply`/`onNewChannel` merge-back logic as the template.
+
+### Alternatives
+None found evidenced — this was implemented directly per the requirement, not as a replacement for a prior visible-rows design.
+
+### Evidence
+`src/lib/utils/time-transition.ts` (`isTimerGeneratedActionString`), `src/components/diagram/visual-diagram.tsx` (`parseActions` filter, `hiddenEntryActions`/`hiddenExitActions`, the `onApply`/`handleNewChannelForStateActions` merge-back), `src/components/diagram/nodes/scxml-state-node.tsx` (`visibleEntryActions`/`visibleExitActions`).
+
+### Status
+Accepted.

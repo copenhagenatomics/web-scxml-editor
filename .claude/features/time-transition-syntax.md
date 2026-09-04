@@ -46,7 +46,7 @@ No dedicated validator rule exists solely for "after X" syntax — timer transit
 ## Related features
 
 - `transitions-editing.md` — the Transition panel is the shared home for Event/Condition/"after X" authoring, and slot classification treats timer transitions specially.
-- `state-actions-panel.md` — the underlying `send`/`cancel` rows this feature manages are also visible/editable as raw rows in the onentry/onexit tabs (a user could hand-edit a timer's `send` row there and break the "after X" display resolution if not careful — the two UIs operate on the same underlying data without cross-validation).
+- `state-actions-panel.md` — the underlying `send`/`cancel` rows this feature manages are deliberately hidden from that panel's onentry/onexit tabs and from the state node's action-count indicator on the canvas (`isTimerGeneratedActionString` in `time-transition.ts`), so a user can no longer hand-edit them as raw rows there. They still exist in the SCXML and remain visible/editable in the Monaco code editor — see `decisions/editing.md` #9.
 
 ## Related files
 
@@ -59,7 +59,7 @@ No dedicated validator rule exists solely for "after X" syntax — timer transit
 ## Known limitations
 
 - The synthetic event-name pattern (`{stateId}_t_{N}_timeEvent_{N}`) embeds the state id as a literal substring — any code that needs to identify/rewrite it must use the dedicated token functions (`findTimeEventToken`, `renameTimeEventTokensInEventList`), never a naive substring replace, or it risks corrupting an unrelated event name that happens to contain the same substring.
-- Editing the underlying `send`/`cancel` rows directly via the State Actions panel (rather than through the Transition panel's "after X" field) bypasses this feature's parsing/formatting entirely — nothing prevents a user from hand-breaking the pairing between the `send` delay and its matching `cancel`/transition event.
+- Editing the underlying `send`/`cancel` rows directly via the Monaco code editor (the only place they're still visible/editable — see `decisions/editing.md` #9) bypasses this feature's parsing/formatting entirely — nothing prevents a user from hand-breaking the pairing between the `send` delay and its matching `cancel`/transition event.
 
 ## Important edge cases
 

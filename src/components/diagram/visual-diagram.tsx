@@ -75,7 +75,7 @@ import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
-import { findTimeEventToken, resolveTimeEventDisplay } from '@/lib/utils/time-transition';
+import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString } from '@/lib/utils/time-transition';
 import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
@@ -277,6 +277,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     id: string;
     entryActions: ParsedActionRow[];
     exitActions: ParsedActionRow[];
+    // Raw send/cancel action strings backing an "after X" time transition,
+    // filtered out of entryActions/exitActions above so they don't show up
+    // as editable rows. Re-appended to whatever the panel applies so they're
+    // never dropped from the underlying SCXML — see isTimerGeneratedActionString.
+    hiddenEntryActions: string[];
+    hiddenExitActions: string[];
     internalEventActions: Array<{ event: string; location: string; expr: string; type: 'internal' | 'external' }>;
     stateType: 'simple' | 'compound' | 'parallel' | 'final';
     isInitial: boolean;
@@ -837,7 +843,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // Step 2: apply the actions/reactions change on the already-patched content
         const stateId = selectedStateForActions.id;
         const result = apply.kind === 'actions'
-          ? new UpdateActionsCommand(stateId, apply.entryActions, apply.exitActions).execute(base)
+          ? new UpdateActionsCommand(
+              stateId,
+              [...apply.entryActions, ...selectedStateForActions.hiddenEntryActions],
+              [...apply.exitActions, ...selectedStateForActions.hiddenExitActions],
+            ).execute(base)
           : new UpdateInternalEventsCommand(stateId, apply.actions).execute(base);
 
         if (result.success) {
@@ -1243,7 +1253,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 const node = nodes.find((n) => n.id === stateId);
                 if (node && node.data && nodeType !== 'scxmlNote') {
                   const parseActions = (actions: string[]): ParsedActionRow[] => {
-                    return actions.flatMap((a): ParsedActionRow[] => {
+                    // Timer-generated send/cancel rows (the "after X" delay's
+                    // implementation) are hidden here — the user authors/edits
+                    // them via the Transition panel's "after X" field, not as
+                    // raw onentry/onexit rows. They remain in the underlying
+                    // SCXML and are visible in the code editor.
+                    return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
                       if (a.startsWith('assign|')) {
                         const parts = a.split('|');
                         return [{ type: 'assign', location: parts[1] || '', expr: parts[2] || '' }];
@@ -1280,6 +1295,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     id: stateId,
                     entryActions: parseActions(node.data.entryActions || []),
                     exitActions: parseActions(node.data.exitActions || []),
+                    hiddenEntryActions: (node.data.entryActions || []).filter(isTimerGeneratedActionString),
+                    hiddenExitActions: (node.data.exitActions || []).filter(isTimerGeneratedActionString),
                     internalEventActions: node.data.internalEventActions || [],
                     stateType: node.data.stateType,
                     isInitial: isInitialFlag,
@@ -3321,8 +3338,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           if (selectedStateForActions) {
             handleNodeActionsChange(
               selectedStateForActions.id,
-              entryActions,
-              exitActions,
+              [...entryActions, ...selectedStateForActions.hiddenEntryActions],
+              [...exitActions, ...selectedStateForActions.hiddenExitActions],
             );
           }
         }}

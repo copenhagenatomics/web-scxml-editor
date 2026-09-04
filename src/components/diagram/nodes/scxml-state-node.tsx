@@ -22,6 +22,7 @@ import {
   visualStylesToCSS,
   getAdditionalClasses,
 } from '@/lib/utils/visual-style-utils';
+import { isTimerGeneratedActionString } from '@/lib/utils/time-transition';
 
 export interface VisualStyles {
   backgroundColor?: string;
@@ -212,8 +213,20 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       exitActions.join('\n')
     );
 
-    const hasEntryActions = entryActions.length > 0;
-    const hasExitActions = exitActions.length > 0;
+    // Timer-generated send/cancel rows (the "after X" delay's implementation)
+    // are hidden from every on-node display — they're authored/edited via the
+    // Transition panel's "after X" field, not as raw onentry/onexit actions.
+    const visibleEntryActions = useMemo(
+      () => entryActions.filter((a) => !isTimerGeneratedActionString(a)),
+      [entryActions]
+    );
+    const visibleExitActions = useMemo(
+      () => exitActions.filter((a) => !isTimerGeneratedActionString(a)),
+      [exitActions]
+    );
+
+    const hasEntryActions = visibleEntryActions.length > 0;
+    const hasExitActions = visibleExitActions.length > 0;
     const hasActions = hasEntryActions || hasExitActions;
 
     // Respond to isEditing flag from parent (triggered by double-click on node)
@@ -337,7 +350,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
     // Determine state characteristics for styling
     const getStateCharacteristics = () => {
       const labelLower = label.toLowerCase();
-      const actionCount = entryActions.length + exitActions.length;
+      const actionCount = visibleEntryActions.length + visibleExitActions.length;
 
       // Check for state types
       if (
@@ -462,8 +475,8 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
     };
 
     const actionCountIndicator = (() => {
-      const entryCount = entryActions.length;
-      const exitCount = exitActions.length;
+      const entryCount = visibleEntryActions.length;
+      const exitCount = visibleExitActions.length;
       const reactionCount = internalEventActions.length;
       const parts: React.ReactNode[] = [];
 

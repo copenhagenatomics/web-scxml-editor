@@ -3,6 +3,7 @@ import {
   parseAfterSyntax,
   formatAfterSyntax,
   isTimeEventName,
+  isTimerGeneratedActionString,
   findTimeEventToken,
   resolveTimeEventDisplay,
 } from './time-transition';
@@ -88,6 +89,28 @@ describe('isTimeEventName', () => {
 
   it('rejects a plain event name', () => {
     expect(isTimeEventName('skippurge')).toBe(false);
+  });
+});
+
+describe('isTimerGeneratedActionString', () => {
+  it('matches a send row whose event is a timer token', () => {
+    expect(isTimerGeneratedActionString('send|Idle_t_0_timeEvent_0|delay|2s')).toBe(true);
+  });
+
+  it('matches a cancel row whose sendid is a timer token', () => {
+    expect(isTimerGeneratedActionString('cancel|Idle_t_0_timeEvent_0')).toBe(true);
+  });
+
+  it('rejects a send row for a plain, non-timer event', () => {
+    expect(isTimerGeneratedActionString('send|skippurge|delay|2s')).toBe(false);
+  });
+
+  it('rejects a cancel row for a plain, non-timer sendid', () => {
+    expect(isTimerGeneratedActionString('cancel|someOtherSendId')).toBe(false);
+  });
+
+  it('rejects an assign row regardless of content', () => {
+    expect(isTimerGeneratedActionString('assign|this_x|Idle_t_0_timeEvent_0')).toBe(false);
   });
 });
 
