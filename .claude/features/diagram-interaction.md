@@ -11,7 +11,7 @@ The full set of direct-manipulation gestures on the ReactFlow canvas that let a 
 - **Move**: drag a state (or a multi-selection) to reposition; all simultaneously-dragged nodes commit as a single batched undo step.
 - **Resize**: select a single state, drag its resize handles (`NodeResizer`, min size enforced).
 - **Reparent**: drag a state onto another to nest it as a child (works for both single-node and multi-node drags).
-- **Copy/paste**: Ctrl/Cmd+C copies the selection (states clone with fresh ids, subtree included); Ctrl/Cmd+V pastes with an escalating offset per repeated paste so pasted copies don't stack exactly on top of each other.
+- **Copy/cut/paste**: Ctrl/Cmd+C copies the selection (states clone with fresh ids, subtree included); Ctrl/Cmd+X cuts (copies, then deletes the selection); Ctrl/Cmd+V pastes with an escalating offset per repeated paste so pasted copies don't stack exactly on top of each other. The Multi-Select Toolbar exposes the same Copy/Cut/Delete actions as buttons.
 - **Delete**: Delete/Backspace removes selected state(s) or transition(s); disabled while the Validation panel is open.
 
 ## UI behavior
@@ -19,7 +19,6 @@ The full set of direct-manipulation gestures on the ReactFlow canvas that let a 
 - Selection is visually indicated per-node (not React Flow's default multi-select box UI, except during an actual marquee drag).
 - The Multi-Select Toolbar appears only once 2+ nodes are selected.
 - A drop target is highlighted while dragging a node over a potential new parent (reparent affordance).
-- An "unnest zone" exists for dragging a nested child back out to its grandparent level.
 
 ## Internal architecture
 
@@ -28,7 +27,7 @@ All of this lives in `src/components/diagram/visual-diagram.tsx` (3,347 lines �
 - **Selection is not ReactFlow's native model**, except during a real marquee drag. `handleStateClick` hand-rolls click/double-click/Ctrl-click disambiguation using a 250ms timer (`clickTimeoutRef`/`clickCountRef`) to distinguish a plain click (replace selection, open State Actions panel) from a double-click and from a Ctrl-click (toggle membership in `activeStates: Set<string>`). A `marqueeStartedRef` flag gates when RF's own native `'select'`-type node-change events (which fire unconditionally during a real box-drag) are allowed to update `activeStates` — outside of an active marquee, those native events are ignored so they don't fight with `handleStateClick`'s own logic.
 - **Drag**: `handleNodesChange` filters RF's native change events, tracks `isDraggingRef`, and distinguishes an actual drag from a mere click or arrow-key nudge (`dragging === true` OR ≥1px position delta — RF's own keyboard-nudge changes never set `dragging: true`). Position commits are debounced 150ms and, for a multi-selection, **all simultaneously-moved nodes are batched into one `BatchUpdatePositionCommand`** rather than one command per node.
 - **Resize**: live preview during drag mutates `setNodes` directly (visual only); on `onResizeEnd`, `handleNodeResize` commits via `UpdatePositionAndDimensionsCommand`.
-- **Reparent**: two separate ReactFlow drag-event families — `onNodeDrag*` (single node) and `onSelectionDragStart/Drag/DragStop` (multi-selection, since RF renders a group drag through a distinct `.react-flow__nodesselection-rect` overlay) — both funnel into the same `computeDropTarget` logic.
+- **Reparent**: two separate ReactFlow drag-event families — `onNodeDrag*` (single node) and `onSelectionDragStart/Drag/DragStop` (multi-selection, since RF renders a group drag through a distinct `.react-flow__nodesselection-rect` overlay) — both funnel into the same `computeDropTarget` logic. There is no drag-to-unnest gesture (the "Back to parent" drop zone was removed); moving a state back out to its grandparent requires editing the SCXML directly.
 - **Copy/paste**: uses the **direct object-tree manipulation path** (`scxml-manipulation-utils.ts`'s `cloneStateSubtreeWithFreshIds`), not a Command — see `.claude/project/architecture.md` §Two mutation strategies. Buffered in `useStateClipboardStore`.
 - **Create/Connect**: `handleAddRootState`/`onConnect` also use the direct object-tree path, not Commands.
 - **Delete**: `handleNodeDelete` routes to `DeleteNoteCommand` or `DeleteNodeCommand` based on `isNoteId(id)`.
