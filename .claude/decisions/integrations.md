@@ -4,19 +4,19 @@ Covers GitHub and the LoopControl host-embedding relationship.
 
 ---
 
-## 1. GitHub OAuth uses Device Flow, not Authorization Code Flow
+## 1. GitHub integration uses Device Flow, not Authorization Code Flow
 
 ### Context
 Each deployed instance of this editor runs on its own physical device (a LoopControl installation), reachable only at its own local IP/hostname, with no shared, fixed public origin.
 
 ### Decision
-GitHub integration uses OAuth **Device Flow** — the user enters a short code at `github.com/login/device` in any browser, while the app polls in the background — rather than a redirect-based Authorization Code Flow.
+GitHub integration uses **Device Flow** — the user enters a short code at `github.com/login/device` in any browser, while the app polls in the background — rather than a redirect-based Authorization Code Flow. This holds regardless of OAuth App vs GitHub App (see decision #5) — both support Device Flow identically.
 
 ### Reason
-Explicitly documented, in unusual depth for this codebase: inline comments in `src/lib/github/oauth.ts` and `DEVELOPER_GUIDE.md`'s "GitHub Integration" section both explain that a classic OAuth App only supports one (or a small fixed set of) registered `redirect_uri`, which doesn't work across a fleet of independently-addressed devices, and that Device Flow needs neither a redirect URI nor a client secret (confirmed against GitHub's own documentation).
+Explicitly documented, in unusual depth for this codebase: inline comments in `src/lib/github/oauth.ts` and `DEVELOPER_GUIDE.md`'s "GitHub Integration" section both explain that a redirect-based flow only supports one (or a small fixed set of) registered `redirect_uri`, which doesn't work across a fleet of independently-addressed devices, and that Device Flow needs neither a redirect URI nor a client secret (confirmed against GitHub's own documentation).
 
 ### Constraints
-Requires a same-origin relay service for the two device-flow POST calls, since GitHub's device endpoints don't send CORS headers — either the local `server/` (development) or LoopControl's own equivalent endpoint (production).
+Requires a same-origin relay service for the device-flow POST calls (code request, token poll, and token refresh — see decision #5), since GitHub's device endpoints don't send CORS headers — either the local `server/` (development) or LoopControl's own equivalent endpoint (production).
 
 ### Alternatives
 Authorization Code Flow is the explicitly-named, explicitly-rejected alternative — rejected specifically because of the redirect-URI/fixed-origin requirement.
@@ -28,6 +28,32 @@ Authorization Code Flow is the explicitly-named, explicitly-rejected alternative
 Accepted.
 
 ---
+
+## 5. GitHub integration migrated from an OAuth App to a GitHub App, for per-repo access scoping
+
+### Context
+The original integration (decision #1) used a classic OAuth App with scope `repo` — which grants access to every repository the signed-in user can reach, with no way to narrow it. The user asked for access restricted to specific repo(s) only.
+
+### Decision
+Switched to a **GitHub App**, installed by the user on exactly the account/repos they choose via a one-time "Install" step on GitHub's own site, in place of the OAuth App. Also opted into GitHub's recommended **expiring user tokens** (8h access token + 6-month refresh token) rather than a non-expiring token, adding a silent-refresh layer (`getValidAccessToken()` in `src/lib/github/token.ts`) that every direct GitHub REST call now goes through instead of reading `accessToken` off the store directly.
+
+### Reason
+OAuth App scopes have no per-repo granularity — `repo` is all-or-nothing across every repo the user can access. A GitHub App is the only mechanism GitHub offers where the *user*, not a coarse scope string, decides which repositories a token can reach, enforced by GitHub itself (not just convention).
+
+### Constraints
+- Repo listing can no longer use `GET /user/repos` (confirmed against GitHub's docs: it does not reliably reflect GitHub App installation scoping) — it goes through `GET /user/installations` → `GET /user/installations/{id}/repositories` instead (`listInstalledRepos` in `src/lib/github/api.ts`).
+- A connected user who hasn't installed the app anywhere (or granted zero repos) needs a distinct UI state — `GithubPanel` shows an "Install on GitHub" prompt (linking to `NEXT_PUBLIC_GITHUB_INSTALL_URL`) instead of the repo picker in that case.
+- Expiring tokens require refresh-token handling end to end: new persisted fields on `useGithubStore` (`refreshToken`, `tokenExpiresAt`, `refreshTokenExpiresAt`), a `refreshAccessToken()` function in `oauth.ts`, and the `getValidAccessToken()` choke point. The relay server itself (`server/`) needed **no changes** — a token refresh posts to the exact same `github.com/login/oauth/access_token` URL the existing `/api/github/device/token` route already forwards to, just with a different `grant_type`.
+
+### Alternatives
+- Narrowing the OAuth App's `scope` string (e.g. to `public_repo`) — rejected, since OAuth scopes still have no per-repo dimension; it would only narrow *which kinds* of repos, not *which specific one(s)*.
+- Non-expiring GitHub App tokens (uncheck "Expire user authorization tokens") — considered as the simpler option (no refresh logic needed, closer to the old OAuth App's behavior), but not chosen: the user opted for GitHub's recommended expiring-token configuration despite the added code.
+
+### Evidence
+`src/lib/github/oauth.ts` (`refreshAccessToken`), `src/lib/github/token.ts`, `src/lib/github/api.ts` (`listInstalledRepos`), `src/stores/github-store.ts`, `src/components/ui/github-panel.tsx` (install-prompt state), `server/README.md` §1.
+
+### Status
+Accepted.
 
 ## 2. A pre-ready command queue (`_q`) lets the host call the API before React mounts
 

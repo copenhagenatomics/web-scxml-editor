@@ -90,35 +90,67 @@ export async function getAuthenticatedUser(token: string): Promise<GithubUser> {
   };
 }
 
+function mapRepoItem(item: unknown): GithubRepoSummary {
+  const repo = item as {
+    owner: { login: string };
+    name: string;
+    full_name: string;
+    default_branch: string;
+    private: boolean;
+  };
+  return {
+    owner: repo.owner.login,
+    name: repo.name,
+    fullName: repo.full_name,
+    defaultBranch: repo.default_branch,
+    private: repo.private,
+  };
+}
+
 /**
- * GET /user/repos - repos the user owns, collaborates on, or belongs to via
- * an org. Only fetches the first page (100 repos, sorted by most recently
- * updated). Pagination is a known MVP limitation, not implemented here.
+ * Repos this GitHub App installation token can actually reach. Unlike an
+ * OAuth App's `GET /user/repos` (every repo the user can access), a GitHub
+ * App user token is scoped to exactly the repo(s) chosen at install time -
+ * so listing them means going through the installations this user has
+ * granted, not a flat repo list. `GET /user/repos` does not reliably
+ * reflect that scoping and must not be used here (confirmed against
+ * GitHub's docs).
+ *
+ * `hasInstallation` distinguishes "not installed anywhere yet" (show an
+ * install prompt) from "installed, but zero repos granted" (both cases
+ * that yield an empty `repos` array).
+ *
+ * Only fetches the first page of installations, and the first page of
+ * repos per installation (100 each) - same documented MVP pagination
+ * limitation the old `listUserRepos` already accepted.
  */
-export async function listUserRepos(token: string): Promise<GithubRepoSummary[]> {
-  const url = `${API_BASE}/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member`;
-  const response = await fetch(url, {
+export async function listInstalledRepos(
+  token: string
+): Promise<{ repos: GithubRepoSummary[]; hasInstallation: boolean }> {
+  const installationsResponse = await fetch(`${API_BASE}/user/installations?per_page=100`, {
     method: 'GET',
     headers: authHeaders(token),
   });
-  await throwIfNotOk(response);
-  const data = await response.json();
-  return (data as unknown[]).map((item) => {
-    const repo = item as {
-      owner: { login: string };
-      name: string;
-      full_name: string;
-      default_branch: string;
-      private: boolean;
-    };
-    return {
-      owner: repo.owner.login,
-      name: repo.name,
-      fullName: repo.full_name,
-      defaultBranch: repo.default_branch,
-      private: repo.private,
-    };
-  });
+  await throwIfNotOk(installationsResponse);
+  const installationsData = (await installationsResponse.json()) as { installations: { id: number }[] };
+  const installations = installationsData.installations;
+
+  const reposByInstallation = await Promise.all(
+    installations.map(async (installation) => {
+      const response = await fetch(
+        `${API_BASE}/user/installations/${installation.id}/repositories?per_page=100`,
+        { method: 'GET', headers: authHeaders(token) }
+      );
+      await throwIfNotOk(response);
+      const data = (await response.json()) as { repositories: unknown[] };
+      return data.repositories.map(mapRepoItem);
+    })
+  );
+
+  return {
+    repos: reposByInstallation.flat(),
+    hasInstallation: installations.length > 0,
+  };
 }
 
 /** GET /repos/{owner}/{repo}/branches - branches for a repo. */

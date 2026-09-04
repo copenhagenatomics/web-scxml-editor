@@ -66,8 +66,20 @@ interface DeviceTokenResponseBody {
   access_token?: string;
   token_type?: string;
   scope?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  refresh_token_expires_in?: number;
   error?: string;
   error_description?: string;
+}
+
+/** Result of a successful token exchange (device-flow poll or refresh). */
+export interface GithubTokens {
+  accessToken: string;
+  /** Present for a GitHub App with "Expire user authorization tokens" enabled; absent for a non-expiring config. */
+  refreshToken?: string;
+  expiresIn?: number;
+  refreshTokenExpiresIn?: number;
 }
 
 async function parseJsonBody(response: Response): Promise<Record<string, unknown>> {
@@ -144,7 +156,7 @@ export async function pollForDeviceToken(
   initialIntervalSeconds: number,
   tokenEndpoint: string,
   signal: AbortSignal
-): Promise<{ accessToken: string }> {
+): Promise<GithubTokens> {
   let intervalSeconds = initialIntervalSeconds;
 
   for (;;) {
@@ -170,7 +182,12 @@ export async function pollForDeviceToken(
     }
 
     if (body.access_token) {
-      return { accessToken: body.access_token };
+      return {
+        accessToken: body.access_token,
+        refreshToken: body.refresh_token,
+        expiresIn: body.expires_in,
+        refreshTokenExpiresIn: body.refresh_token_expires_in,
+      };
     }
 
     switch (body.error) {
@@ -190,7 +207,7 @@ export async function pollForDeviceToken(
       case 'device_flow_disabled':
         throw new GithubOAuthError(
           'device-flow-disabled',
-          'Device flow is not enabled for this GitHub OAuth App.'
+          'Device flow is not enabled for this GitHub App.'
         );
       default:
         throw new GithubOAuthError(
@@ -199,4 +216,44 @@ export async function pollForDeviceToken(
         );
     }
   }
+}
+
+/**
+ * Exchanges a refresh token for a new access token (relayed through
+ * `tokenEndpoint` - the same relay `pollForDeviceToken` uses, since a
+ * refresh posts to the exact same `github.com/login/oauth/access_token`
+ * URL, just with `grant_type: refresh_token` instead of a device code).
+ * Only relevant for a GitHub App with "Expire user authorization tokens"
+ * enabled, which is what issues a `refresh_token` in the first place.
+ */
+export async function refreshAccessToken(
+  clientId: string,
+  refreshToken: string,
+  tokenEndpoint: string
+): Promise<GithubTokens> {
+  const response = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: clientId,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  const body = (await parseJsonBody(response)) as DeviceTokenResponseBody;
+
+  if (!response.ok || body.error || !body.access_token) {
+    throw new GithubOAuthError(
+      'request-failed',
+      body.error_description || body.error || `Failed to refresh GitHub session (status ${response.status}).`
+    );
+  }
+
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    expiresIn: body.expires_in,
+    refreshTokenExpiresIn: body.refresh_token_expires_in,
+  };
 }

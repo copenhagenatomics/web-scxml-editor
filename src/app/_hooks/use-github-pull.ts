@@ -11,6 +11,7 @@ import { useGithubStore } from '@/stores/github-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { getFileContent, isUnauthorizedError } from '@/lib/github/api';
+import { getValidAccessToken } from '@/lib/github/token';
 import type { FileInfo } from '@/types/common';
 
 /**
@@ -35,8 +36,13 @@ export function useGithubPull() {
 
     setSyncing(true);
     try {
+      const token = await getValidAccessToken();
+      if (!token) {
+        showFeedback('Your GitHub session has expired or was revoked. Please reconnect.', 'error');
+        return;
+      }
       const fileContent = await getFileContent(
-        accessToken,
+        token,
         linkedRepo.owner,
         linkedRepo.repo,
         linkedRepo.branch,

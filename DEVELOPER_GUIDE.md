@@ -1043,30 +1043,55 @@ and `useGithubPull` hooks under `src/app/_hooks/`, and the
 `GithubPanel` component (opened from the GitHub button in the main
 toolbar).
 
-Connecting uses GitHub's OAuth **Device Flow**, not the more common
-redirect-based Authorization Code Flow: the user is shown a short code and
-opens `github.com/login/device` (in any browser) to enter it, while the
-editor polls in the background until they do. This was chosen because the
+Connecting uses GitHub's **Device Flow** against a **GitHub App** (not a
+classic OAuth App, and not the more common redirect-based Authorization
+Code Flow): the user is shown a short code and opens
+`github.com/login/device` (in any browser) to enter it, while the editor
+polls in the background until they do. Device Flow was chosen because the
 editor is deployed in contexts (e.g. embedded per-device inside
 LoopControl) where every installation is reached at its own local
-IP/hostname, and a classic OAuth App only supports one registered
-`redirect_uri` — Device Flow needs none at all. It also needs no client
-secret (confirmed against GitHub's own docs), so this app never holds one.
+IP/hostname, and a redirect-based flow only supports a small fixed set of
+registered `redirect_uri`s — Device Flow needs none at all, and needs no
+client secret either (confirmed against GitHub's own docs), so this app
+never holds one. A GitHub App (rather than an OAuth App) is used
+specifically so access can be scoped to the repo(s) a user explicitly
+grants during a one-time **install** step on GitHub's own site, rather than
+every repo they can reach — OAuth App scopes have no per-repo granularity.
+
+Because tokens are scoped per-installation, listing repos goes through
+`GET /user/installations` → `GET /user/installations/{id}/repositories`
+(`listInstalledRepos` in `src/lib/github/api.ts`), not the flatter
+`GET /user/repos` an OAuth App could use. If a connected user hasn't
+installed the app anywhere yet (or has granted it zero repos),
+`GithubPanel` shows an "Install on GitHub" prompt linking to
+`NEXT_PUBLIC_GITHUB_INSTALL_URL` instead of the repo picker.
+
+This GitHub App is also configured with **expiring user tokens** (GitHub's
+recommended default: an 8h access token + a 6-month refresh token, rather
+than a token that never expires). `getValidAccessToken()`
+(`src/lib/github/token.ts`) is the single point every direct GitHub REST
+call goes through — it silently refreshes a near-expiry token first, and
+only falls back to prompting reconnection if the refresh token itself has
+expired or been revoked.
 
 GitHub's device-flow endpoints don't send CORS headers, though, so the
-browser can't call `github.com` directly — both device-flow calls are
-relayed through a same-origin endpoint that just forwards the request and
-returns GitHub's response verbatim (no secret involved, purely a CORS
+browser can't call `github.com` directly — both device-flow calls (and
+token refreshes, which hit the same token URL with a different grant type)
+are relayed through a same-origin endpoint that just forwards the request
+and returns GitHub's response verbatim (no secret involved, purely a CORS
 workaround). For local dev that's the standalone Express service in
-`server/` (see `server/README.md` for how to register a GitHub OAuth App
-and enable Device Flow on it); a LoopControl-embedded deployment instead
-points at LoopControl's own `/api/v1/scxml-editor/github/device/*`
-endpoints, which perform the same relay natively (same-origin, no CORS
-config needed). The frontend needs three environment variables, copied
-from `.env.local.example` into `.env.local`:
+`server/` (see `server/README.md` for how to register the GitHub App and
+enable Device Flow on it); a LoopControl-embedded deployment instead points
+at LoopControl's own `/api/v1/scxml-editor/github/device/*` endpoints,
+which perform the same relay natively (same-origin, no CORS config
+needed). The frontend needs four environment variables, copied from
+`.env.local.example` into `.env.local`:
 
-- `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the GitHub OAuth App's Client ID (public,
-  safe to ship in the bundle).
+- `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the GitHub App's Client ID (public, safe
+  to ship in the bundle).
+- `NEXT_PUBLIC_GITHUB_INSTALL_URL` — the GitHub App's public install page
+  (`https://github.com/apps/<slug>/installations/new`), shown to a
+  connected user who hasn't installed the app / granted any repos yet.
 - `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT` / `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT`
   — the *full* URLs of the two relay endpoints (not base URLs — the paths
   differ by deployment). For local dev against the standalone service,
