@@ -90,7 +90,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | multiple initial states, disconnected sub-machines, Initial State group conflict | [initial-state-groups.md](features/initial-state-groups.md) |
 | history state, shallow/deep history | [state-node-types.md](features/state-node-types.md) |
 | "work tree", state tree, parent/child registry, ancestor chain | [state-hierarchy-tree.md](features/state-hierarchy-tree.md) *("work tree" is not a real term in this codebase — see this doc's verification note* |
-| connection point, handle, dragging a new transition, `onConnect` | [state-connections-handles.md](features/state-connections-handles.md) |
+| connection point, handle, dragging a new transition, `onConnect`, anchor point, `viz:anchors`, shift-click add anchor | [state-connections-handles.md](features/state-connections-handles.md) |
 | transition editing, event/cond fields, Transition panel, edge label, waypoints, reconnect | [transitions-editing.md](features/transitions-editing.md) |
 | transition slot, "only one transition allowed", duplicate transition | [transitions-editing.md](features/transitions-editing.md) |
 | `cond`, condition expression, ConditionEvaluator | [conditions-and-expressions.md](features/conditions-and-expressions.md) |
@@ -148,7 +148,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 | [scxml-validation.md](features/scxml-validation.md) | The 16-pass validator pipeline, error surfacing, known gaps |
 | [selection.md](features/selection.md) | Single/multi-select, marquee, click/double-click disambiguation |
 | [state-actions-panel.md](features/state-actions-panel.md) | onentry/onexit action editing + internal-event reactions tab |
-| [state-connections-handles.md](features/state-connections-handles.md) | The ReactFlow Handle model (8 per node) and the connect gesture |
+| [state-connections-handles.md](features/state-connections-handles.md) | The ReactFlow Handle model (4+ per node, multi-anchor sides via `viz:anchors`) and the connect gesture |
 | [state-editing.md](features/state-editing.md) | Create/rename/retype/delete lifecycle for a state |
 | [state-hierarchy-tree.md](features/state-hierarchy-tree.md) | The parent/child state registry ("work trees" investigation result) |
 | [state-node-types.md](features/state-node-types.md) | Simple/compound/parallel/final/initial/history rendering rules |

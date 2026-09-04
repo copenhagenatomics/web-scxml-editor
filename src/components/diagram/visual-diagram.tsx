@@ -5,6 +5,7 @@
 import { useHierarchyNavigation } from '@/hooks/use-hierarchy-navigation';
 import { SCXMLToXStateConverter } from '@/lib/converters/scxml-to-xstate';
 import { nodeDimensionCalculator } from '@/lib/layout/node-dimension-calculator';
+import { parseHandleId, type HandleSide } from '@/lib/layout/edge-obstacle-utils';
 import { VisualMetadataManager } from '@/lib/metadata';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
@@ -702,6 +703,31 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
     },
     [onSCXMLChange, setNodes, setEdges]
+  );
+
+  // ==================== ANCHOR POINT HANDLER ====================
+  const handleAddAnchor = React.useCallback(
+    (nodeId: string, side: HandleSide) => {
+      const currentScxmlContent = scxmlContentRef.current;
+      if (!onSCXMLChange || !currentScxmlContent) return;
+
+      try {
+        const { AddAnchorPointCommand } = require('@/lib/commands');
+        const result = new AddAnchorPointCommand(nodeId, side).execute(
+          currentScxmlContent
+        );
+
+        if (result.success) {
+          previousScxmlRef.current = result.newContent;
+          onSCXMLChange(result.newContent, 'property');
+        } else {
+          console.error('Failed to add anchor point:', result.error);
+        }
+      } catch (error) {
+        console.error('Failed to add anchor point:', error);
+      }
+    },
+    [onSCXMLChange]
   );
 
   // ==================== EDGE HANDLERS ====================
@@ -2034,6 +2060,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               onDelete: () => handleNodeDelete(node.id),
               onResize: (x: number, y: number, width: number, height: number) =>
                 handleNodeResize(node.id, x, y, width, height),
+              onAddAnchor: (side: HandleSide) => handleAddAnchor(node.id, side),
             };
 
             return nodeUpdate;
@@ -2093,8 +2120,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               // stacked nodes leave little horizontal room — an X spread isn't wide
               // enough to clear a label pill, so those labels stack vertically (Y)
               // instead, regardless of the path's own bow direction.
+              const sourceHandleSide = edge.sourceHandle
+                ? parseHandleId(edge.sourceHandle).side
+                : undefined;
               const isVerticalConnection =
-                edge.sourceHandle === 'top' || edge.sourceHandle === 'bottom';
+                sourceHandleSide === 'top' || sourceHandleSide === 'bottom';
               const labelSpread =
                 (edgeIndex - (parallelEdges.length - 1) / 2) *
                 (isVerticalConnection ? 24 : 25);
