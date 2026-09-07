@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Panel, Button, Field, Input, inputClass } from '@/components/ui/primitives';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useGithubStore, type GithubUser } from '@/stores/github-store';
@@ -9,12 +9,13 @@ import { useEditorStore } from '@/stores/editor-store';
 import { useGithubConnect } from '@/app/_hooks/use-github-connect';
 import { useGithubPull } from '@/app/_hooks/use-github-pull';
 import {
-  listUserRepos,
+  listInstalledRepos,
   listBranches,
   getFileContent,
   createOrUpdateFile,
   isUnauthorizedError,
 } from '@/lib/github/api';
+import { getValidAccessToken } from '@/lib/github/token';
 import { GithubApiError, type GithubRepoSummary, type GithubBranchSummary } from '@/lib/github/types';
 import { generateDefaultCommitMessage } from '@/lib/github/commit-message';
 import type { FeedbackItem } from '@/types/host-api';
@@ -80,8 +81,11 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
   // --- Repo picker (connected, not linked) ---
   const [repos, setRepos] = useState<GithubRepoSummary[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
+  // null = not checked yet; false is what drives the "install on GitHub" prompt.
+  const [hasInstallation, setHasInstallation] = useState<boolean | null>(null);
   const [selectedFullName, setSelectedFullName] = useState('');
   const selectedRepo = repos.find(r => r.fullName === selectedFullName) ?? null;
+  const installUrl = process.env.NEXT_PUBLIC_GITHUB_INSTALL_URL;
 
   // --- Branch picker ---
   const [branches, setBranches] = useState<GithubBranchSummary[]>([]);
@@ -117,25 +121,29 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
   const [commitMessage, setCommitMessage] = useState('');
   const [pullConfirming, setPullConfirming] = useState(false);
 
-  // Fetch the user's repos once we're connected-but-not-linked and visible.
+  // Fetch the repos this GitHub App installation grants access to, once
+  // we're connected-but-not-linked and visible. Also re-run on demand via
+  // the "I've installed it" refresh button in the install-prompt state.
+  const fetchRepos = useCallback(async () => {
+    setReposLoading(true);
+    try {
+      const token = await getValidAccessToken();
+      if (!token) return;
+      const { repos: list, hasInstallation: installed } = await listInstalledRepos(token);
+      setRepos(list);
+      setHasInstallation(installed);
+    } catch (err) {
+      handleGithubError(err, showFeedback, 'Failed to load repositories');
+    } finally {
+      setReposLoading(false);
+    }
+  }, [showFeedback]);
+
   useEffect(() => {
     if (!isVisible || !accessToken || linkedRepo) return;
-    let cancelled = false;
-    setReposLoading(true);
-    listUserRepos(accessToken)
-      .then(list => {
-        if (!cancelled) setRepos(list);
-      })
-      .catch(err => {
-        if (!cancelled) handleGithubError(err, showFeedback, 'Failed to load repositories');
-      })
-      .finally(() => {
-        if (!cancelled) setReposLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isVisible, accessToken, linkedRepo, showFeedback]);
+    void fetchRepos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVisible, accessToken, linkedRepo]);
 
   // Fetch branches whenever the selected repo changes.
   useEffect(() => {
@@ -145,9 +153,13 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
     }
     let cancelled = false;
     setBranchesLoading(true);
-    listBranches(accessToken, selectedRepo.owner, selectedRepo.name)
+    (async () => {
+      const token = await getValidAccessToken();
+      if (!token || cancelled) return;
+      return listBranches(token, selectedRepo.owner, selectedRepo.name);
+    })()
       .then(list => {
-        if (cancelled) return;
+        if (cancelled || !list) return;
         setBranches(list);
         setSelectedBranch(prev => {
           if (prev && list.some(b => b.name === prev)) return prev;
@@ -177,7 +189,9 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
     }
     setPathChecking(true);
     try {
-      const file = await getFileContent(accessToken, selectedRepo.owner, selectedRepo.name, selectedBranch, trimmedPath);
+      const token = await getValidAccessToken();
+      if (!token) return;
+      const file = await getFileContent(token, selectedRepo.owner, selectedRepo.name, selectedBranch, trimmedPath);
       // A newer check (or a repo/branch/path change via resetPathCheck())
       // superseded this one while it was in flight - discard this result
       // rather than clobbering the newer/current state.
@@ -230,8 +244,10 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
     const message = commitMessage.trim() || commitPlaceholder;
     useGithubStore.getState().setSyncing(true);
     try {
+      const token = await getValidAccessToken();
+      if (!token) return;
       const newSha = await createOrUpdateFile(
-        accessToken,
+        token,
         linkedRepo.owner,
         linkedRepo.repo,
         linkedRepo.branch,
@@ -306,7 +322,27 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
         </div>
       )}
 
-      {accessToken && !linkedRepo && (
+      {accessToken && !linkedRepo && hasInstallation === false && (
+        <div>
+          <GithubUserHeader user={user!} onSignOut={() => useGithubStore.getState().clearAuth()} disabled={isSyncing} />
+          <div className='p-4 space-y-3'>
+            <p className='text-xs text-muted'>
+              This GitHub account hasn&apos;t installed the SCXML Editor app yet, or hasn&apos;t
+              granted it any repositories. Install it and pick which repo(s) to share.
+            </p>
+            {installUrl && (
+              <Button variant='solid' onClick={() => window.open(installUrl, '_blank', 'noreferrer')}>
+                Install on GitHub
+              </Button>
+            )}
+            <Button variant='outline' size='sm' onClick={() => void fetchRepos()} loading={reposLoading}>
+              I&apos;ve installed it — refresh
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {accessToken && !linkedRepo && hasInstallation !== false && (
         <div>
           <GithubUserHeader user={user!} onSignOut={() => useGithubStore.getState().clearAuth()} disabled={isSyncing} />
           <div className='p-3 space-y-3'>

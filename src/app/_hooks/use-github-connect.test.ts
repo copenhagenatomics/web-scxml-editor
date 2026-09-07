@@ -36,6 +36,9 @@ const DEVICE_CODE_INFO = {
 function resetGithubStore() {
   useGithubStore.setState({
     accessToken: null,
+    refreshToken: null,
+    tokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
     user: null,
     linkedRepo: null,
     isConnecting: false,
@@ -170,6 +173,28 @@ describe('useGithubConnect', () => {
     expect(getFeedback()).toHaveLength(0);
   });
 
+  it('passes through refresh_token/expires_in/refresh_token_expires_in from pollForDeviceToken into the store', async () => {
+    (requestDeviceCode as ReturnType<typeof vi.fn>).mockResolvedValue(DEVICE_CODE_INFO);
+    (pollForDeviceToken as ReturnType<typeof vi.fn>).mockResolvedValue({
+      accessToken: 'tok-1',
+      refreshToken: 'refresh-1',
+      expiresIn: 28800,
+      refreshTokenExpiresIn: 15897600,
+    });
+    (getAuthenticatedUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+      login: 'octocat',
+      avatarUrl: 'https://example.com/a.png',
+    });
+
+    const { result } = renderHook(() => useGithubConnect());
+    await runAndFlush(() => result.current.connect());
+
+    expect(useGithubStore.getState().accessToken).toBe('tok-1');
+    expect(useGithubStore.getState().refreshToken).toBe('refresh-1');
+    expect(useGithubStore.getState().tokenExpiresAt).not.toBeNull();
+    expect(useGithubStore.getState().refreshTokenExpiresAt).not.toBeNull();
+  });
+
   it('cancelled is silent: no feedback, isConnecting resets, deviceCode clears, no auth stored', async () => {
     (requestDeviceCode as ReturnType<typeof vi.fn>).mockResolvedValue(DEVICE_CODE_INFO);
     (pollForDeviceToken as ReturnType<typeof vi.fn>).mockRejectedValue(
@@ -188,7 +213,7 @@ describe('useGithubConnect', () => {
   it.each([
     ['expired', 'The GitHub sign-in code expired before it was used. Please try again.'],
     ['access-denied', 'GitHub sign-in was denied.'],
-    ['device-flow-disabled', 'Device flow is not enabled for this GitHub OAuth App.'],
+    ['device-flow-disabled', 'Device flow is not enabled for this GitHub App.'],
     ['request-failed', 'Failed to start GitHub sign-in (status 400).'],
   ] as const)('%s shows the GithubOAuthError message verbatim as an error toast', async (reason, message) => {
     (requestDeviceCode as ReturnType<typeof vi.fn>).mockResolvedValue(DEVICE_CODE_INFO);

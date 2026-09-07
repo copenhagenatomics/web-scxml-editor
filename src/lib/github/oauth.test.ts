@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { requestDeviceCode, pollForDeviceToken, GithubOAuthError } from './oauth';
+import { requestDeviceCode, pollForDeviceToken, refreshAccessToken, GithubOAuthError } from './oauth';
 
 const DEVICE_CODE_ENDPOINT = 'https://relay.example.com/device/code';
 const TOKEN_ENDPOINT = 'https://relay.example.com/device/token';
@@ -121,8 +121,35 @@ describe('pollForDeviceToken', () => {
     );
 
     await vi.advanceTimersByTimeAsync(5000);
-    await expect(resultPromise).resolves.toEqual({ accessToken: 'tok-1' });
+    await expect(resultPromise).resolves.toEqual({
+      accessToken: 'tok-1',
+      refreshToken: undefined,
+      expiresIn: undefined,
+      refreshTokenExpiresIn: undefined,
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes through refresh_token/expires_in/refresh_token_expires_in when GitHub (a GitHub App with expiring tokens) includes them', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockJsonResponse({
+        access_token: 'tok-1',
+        refresh_token: 'refresh-1',
+        expires_in: 28800,
+        refresh_token_expires_in: 15897600,
+      })
+    );
+
+    const controller = new AbortController();
+    const resultPromise = pollForDeviceToken('client-1', 'dc-1', 5, TOKEN_ENDPOINT, controller.signal);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(resultPromise).resolves.toEqual({
+      accessToken: 'tok-1',
+      refreshToken: 'refresh-1',
+      expiresIn: 28800,
+      refreshTokenExpiresIn: 15897600,
+    });
   });
 
   it('applies the slow_down backoff (adds 5s) before the next poll', async () => {
@@ -222,5 +249,72 @@ describe('pollForDeviceToken', () => {
       expect(err).toBeInstanceOf(GithubOAuthError);
       expect((err as GithubOAuthError).reason).toBe('cancelled');
     }
+  });
+});
+
+describe('refreshAccessToken', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts client_id/refresh_token/grant_type to the relay endpoint and maps the response', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockJsonResponse({
+        access_token: 'tok-2',
+        refresh_token: 'refresh-2',
+        expires_in: 28800,
+        refresh_token_expires_in: 15897600,
+      })
+    );
+
+    const tokens = await refreshAccessToken('client-1', 'refresh-1', TOKEN_ENDPOINT);
+
+    expect(fetch).toHaveBeenCalledWith(
+      TOKEN_ENDPOINT,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          client_id: 'client-1',
+          refresh_token: 'refresh-1',
+          grant_type: 'refresh_token',
+        }),
+      })
+    );
+    expect(tokens).toEqual({
+      accessToken: 'tok-2',
+      refreshToken: 'refresh-2',
+      expiresIn: 28800,
+      refreshTokenExpiresIn: 15897600,
+    });
+  });
+
+  it('throws a request-failed GithubOAuthError with GitHub error_description when the refresh token is rejected', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      mockJsonResponse({ error: 'bad_refresh_token', error_description: 'The refresh token expired' }, false)
+    );
+
+    await expect(refreshAccessToken('client-1', 'stale-refresh', TOKEN_ENDPOINT)).rejects.toMatchObject({
+      reason: 'request-failed',
+      message: 'The refresh token expired',
+    });
+  });
+
+  it('falls back to a generic status-based message when the error body is unparseable', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new Error('not json');
+      },
+    });
+
+    await expect(refreshAccessToken('client-1', 'refresh-1', TOKEN_ENDPOINT)).rejects.toMatchObject({
+      reason: 'request-failed',
+      message: expect.stringContaining('502'),
+    });
   });
 });

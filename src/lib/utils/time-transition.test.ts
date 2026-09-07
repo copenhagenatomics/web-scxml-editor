@@ -3,6 +3,8 @@ import {
   parseAfterSyntax,
   formatAfterSyntax,
   isTimeEventName,
+  isTimerGeneratedActionString,
+  mergeHiddenActions,
   findTimeEventToken,
   resolveTimeEventDisplay,
 } from './time-transition';
@@ -88,6 +90,76 @@ describe('isTimeEventName', () => {
 
   it('rejects a plain event name', () => {
     expect(isTimeEventName('skippurge')).toBe(false);
+  });
+
+  it('rejects a user-authored name that merely contains the timer pattern as a substring', () => {
+    expect(isTimeEventName('Idle_t_0_timeEvent_0_backup')).toBe(false);
+  });
+});
+
+describe('isTimerGeneratedActionString', () => {
+  it('matches a send row whose event is a timer token', () => {
+    expect(isTimerGeneratedActionString('send|Idle_t_0_timeEvent_0|delay|2s')).toBe(true);
+  });
+
+  it('matches a cancel row whose sendid is a timer token', () => {
+    expect(isTimerGeneratedActionString('cancel|Idle_t_0_timeEvent_0')).toBe(true);
+  });
+
+  it('rejects a send row for a plain, non-timer event', () => {
+    expect(isTimerGeneratedActionString('send|skippurge|delay|2s')).toBe(false);
+  });
+
+  it('rejects a cancel row for a plain, non-timer sendid', () => {
+    expect(isTimerGeneratedActionString('cancel|someOtherSendId')).toBe(false);
+  });
+
+  it('rejects an assign row regardless of content', () => {
+    expect(isTimerGeneratedActionString('assign|this_x|Idle_t_0_timeEvent_0')).toBe(false);
+  });
+
+  it('rejects a send row for a user-authored event that merely contains the timer pattern', () => {
+    expect(
+      isTimerGeneratedActionString('send|Idle_t_0_timeEvent_0_backup|delay|2s')
+    ).toBe(false);
+  });
+});
+
+describe('mergeHiddenActions', () => {
+  it('reconstructs the original order when nothing was edited', () => {
+    const hidden = [
+      { index: 1, action: 'send|Idle_t_0_timeEvent_0|delay|2s' },
+      { index: 3, action: 'cancel|Idle_t_0_timeEvent_0' },
+    ];
+    const edited = ['assign|a|1', 'assign|b|2'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'send|Idle_t_0_timeEvent_0|delay|2s',
+      'assign|b|2',
+      'cancel|Idle_t_0_timeEvent_0',
+    ]);
+  });
+
+  it('keeps a hidden action next to its original neighbor after a later row is removed', () => {
+    const hidden = [{ index: 1, action: 'send|Idle_t_0_timeEvent_0|delay|2s' }];
+    const edited = ['assign|a|1'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'send|Idle_t_0_timeEvent_0|delay|2s',
+    ]);
+  });
+
+  it('clamps an out-of-range original index to the end of the edited list', () => {
+    const hidden = [{ index: 5, action: 'cancel|Idle_t_0_timeEvent_0' }];
+    const edited = ['assign|a|1'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'cancel|Idle_t_0_timeEvent_0',
+    ]);
+  });
+
+  it('returns the edited list unchanged when there is nothing hidden', () => {
+    expect(mergeHiddenActions(['assign|a|1'], [])).toEqual(['assign|a|1']);
   });
 });
 

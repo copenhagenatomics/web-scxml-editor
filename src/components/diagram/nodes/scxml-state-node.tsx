@@ -10,18 +10,12 @@ import {
   NodeResizer,
   useReactFlow,
 } from 'reactflow';
-import {
-  Circle,
-  Square,
-  Target,
-  Trash2,
-  ArrowDownCircle,
-  Plus,
-} from 'lucide-react';
+import { Trash2, ArrowDownCircle, Plus } from 'lucide-react';
 import {
   visualStylesToCSS,
   getAdditionalClasses,
 } from '@/lib/utils/visual-style-utils';
+import { isTimerGeneratedActionString } from '@/lib/utils/time-transition';
 
 export interface VisualStyles {
   backgroundColor?: string;
@@ -63,6 +57,59 @@ export interface SCXMLStateNodeData {
   // Drag-to-nest: true while another node is being dragged over this one as
   // a valid reparent target.
   isDropTarget?: boolean;
+  // Per-side connection-point counts (viz:anchors). A side not present here
+  // has exactly one handle, at its midpoint (the original behavior).
+  anchors?: Partial<Record<'top' | 'bottom' | 'left' | 'right', number>>;
+  // Shift-click near a side's border adds another anchor point there.
+  onAddAnchor?: (side: 'top' | 'bottom' | 'left' | 'right') => void;
+}
+
+const HANDLE_SIDES = ['top', 'bottom', 'left', 'right'] as const;
+type HandleSideName = (typeof HANDLE_SIDES)[number];
+
+const HANDLE_SIDE_POSITION: Record<HandleSideName, Position> = {
+  top: Position.Top,
+  bottom: Position.Bottom,
+  left: Position.Left,
+  right: Position.Right,
+};
+
+// Border-proximity margin (px) for the shift-click "add anchor" zone —
+// shared by the click handler and the hover-cursor preview so they agree on
+// exactly where the gesture is available.
+const EDGE_MARGIN = 14;
+
+/** Nearest of a rect's four borders to (x, y), and the distance to it. */
+function nearestBorderSide(
+  width: number,
+  height: number,
+  x: number,
+  y: number
+): { side: HandleSideName; dist: number } {
+  const candidates: [HandleSideName, number][] = [
+    ['top', y],
+    ['bottom', height - y],
+    ['left', x],
+    ['right', width - x],
+  ];
+  const [side, dist] = candidates.reduce((a, b) => (b[1] < a[1] ? b : a));
+  return { side, dist };
+}
+
+// Style for a handle at fraction `frac` along `side` — frac 0.5 (a single
+// handle) reproduces the original fixed-midpoint style exactly.
+function handleSideStyle(side: HandleSideName, frac: number): React.CSSProperties {
+  const pct = `${frac * 100}%`;
+  switch (side) {
+    case 'top':
+      return { left: pct, top: '0', transform: 'translate(-50%, -50%)', zIndex: 10 };
+    case 'bottom':
+      return { left: pct, bottom: '0', transform: 'translate(-50%, 50%)', zIndex: 10 };
+    case 'left':
+      return { left: '0', top: pct, transform: 'translate(-50%, -50%)', zIndex: 10 };
+    case 'right':
+      return { right: '0', top: pct, transform: 'translate(50%, -50%)', zIndex: 10 };
+  }
 }
 
 export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
@@ -95,7 +142,59 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       onNavigateInto,
       onResize,
       isDropTarget = false,
+      anchors,
+      onAddAnchor,
     } = data;
+
+    // Shift-click near one of the node's four borders adds another anchor
+    // point to that side (see the anchors feature). A margin of EDGE_MARGIN
+    // px around the border is the "add" zone; anything else (including a
+    // shift-click in the interior) falls through to normal click behavior.
+    const handleNodeClick = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!e.shiftKey || !onAddAnchor) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const { side, dist } = nearestBorderSide(
+        rect.width,
+        rect.height,
+        e.clientX - rect.left,
+        e.clientY - rect.top
+      );
+      if (dist > EDGE_MARGIN) return;
+      e.stopPropagation();
+      onAddAnchor(side);
+    };
+
+    // While Shift is held and the pointer is within the add-anchor zone,
+    // switch the cursor to a crosshair so the gesture is discoverable before
+    // the user commits to clicking.
+    const [nearAddableBorder, setNearAddableBorder] = React.useState(false);
+    const handleNodeMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!onAddAnchor || !e.shiftKey) {
+        if (nearAddableBorder) setNearAddableBorder(false);
+        return;
+      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const { dist } = nearestBorderSide(
+        rect.width,
+        rect.height,
+        e.clientX - rect.left,
+        e.clientY - rect.top
+      );
+      setNearAddableBorder(dist <= EDGE_MARGIN);
+    };
+    const handleNodeMouseLeave = () => {
+      if (nearAddableBorder) setNearAddableBorder(false);
+    };
+    // A mousemove only fires on pointer movement — releasing Shift while the
+    // pointer sits still near a border wouldn't otherwise clear the cursor.
+    React.useEffect(() => {
+      if (!nearAddableBorder) return;
+      const onKeyUp = (e: KeyboardEvent) => {
+        if (e.key === 'Shift') setNearAddableBorder(false);
+      };
+      window.addEventListener('keyup', onKeyUp);
+      return () => window.removeEventListener('keyup', onKeyUp);
+    }, [nearAddableBorder]);
 
     const [editingLabel, setEditingLabel] = React.useState(false);
     const [editingActions, setEditingActions] = React.useState(false);
@@ -107,8 +206,20 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       exitActions.join('\n')
     );
 
-    const hasEntryActions = entryActions.length > 0;
-    const hasExitActions = exitActions.length > 0;
+    // Timer-generated send/cancel rows (the "after X" delay's implementation)
+    // are hidden from every on-node display — they're authored/edited via the
+    // Transition panel's "after X" field, not as raw onentry/onexit actions.
+    const visibleEntryActions = useMemo(
+      () => entryActions.filter((a) => !isTimerGeneratedActionString(a)),
+      [entryActions]
+    );
+    const visibleExitActions = useMemo(
+      () => exitActions.filter((a) => !isTimerGeneratedActionString(a)),
+      [exitActions]
+    );
+
+    const hasEntryActions = visibleEntryActions.length > 0;
+    const hasExitActions = visibleExitActions.length > 0;
     const hasActions = hasEntryActions || hasExitActions;
 
     // Respond to isEditing flag from parent (triggered by double-click on node)
@@ -232,7 +343,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
     // Determine state characteristics for styling
     const getStateCharacteristics = () => {
       const labelLower = label.toLowerCase();
-      const actionCount = entryActions.length + exitActions.length;
+      const actionCount = visibleEntryActions.length + visibleExitActions.length;
 
       // Check for state types
       if (
@@ -313,52 +424,9 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       inlineStyles.borderStyle = 'solid';
     }
 
-    // Get icon for state type with matching colors
-    const getStateIcon = () => {
-      const iconColor = stateChar.color;
-
-      // Special handling for history states
-      if (label.toLowerCase().includes('history')) {
-        return (
-          <Circle
-            className='h-4 w-4'
-            style={{ color: iconColor }}
-            fill='currentColor'
-          />
-        );
-      }
-
-      switch (stateType) {
-        case 'final':
-          return <Target className='h-4 w-4' style={{ color: iconColor }} />;
-        case 'compound':
-          return <Square className='h-4 w-4' style={{ color: iconColor }} />;
-        case 'parallel':
-          return (
-            <div className='flex items-center space-x-1'>
-              <div className='flex'>
-                <Square
-                  className='h-3 w-3'
-                  style={{ color: iconColor, fill: `${iconColor}33` }}
-                />
-                <Square
-                  className='h-3 w-3 -ml-1'
-                  style={{ color: iconColor, fill: `${iconColor}33` }}
-                />
-              </div>
-              <span className='text-xs font-bold' style={{ color: iconColor }}>
-                ⚡
-              </span>
-            </div>
-          );
-        default:
-          return <Circle className='h-4 w-4' style={{ color: iconColor }} />;
-      }
-    };
-
     const actionCountIndicator = (() => {
-      const entryCount = entryActions.length;
-      const exitCount = exitActions.length;
+      const entryCount = visibleEntryActions.length;
+      const exitCount = visibleExitActions.length;
       const reactionCount = internalEventActions.length;
       const parts: React.ReactNode[] = [];
 
@@ -457,112 +525,46 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
             position: 'relative',
             zIndex: 9999999, // Higher z-index to render above edges
             overflow: 'visible',
+            cursor: nearAddableBorder ? 'crosshair' : undefined,
           }}
+          onClick={handleNodeClick}
+          onMouseMove={handleNodeMouseMove}
+          onMouseLeave={handleNodeMouseLeave}
+          title={
+            onAddAnchor
+              ? 'Shift-click near an edge to add a connection point'
+              : undefined
+          }
         >
-          {/* Connection handles - all 4 sides support both incoming and outgoing */}
-          {/* Top handles */}
-          <Handle
-            type='target'
-            position={Position.Top}
-            id='top'
-            style={{
-              left: '50%',
-              top: '0',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-          <Handle
-            type='source'
-            position={Position.Top}
-            id='top'
-            style={{
-              left: '50%',
-              top: '0',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-
-          {/* Bottom handles */}
-          <Handle
-            type='target'
-            position={Position.Bottom}
-            id='bottom'
-            style={{
-              left: '50%',
-              bottom: '0',
-              transform: 'translate(-50%, 50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-          <Handle
-            type='source'
-            position={Position.Bottom}
-            id='bottom'
-            style={{
-              left: '50%',
-              bottom: '0',
-              transform: 'translate(-50%, 50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-
-          {/* Left handles */}
-          <Handle
-            type='target'
-            position={Position.Left}
-            id='left'
-            style={{
-              left: '0',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-          <Handle
-            type='source'
-            position={Position.Left}
-            id='left'
-            style={{
-              left: '0',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-
-          {/* Right handles */}
-          <Handle
-            type='target'
-            position={Position.Right}
-            id='right'
-            style={{
-              right: '0',
-              top: '50%',
-              transform: 'translate(50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
-          <Handle
-            type='source'
-            position={Position.Right}
-            id='right'
-            style={{
-              right: '0',
-              top: '50%',
-              transform: 'translate(50%, -50%)',
-              zIndex: 10,
-            }}
-            className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-          />
+          {/* Connection handles - all 4 sides support both incoming and outgoing.
+              Each side renders `anchors[side] ?? 1` evenly-spaced handle pairs;
+              index 0 keeps the bare side id for backward compatibility, see
+              .claude/features/state-connections-handles.md */}
+          {HANDLE_SIDES.flatMap((side) => {
+            const count = anchors?.[side] ?? 1;
+            return Array.from({ length: count }, (_, i) => {
+              const id = i === 0 ? side : `${side}-${i}`;
+              const style = handleSideStyle(side, (i + 1) / (count + 1));
+              return (
+                <React.Fragment key={id}>
+                  <Handle
+                    type='target'
+                    position={HANDLE_SIDE_POSITION[side]}
+                    id={id}
+                    style={style}
+                    className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
+                  />
+                  <Handle
+                    type='source'
+                    position={HANDLE_SIDE_POSITION[side]}
+                    id={id}
+                    style={style}
+                    className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
+                  />
+                </React.Fragment>
+              );
+            });
+          })}
 
           {/* Delete button - only show if onDelete is provided and not initial state */}
           {onDelete && !isInitial && (
@@ -604,7 +606,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
             {/* State header with icon and name */}
             <div className='flex items-center justify-between mb-2'>
               <div className='flex items-center space-x-2 flex-1'>
-                {getStateIcon()}
                 {editingLabel ? (
                   <input
                     type='text'

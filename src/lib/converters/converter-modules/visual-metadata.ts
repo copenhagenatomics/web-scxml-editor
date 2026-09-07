@@ -8,6 +8,7 @@
 import type { HierarchicalNode } from '@/types/hierarchical-node';
 import { VISUAL_METADATA_CONSTANTS } from '@/types/visual-metadata';
 import { formatXML } from '@/lib/utils/format-utils';
+import type { HandleSide } from '@/lib/layout/edge-obstacle-utils';
 
 export interface VisualMetadata {
   x?: number;
@@ -15,6 +16,42 @@ export interface VisualMetadata {
   width?: number;
   height?: number;
   fill?: string;
+  /** Per-side anchor-point counts (viz:anchors) — sides at the default of 1 are omitted. */
+  anchors?: Partial<Record<HandleSide, number>>;
+}
+
+/** Hard cap on anchors per side — guards against runaway shift-clicking or malformed XML. */
+export const MAX_ANCHORS_PER_SIDE = 6;
+
+/**
+ * Parses the viz:anchors attribute value ("side:count;side:count") into a
+ * per-side count map. Malformed entries (unknown side, non-integer, or
+ * out-of-range count) are skipped rather than throwing, since this reads
+ * user-editable XML.
+ */
+export function parseAnchorsAttribute(value: string): Partial<Record<HandleSide, number>> {
+  const result: Partial<Record<HandleSide, number>> = {};
+  const sides: HandleSide[] = ['top', 'bottom', 'left', 'right'];
+  for (const entry of value.split(';')) {
+    const [side, countStr] = entry.split(':').map((s) => s.trim());
+    if (!countStr || !/^\d+$/.test(countStr)) continue;
+    const count = Number(countStr);
+    if (sides.includes(side as HandleSide) && count > 1 && count <= MAX_ANCHORS_PER_SIDE) {
+      result[side as HandleSide] = count;
+    }
+  }
+  return result;
+}
+
+/**
+ * Serializes a per-side anchor count map back into the viz:anchors attribute
+ * format, omitting sides at the default count of 1.
+ */
+export function formatAnchorsAttribute(anchors: Partial<Record<HandleSide, number>>): string {
+  return (Object.entries(anchors) as [HandleSide, number][])
+    .filter(([, count]) => count > 1)
+    .map(([side, count]) => `${side}:${count}`)
+    .join(';');
 }
 
 /**
@@ -29,6 +66,7 @@ export function extractVisualMetadata(
   // Extract visual metadata from the viz namespace
   const vizXywh = getAttribute(element, 'viz:xywh');
   const vizRgb = getAttribute(element, 'viz:rgb');
+  const vizAnchors = getAttribute(element, 'viz:anchors');
 
   // Parse viz:xywh format: "x,y,width,height" (comma-separated)
   if (vizXywh && typeof vizXywh === 'string') {
@@ -47,6 +85,10 @@ export function extractVisualMetadata(
   // Parse viz:rgb for fill color
   if (vizRgb) {
     (metadata as any).fill = vizRgb;
+  }
+
+  if (vizAnchors) {
+    metadata.anchors = parseAnchorsAttribute(vizAnchors);
   }
 
   return metadata;

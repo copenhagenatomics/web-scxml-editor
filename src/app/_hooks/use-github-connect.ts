@@ -40,7 +40,7 @@ export function useGithubConnect() {
       const deviceInfo = await requestDeviceCode(clientId, deviceCodeEndpoint);
       setDeviceCode({ userCode: deviceInfo.userCode, verificationUri: deviceInfo.verificationUri });
 
-      const { accessToken } = await pollForDeviceToken(
+      const tokens = await pollForDeviceToken(
         clientId,
         deviceInfo.deviceCode,
         deviceInfo.interval,
@@ -48,8 +48,8 @@ export function useGithubConnect() {
         controller.signal
       );
 
-      const user = await getAuthenticatedUser(accessToken);
-      setAuth(accessToken, user);
+      const user = await getAuthenticatedUser(tokens.accessToken);
+      setAuth(tokens.accessToken, user, tokens.refreshToken, tokens.expiresIn, tokens.refreshTokenExpiresIn);
     } catch (err) {
       if (err instanceof GithubOAuthError) {
         // 'cancelled' is a normal, user-initiated way to back out - show

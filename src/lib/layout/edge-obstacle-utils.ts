@@ -23,19 +23,38 @@ export interface Rect {
 export type HandleSide = 'top' | 'bottom' | 'left' | 'right';
 
 /**
- * Anchor point of a handle: the midpoint of the given side of the node rect.
+ * Anchor point of a handle: a state's side can carry more than one handle
+ * (see the anchors feature) — `index`/`count` locate this handle among its
+ * `count` siblings on that side, evenly spaced at fraction (index+1)/(count+1).
+ * Defaults reproduce the original single-handle midpoint behavior.
  */
-export function getHandleAnchor(rect: Rect, side: HandleSide): Point {
+export function getHandleAnchor(
+  rect: Rect,
+  side: HandleSide,
+  index = 0,
+  count = 1
+): Point {
+  const frac = (index + 1) / (count + 1);
   switch (side) {
     case 'top':
-      return { x: rect.x + rect.width / 2, y: rect.y };
+      return { x: rect.x + rect.width * frac, y: rect.y };
     case 'bottom':
-      return { x: rect.x + rect.width / 2, y: rect.y + rect.height };
+      return { x: rect.x + rect.width * frac, y: rect.y + rect.height };
     case 'left':
-      return { x: rect.x, y: rect.y + rect.height / 2 };
+      return { x: rect.x, y: rect.y + rect.height * frac };
     case 'right':
-      return { x: rect.x + rect.width, y: rect.y + rect.height / 2 };
+      return { x: rect.x + rect.width, y: rect.y + rect.height * frac };
   }
+}
+
+/**
+ * Splits a handle id into its side and index. Index 0 uses the bare side
+ * name ('top') for backward compatibility with documents/tests predating
+ * multi-anchor sides; 'top-2' etc. address a specific additional anchor.
+ */
+export function parseHandleId(handleId: string): { side: HandleSide; index: number } {
+  const [side, indexStr] = handleId.split('-');
+  return { side: side as HandleSide, index: indexStr ? parseInt(indexStr, 10) : 0 };
 }
 
 // Rects are shrunk by this margin before intersection tests so a path that

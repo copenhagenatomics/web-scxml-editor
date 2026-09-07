@@ -695,6 +695,10 @@ export class SCXMLToXStateConverter {
       (node.data as any).height = visualMetadata.height;
     }
 
+    if (visualMetadata.anchors) {
+      (node.data as any).anchors = visualMetadata.anchors;
+    }
+
     return node;
   }
 

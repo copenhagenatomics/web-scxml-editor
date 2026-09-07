@@ -93,7 +93,45 @@ export function formatAfterSyntax(
  * {stateId}_t_{N}_timeEvent_{N}.
  */
 export function isTimeEventName(name: string): boolean {
-  return /_t_\d+_timeEvent_\d+/.test(name);
+  return /^.+_t_\d+_timeEvent_\d+$/.test(name);
+}
+
+/**
+ * Returns true for a pipe-delimited onentry/onexit action string (the format
+ * produced by StateActionsPanel's `toStrings()`) that is the auto-generated
+ * send/cancel pair backing an "after X" time transition, rather than an
+ * action the user authored directly. Used to hide these rows from the State
+ * Actions panel and the state node's action-count display — they still exist
+ * in the underlying SCXML and remain visible in the code editor.
+ */
+export function isTimerGeneratedActionString(actionString: string): boolean {
+  const parts = actionString.split('|');
+  if (parts[0] === 'send' || parts[0] === 'cancel') {
+    return isTimeEventName(parts[1] ?? '');
+  }
+  return false;
+}
+
+/**
+ * Re-inserts timer-generated action strings (hidden from the State Actions panel by
+ * `isTimerGeneratedActionString`) back into an edited action list at their original
+ * position, rather than appending them at the end. Callers record each hidden action's
+ * index in the pre-edit array; this splices them back in ascending index order so
+ * interleaved `<send>`/`<cancel>` pairs keep their execution order relative to the
+ * surrounding onentry/onexit actions (e.g. a `delayexpr` still reads a variable's value
+ * as of its original position, not after later assignments). Indices are clamped to the
+ * current array length so this degrades gracefully when the user added/removed rows.
+ */
+export function mergeHiddenActions(
+  editedActions: string[],
+  hiddenActions: Array<{ index: number; action: string }>
+): string[] {
+  const result = [...editedActions];
+  const sorted = [...hiddenActions].sort((a, b) => a.index - b.index);
+  for (const { index, action } of sorted) {
+    result.splice(Math.min(index, result.length), 0, action);
+  }
+  return result;
 }
 
 /**

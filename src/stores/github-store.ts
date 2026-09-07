@@ -22,6 +22,12 @@ export interface GithubDeviceCode {
 
 interface GithubState {
   accessToken: string | null;
+  // The next three are null for a non-expiring token (e.g. a GitHub App
+  // config with "Expire user authorization tokens" turned off) - getValidAccessToken()
+  // treats a null tokenExpiresAt as "never needs refreshing".
+  refreshToken: string | null;
+  tokenExpiresAt: number | null; // epoch ms
+  refreshTokenExpiresAt: number | null; // epoch ms
   user: GithubUser | null;
   linkedRepo: GithubLinkedRepo | null;
   isConnecting: boolean;   // true while a Device Flow sign-in is being requested/polled
@@ -31,7 +37,19 @@ interface GithubState {
 }
 
 interface GithubActions {
-  setAuth: (token: string, user: GithubUser) => void;
+  setAuth: (
+    token: string,
+    user: GithubUser,
+    refreshToken?: string,
+    expiresIn?: number,
+    refreshTokenExpiresIn?: number
+  ) => void;
+  updateTokens: (
+    token: string,
+    refreshToken?: string,
+    expiresIn?: number,
+    refreshTokenExpiresIn?: number
+  ) => void;
   clearAuth: () => void;
   setLinkedRepo: (repo: GithubLinkedRepo) => void;
   updateLinkedRepoSha: (sha: string) => void;
@@ -44,6 +62,9 @@ interface GithubActions {
 
 const initialState: GithubState = {
   accessToken: null,
+  refreshToken: null,
+  tokenExpiresAt: null,
+  refreshTokenExpiresAt: null,
   user: null,
   linkedRepo: null,
   isConnecting: false,
@@ -52,20 +73,59 @@ const initialState: GithubState = {
   deviceCode: null,
 };
 
+/** undefined (no expiry info) -> null; a number of seconds -> an absolute epoch-ms deadline. */
+function toExpiryTimestamp(expiresInSeconds: number | undefined): number | null {
+  return expiresInSeconds === undefined ? null : Date.now() + expiresInSeconds * 1000;
+}
+
 export const useGithubStore = create<GithubState & GithubActions>()(
   persist(
     (set, get) => ({
       ...initialState,
 
-      setAuth: (token: string, user: GithubUser) => {
-        set({ accessToken: token, user });
+      setAuth: (
+        token: string,
+        user: GithubUser,
+        refreshToken?: string,
+        expiresIn?: number,
+        refreshTokenExpiresIn?: number
+      ) => {
+        set({
+          accessToken: token,
+          user,
+          refreshToken: refreshToken ?? null,
+          tokenExpiresAt: toExpiryTimestamp(expiresIn),
+          refreshTokenExpiresAt: toExpiryTimestamp(refreshTokenExpiresIn),
+        });
       },
 
-      // Clears accessToken + user + linkedRepo (no auth => no valid link).
+      // Updates the token pair after a successful refresh - leaves user/linkedRepo untouched.
+      updateTokens: (
+        token: string,
+        refreshToken?: string,
+        expiresIn?: number,
+        refreshTokenExpiresIn?: number
+      ) => {
+        set({
+          accessToken: token,
+          refreshToken: refreshToken ?? null,
+          tokenExpiresAt: toExpiryTimestamp(expiresIn),
+          refreshTokenExpiresAt: toExpiryTimestamp(refreshTokenExpiresIn),
+        });
+      },
+
+      // Clears accessToken + tokens + user + linkedRepo (no auth => no valid link).
       // Used both for a manual "Sign out" action and for the 401
       // expired/revoked-token handler.
       clearAuth: () => {
-        set({ accessToken: null, user: null, linkedRepo: null });
+        set({
+          accessToken: null,
+          refreshToken: null,
+          tokenExpiresAt: null,
+          refreshTokenExpiresAt: null,
+          user: null,
+          linkedRepo: null,
+        });
       },
 
       setLinkedRepo: (repo: GithubLinkedRepo) => {
@@ -112,6 +172,9 @@ export const useGithubStore = create<GithubState & GithubActions>()(
       // running.
       partialize: (state) => ({
         accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
+        tokenExpiresAt: state.tokenExpiresAt,
+        refreshTokenExpiresAt: state.refreshTokenExpiresAt,
         user: state.user,
         linkedRepo: state.linkedRepo,
       }),
