@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history + tags, needed to diff against the previous release
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -41,6 +43,7 @@ jobs:
           # runs at - a fixed absolute URL wouldn't work across a fleet of
           # devices each reached at their own local IP/hostname.
           NEXT_PUBLIC_GITHUB_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GITHUB_CLIENT_ID }}
+          NEXT_PUBLIC_GITHUB_INSTALL_URL: ${{ vars.NEXT_PUBLIC_GITHUB_INSTALL_URL }}
           NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT: ${{ vars.NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT }}
           NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT: ${{ vars.NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT }}
 
@@ -77,24 +80,35 @@ jobs:
           sha256sum "scxml-editor-${{ steps.version.outputs.VERSION }}.zip" > "scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256"
           echo "SHA256=$(cut -d ' ' -f1 "scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256")" >> "$GITHUB_OUTPUT"
 
+      - name: Generate changelog
+        run: |
+          node scripts/generate-release-notes.mjs --to "${{ steps.version.outputs.VERSION }}" --out changelog.md
+
+      - name: Compose release notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Release ${{ steps.version.outputs.VERSION }}
+
+          Download `scxml-editor-${{ steps.version.outputs.VERSION }}.zip` below.
+
+          **SHA256:** `${{ steps.checksum.outputs.SHA256 }}`
+
+          **Serve it locally:**
+          ```bash
+          unzip scxml-editor-${{ steps.version.outputs.VERSION }}.zip
+          python3 -m http.server 3000
+          ```
+          Or deploy the folder to any static host (Netlify, S3, GitHub Pages, nginx).
+
+          EOF
+          cat changelog.md >> release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
           name: "SCXML Visual Editor ${{ steps.version.outputs.VERSION }}"
-          body: |
-            ## Release ${{ steps.version.outputs.VERSION }}
-
-            Download `scxml-editor-${{ steps.version.outputs.VERSION }}.zip` below.
-
-            **SHA256:** `${{ steps.checksum.outputs.SHA256 }}`
-
-            **Serve it locally:**
-            ```bash
-            unzip scxml-editor-${{ steps.version.outputs.VERSION }}.zip
-            python3 -m http.server 3000
-            ```
-            Or deploy the folder to any static host (Netlify, S3, GitHub Pages, nginx).
+          body_path: release-notes.md
           files: |
             scxml-editor-${{ steps.version.outputs.VERSION }}.zip
             scxml-editor-${{ steps.version.outputs.VERSION }}.zip.sha256

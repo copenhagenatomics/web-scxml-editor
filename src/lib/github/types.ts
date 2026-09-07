@@ -8,7 +8,7 @@
  * these shapes.
  */
 
-/** Flattened shape for a repo, derived from GitHub's `GET /user/repos` items. */
+/** Flattened shape for a repo, derived from GitHub's `GET /user/installations/{id}/repositories` items. */
 export interface GithubRepoSummary {
   owner: string;
   name: string;

@@ -24,3 +24,19 @@ isn't clean or you're not on `main`.
 
 GitHub Actions will automatically build the app and create a GitHub Release with `scxml-editor-vX.Y.Z.zip` attached.
 Check progress at your repo's **Actions** tab (~1 min).
+
+## Changelog
+
+The release body includes a "What's New" section, generated automatically by
+`scripts/generate-release-notes.mjs` from the conventional-commit messages
+(`feat:`, `fix:`, `refactor:`, etc.) between the previous tag and the new one.
+No manual changelog editing is needed — write descriptive commit messages
+and the categorized list (New Features / Bug Fixes / Improvements / Breaking
+Changes) is built for you on every release.
+
+To preview it locally before releasing:
+```bash
+node scripts/generate-release-notes.mjs --to HEAD
+# or compare two specific tags:
+node scripts/generate-release-notes.mjs --from v0.1.2 --to v0.1.3
+```

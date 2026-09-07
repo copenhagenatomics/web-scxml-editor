@@ -5,6 +5,7 @@
 import { useHierarchyNavigation } from '@/hooks/use-hierarchy-navigation';
 import { SCXMLToXStateConverter } from '@/lib/converters/scxml-to-xstate';
 import { nodeDimensionCalculator } from '@/lib/layout/node-dimension-calculator';
+import { parseHandleId, type HandleSide } from '@/lib/layout/edge-obstacle-utils';
 import { VisualMetadataManager } from '@/lib/metadata';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
@@ -47,7 +48,6 @@ import {
   Controls,
   MarkerType,
   MiniMap,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -75,7 +75,7 @@ import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
-import { findTimeEventToken, resolveTimeEventDisplay } from '@/lib/utils/time-transition';
+import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString } from '@/lib/utils/time-transition';
 import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
@@ -206,13 +206,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const [dropTargetId, setDropTargetId] = React.useState<string | null>(null);
   const draggingNodeIdsRef = React.useRef<string[]>([]);
 
-  // Un-nest drop zone: a fixed "Back to parent" control (rendered only while
-  // drilled into a state) that lets a drag pull the dragged node(s) back out
-  // to the grandparent level. Tracked separately from dropTargetId because
-  // the zone is a screen-space DOM element, not a flow-space node.
-  const [isOverUnnestZone, setIsOverUnnestZone] = React.useState(false);
-  const unnestZoneRef = React.useRef<HTMLDivElement>(null);
-
   // Ref to always access latest selection state in callbacks
   const selectedTransitionsRef = React.useRef(selectedTransitions);
   React.useEffect(() => {
@@ -284,6 +277,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     id: string;
     entryActions: ParsedActionRow[];
     exitActions: ParsedActionRow[];
+    // Raw send/cancel action strings backing an "after X" time transition,
+    // filtered out of entryActions/exitActions above so they don't show up
+    // as editable rows. Re-appended to whatever the panel applies so they're
+    // never dropped from the underlying SCXML — see isTimerGeneratedActionString.
+    hiddenEntryActions: string[];
+    hiddenExitActions: string[];
     internalEventActions: Array<{ event: string; location: string; expr: string; type: 'internal' | 'external' }>;
     stateType: 'simple' | 'compound' | 'parallel' | 'final';
     isInitial: boolean;
@@ -712,6 +711,31 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [onSCXMLChange, setNodes, setEdges]
   );
 
+  // ==================== ANCHOR POINT HANDLER ====================
+  const handleAddAnchor = React.useCallback(
+    (nodeId: string, side: HandleSide) => {
+      const currentScxmlContent = scxmlContentRef.current;
+      if (!onSCXMLChange || !currentScxmlContent) return;
+
+      try {
+        const { AddAnchorPointCommand } = require('@/lib/commands');
+        const result = new AddAnchorPointCommand(nodeId, side).execute(
+          currentScxmlContent
+        );
+
+        if (result.success) {
+          previousScxmlRef.current = result.newContent;
+          onSCXMLChange(result.newContent, 'property');
+        } else {
+          console.error('Failed to add anchor point:', result.error);
+        }
+      } catch (error) {
+        console.error('Failed to add anchor point:', error);
+      }
+    },
+    [onSCXMLChange]
+  );
+
   // ==================== EDGE HANDLERS ====================
   const handleTransitionLabelChange = React.useCallback(
     (
@@ -819,7 +843,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // Step 2: apply the actions/reactions change on the already-patched content
         const stateId = selectedStateForActions.id;
         const result = apply.kind === 'actions'
-          ? new UpdateActionsCommand(stateId, apply.entryActions, apply.exitActions).execute(base)
+          ? new UpdateActionsCommand(
+              stateId,
+              [...apply.entryActions, ...selectedStateForActions.hiddenEntryActions],
+              [...apply.exitActions, ...selectedStateForActions.hiddenExitActions],
+            ).execute(base)
           : new UpdateInternalEventsCommand(stateId, apply.actions).execute(base);
 
         if (result.success) {
@@ -1004,6 +1032,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       setEdges((eds) => addEdge(newEdge, eds));
 
+      setActiveStates(new Set());
+      setSelectedStateForActions(null);
+      setSelectedTransitions(new Set([newEdge.id]));
+      setActivePanel('transition');
+      setSelectedEdgeForEdit({
+        id: newEdge.id,
+        source: newEdge.source,
+        target: newEdge.target,
+        event: undefined,
+        cond: undefined,
+      });
+
       if (parserRef.current && scxmlContent) {
         try {
           const parseResult = parserRef.current.parse(scxmlContent);
@@ -1063,7 +1103,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
       }
     },
-    [setEdges, scxmlContent, onSCXMLChange]
+    [setEdges, scxmlContent, onSCXMLChange, setActivePanel]
   );
 
   // Set for the duration of a drag on an existing edge's endpoint (onReconnectStart ->
@@ -1213,7 +1253,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 const node = nodes.find((n) => n.id === stateId);
                 if (node && node.data && nodeType !== 'scxmlNote') {
                   const parseActions = (actions: string[]): ParsedActionRow[] => {
-                    return actions.flatMap((a): ParsedActionRow[] => {
+                    // Timer-generated send/cancel rows (the "after X" delay's
+                    // implementation) are hidden here — the user authors/edits
+                    // them via the Transition panel's "after X" field, not as
+                    // raw onentry/onexit rows. They remain in the underlying
+                    // SCXML and are visible in the code editor.
+                    return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
                       if (a.startsWith('assign|')) {
                         const parts = a.split('|');
                         return [{ type: 'assign', location: parts[1] || '', expr: parts[2] || '' }];
@@ -1250,6 +1295,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     id: stateId,
                     entryActions: parseActions(node.data.entryActions || []),
                     exitActions: parseActions(node.data.exitActions || []),
+                    hiddenEntryActions: (node.data.entryActions || []).filter(isTimerGeneratedActionString),
+                    hiddenExitActions: (node.data.exitActions || []).filter(isTimerGeneratedActionString),
                     internalEventActions: node.data.internalEventActions || [],
                     stateType: node.data.stateType,
                     isInitial: isInitialFlag,
@@ -2030,6 +2077,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               onDelete: () => handleNodeDelete(node.id),
               onResize: (x: number, y: number, width: number, height: number) =>
                 handleNodeResize(node.id, x, y, width, height),
+              onAddAnchor: (side: HandleSide) => handleAddAnchor(node.id, side),
             };
 
             return nodeUpdate;
@@ -2089,8 +2137,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               // stacked nodes leave little horizontal room — an X spread isn't wide
               // enough to clear a label pill, so those labels stack vertically (Y)
               // instead, regardless of the path's own bow direction.
+              const sourceHandleSide = edge.sourceHandle
+                ? parseHandleId(edge.sourceHandle).side
+                : undefined;
               const isVerticalConnection =
-                edge.sourceHandle === 'top' || edge.sourceHandle === 'bottom';
+                sourceHandleSide === 'top' || sourceHandleSide === 'bottom';
               const labelSpread =
                 (edgeIndex - (parallelEdges.length - 1) / 2) *
                 (isVerticalConnection ? 24 : 25);
@@ -2269,14 +2320,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   // Update allNodesRef with original nodes (with parentId intact)
   allNodesRef.current = parsedData.nodes;
-
-  // The parent of the state we're currently drilled into, if any — the
-  // un-nest drop zone's target when un-nesting a child of currentParentId.
-  const grandparentId = React.useMemo(() => {
-    if (!currentParentId) return undefined;
-    const parentNode = parsedData.nodes.find((n) => n.id === currentParentId);
-    return parentNode?.parentId;
-  }, [currentParentId, parsedData.nodes]);
 
   // Keep the hierarchy index panel's tooltip data (editor-store) in sync
   // with the current node set, so it works from the toolbar without that
@@ -2534,6 +2577,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     setActiveStates(new Set(clones.map((c) => c['@_id'])));
   }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId]);
 
+  const handleCutSelection = useCallback(() => {
+    if (activeStates.size === 0) return;
+    handleCopySelection();
+    const ids = Array.from(activeStates);
+    handleNodesChange(ids.map((id) => ({ id, type: 'remove' })));
+  }, [activeStates, handleCopySelection, handleNodesChange]);
+
   // ==================== DRAG-TO-NEST ====================
   const handleReparent = useCallback(
     (stateIds: string[], targetParentId: string | undefined) => {
@@ -2593,26 +2643,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // other way and a subsequent drag happens to target a single node instead.
   // Both paths share the same drop-target detection, factored out here.
   const computeDropTarget = useCallback(
-    (
-      event: React.MouseEvent,
-      draggedRect: { x: number; y: number; width: number; height: number }
-    ) => {
-      if (currentParentId && unnestZoneRef.current) {
-        const zoneRect = unnestZoneRef.current.getBoundingClientRect();
-        const overZone =
-          event.clientX >= zoneRect.left &&
-          event.clientX <= zoneRect.right &&
-          event.clientY >= zoneRect.top &&
-          event.clientY <= zoneRect.bottom;
-        setIsOverUnnestZone(overZone);
-        if (overZone) {
-          setDropTargetId(null);
-          return;
-        }
-      } else {
-        setIsOverUnnestZone(false);
-      }
-
+    (draggedRect: { x: number; y: number; width: number; height: number }) => {
       const candidate = nodes.find((n) => {
         if (draggingNodeIdsRef.current.includes(n.id) || isNoteId(n.id)) return false;
         const rect = { x: n.position.x, y: n.position.y, width: n.width || 120, height: n.height || 60 };
@@ -2637,12 +2668,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       setDropTargetId(invalid ? null : candidate.id);
     },
-    [nodes, scxmlContent, currentParentId]
+    [nodes, scxmlContent]
   );
 
   const handleNodeDrag = useCallback(
-    (event: React.MouseEvent, node: Node) => {
-      computeDropTarget(event, {
+    (_event: React.MouseEvent, node: Node) => {
+      computeDropTarget({
         x: node.position.x,
         y: node.position.y,
         width: node.width || 120,
@@ -2660,7 +2691,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   );
 
   const handleSelectionDrag = useCallback(
-    (event: React.MouseEvent, draggedNodes: Node[]) => {
+    (_event: React.MouseEvent, draggedNodes: Node[]) => {
       if (draggedNodes.length === 0) return;
       const lefts = draggedNodes.map((n) => n.position.x);
       const tops = draggedNodes.map((n) => n.position.y);
@@ -2668,7 +2699,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const bottoms = draggedNodes.map((n) => n.position.y + (n.height || 60));
       const left = Math.min(...lefts);
       const top = Math.min(...tops);
-      computeDropTarget(event, {
+      computeDropTarget({
         x: left,
         y: top,
         width: Math.max(...rights) - left,
@@ -2681,17 +2712,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const justReparentedIdsRef = React.useRef<Set<string>>(new Set());
 
   const handleNodeDragStop = useCallback(() => {
-    if (isOverUnnestZone && currentParentId) {
-      justReparentedIdsRef.current = new Set(draggingNodeIdsRef.current);
-      handleReparent(draggingNodeIdsRef.current, grandparentId);
-    } else if (dropTargetId) {
+    if (dropTargetId) {
       justReparentedIdsRef.current = new Set(draggingNodeIdsRef.current);
       handleReparent(draggingNodeIdsRef.current, dropTargetId);
     }
     setDropTargetId(null);
-    setIsOverUnnestZone(false);
     draggingNodeIdsRef.current = [];
-  }, [dropTargetId, isOverUnnestZone, currentParentId, grandparentId, handleReparent]);
+  }, [dropTargetId, handleReparent]);
 
   const handleAddNote = React.useCallback(() => {
     if (!onSCXMLChange || !scxmlContent) {
@@ -3046,6 +3073,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       if (event.key === 'c' && activeStates.size > 0) {
         event.preventDefault();
         handleCopySelection();
+      } else if (event.key === 'x' && activeStates.size > 0) {
+        event.preventDefault();
+        handleCutSelection();
       } else if (event.key === 'v') {
         event.preventDefault();
         handlePasteClipboard();
@@ -3054,7 +3084,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
     window.addEventListener('keydown', handleCopyPasteKeys);
     return () => window.removeEventListener('keydown', handleCopyPasteKeys);
-  }, [activeStates, handleCopySelection, handlePasteClipboard]);
+  }, [activeStates, handleCopySelection, handleCutSelection, handlePasteClipboard]);
 
   // Cleanup timeout on unmount
   React.useEffect(() => {
@@ -3242,20 +3272,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               maskColor='rgba(0, 0, 0, 0.05)'
               className='bg-white/90 border border-slate-200 rounded-lg shadow-sm'
             />
-            {currentParentId && (
-              <Panel position='top-left'>
-                <div
-                  ref={unnestZoneRef}
-                  className={`flex items-center gap-1 rounded-lg border px-3 py-2 text-xs shadow-sm transition-colors ${
-                    isOverUnnestZone
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                      : 'border-default bg-elevated text-muted'
-                  }`}
-                >
-                  ↑ Back to parent
-                </div>
-              </Panel>
-            )}
           </ReactFlow>
           <InitialGroupConflictBanner
             message={connectionBlockedMessage}
@@ -3265,6 +3281,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             <MultiSelectToolbar
               count={activeStates.size}
               onCopy={handleCopySelection}
+              onCut={handleCutSelection}
               onDelete={() => {
                 const ids = Array.from(activeStates);
                 handleNodesChange(ids.map((id) => ({ id, type: 'remove' })));
@@ -3321,8 +3338,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           if (selectedStateForActions) {
             handleNodeActionsChange(
               selectedStateForActions.id,
-              entryActions,
-              exitActions,
+              [...entryActions, ...selectedStateForActions.hiddenEntryActions],
+              [...exitActions, ...selectedStateForActions.hiddenExitActions],
             );
           }
         }}

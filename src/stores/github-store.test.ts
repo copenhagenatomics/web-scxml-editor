@@ -13,6 +13,9 @@ const testRepo: GithubLinkedRepo = {
 function resetStore() {
   useGithubStore.setState({
     accessToken: null,
+    refreshToken: null,
+    tokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
     user: null,
     linkedRepo: null,
     isConnecting: false,
@@ -31,6 +34,9 @@ describe('github-store', () => {
   it('has the expected default state', () => {
     const state = useGithubStore.getState();
     expect(state.accessToken).toBeNull();
+    expect(state.refreshToken).toBeNull();
+    expect(state.tokenExpiresAt).toBeNull();
+    expect(state.refreshTokenExpiresAt).toBeNull();
     expect(state.user).toBeNull();
     expect(state.linkedRepo).toBeNull();
     expect(state.isConnecting).toBe(false);
@@ -39,19 +45,50 @@ describe('github-store', () => {
     expect(state.deviceCode).toBeNull();
   });
 
-  it('setAuth sets both accessToken and user', () => {
+  it('setAuth sets accessToken and user, with no refresh info (non-expiring config)', () => {
     useGithubStore.getState().setAuth('token-123', testUser);
     expect(useGithubStore.getState().accessToken).toBe('token-123');
     expect(useGithubStore.getState().user).toEqual(testUser);
+    expect(useGithubStore.getState().refreshToken).toBeNull();
+    expect(useGithubStore.getState().tokenExpiresAt).toBeNull();
+    expect(useGithubStore.getState().refreshTokenExpiresAt).toBeNull();
   });
 
-  it('clearAuth clears accessToken, user, and linkedRepo', () => {
-    useGithubStore.getState().setAuth('token-123', testUser);
+  it('setAuth computes absolute expiry timestamps from expiresIn/refreshTokenExpiresIn', () => {
+    const before = Date.now();
+    useGithubStore.getState().setAuth('token-123', testUser, 'refresh-1', 28800, 15897600);
+    const after = Date.now();
+
+    expect(useGithubStore.getState().refreshToken).toBe('refresh-1');
+    const { tokenExpiresAt, refreshTokenExpiresAt } = useGithubStore.getState();
+    expect(tokenExpiresAt).not.toBeNull();
+    expect(tokenExpiresAt!).toBeGreaterThanOrEqual(before + 28800 * 1000);
+    expect(tokenExpiresAt!).toBeLessThanOrEqual(after + 28800 * 1000);
+    expect(refreshTokenExpiresAt!).toBeGreaterThanOrEqual(before + 15897600 * 1000);
+  });
+
+  it('updateTokens replaces the token pair without touching user/linkedRepo', () => {
+    useGithubStore.getState().setAuth('token-123', testUser, 'refresh-1', 28800, 15897600);
+    useGithubStore.getState().setLinkedRepo(testRepo);
+
+    useGithubStore.getState().updateTokens('token-456', 'refresh-2', 28800, 15897600);
+
+    expect(useGithubStore.getState().accessToken).toBe('token-456');
+    expect(useGithubStore.getState().refreshToken).toBe('refresh-2');
+    expect(useGithubStore.getState().user).toEqual(testUser);
+    expect(useGithubStore.getState().linkedRepo).toEqual(testRepo);
+  });
+
+  it('clearAuth clears accessToken, refresh info, user, and linkedRepo', () => {
+    useGithubStore.getState().setAuth('token-123', testUser, 'refresh-1', 28800, 15897600);
     useGithubStore.getState().setLinkedRepo(testRepo);
 
     useGithubStore.getState().clearAuth();
 
     expect(useGithubStore.getState().accessToken).toBeNull();
+    expect(useGithubStore.getState().refreshToken).toBeNull();
+    expect(useGithubStore.getState().tokenExpiresAt).toBeNull();
+    expect(useGithubStore.getState().refreshTokenExpiresAt).toBeNull();
     expect(useGithubStore.getState().user).toBeNull();
     expect(useGithubStore.getState().linkedRepo).toBeNull();
   });
@@ -131,8 +168,8 @@ describe('github-store', () => {
       return parsed.state as Record<string, unknown>;
     }
 
-    it('persists accessToken, user, and linkedRepo but not the transient fields', () => {
-      useGithubStore.getState().setAuth('token-123', testUser);
+    it('persists accessToken, refresh info, user, and linkedRepo but not the transient fields', () => {
+      useGithubStore.getState().setAuth('token-123', testUser, 'refresh-1', 28800, 15897600);
       useGithubStore.getState().setLinkedRepo(testRepo);
       useGithubStore.getState().setConnecting(true);
       useGithubStore.getState().setSyncing(true);
@@ -146,6 +183,9 @@ describe('github-store', () => {
 
       // Durable fields are present and correct.
       expect(persisted.accessToken).toBe('token-123');
+      expect(persisted.refreshToken).toBe('refresh-1');
+      expect(persisted.tokenExpiresAt).not.toBeNull();
+      expect(persisted.refreshTokenExpiresAt).not.toBeNull();
       expect(persisted.user).toEqual(testUser);
       expect(persisted.linkedRepo).toEqual(testRepo);
 

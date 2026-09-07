@@ -97,6 +97,22 @@ export function isTimeEventName(name: string): boolean {
 }
 
 /**
+ * Returns true for a pipe-delimited onentry/onexit action string (the format
+ * produced by StateActionsPanel's `toStrings()`) that is the auto-generated
+ * send/cancel pair backing an "after X" time transition, rather than an
+ * action the user authored directly. Used to hide these rows from the State
+ * Actions panel and the state node's action-count display — they still exist
+ * in the underlying SCXML and remain visible in the code editor.
+ */
+export function isTimerGeneratedActionString(actionString: string): boolean {
+  const parts = actionString.split('|');
+  if (parts[0] === 'send' || parts[0] === 'cancel') {
+    return isTimeEventName(parts[1] ?? '');
+  }
+  return false;
+}
+
+/**
  * Finds the single time-event token inside a possibly comma-merged `@_event` value
  * (event-merge can combine a time event with a plain event sharing the same
  * target/cond/actions). Returns undefined if no token matches the time-event pattern.

@@ -10,7 +10,7 @@ vi.mock('@/lib/github/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/github/api')>();
   return {
     ...actual,
-    listUserRepos: vi.fn(),
+    listInstalledRepos: vi.fn(),
     listBranches: vi.fn(),
     getFileContent: vi.fn(),
     createOrUpdateFile: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock('@/app/_hooks/use-github-pull', () => ({
 }));
 
 import {
-  listUserRepos,
+  listInstalledRepos,
   listBranches,
   getFileContent,
   createOrUpdateFile,
@@ -47,6 +47,9 @@ const testRepo: GithubLinkedRepo = {
 function resetGithubStore() {
   useGithubStore.setState({
     accessToken: null,
+    refreshToken: null,
+    tokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
     user: null,
     linkedRepo: null,
     isConnecting: false,
@@ -61,7 +64,7 @@ function noop() {}
 
 describe('GithubPanel', () => {
   beforeEach(() => {
-    (listUserRepos as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({ repos: [], hasInstallation: true });
     (listBranches as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (getFileContent as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (createOrUpdateFile as ReturnType<typeof vi.fn>).mockResolvedValue('newsha');
@@ -128,17 +131,20 @@ describe('GithubPanel', () => {
     });
 
     it('shows the header (avatar/login/sign out) and loads the repo list', async () => {
-      (listUserRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
-        { owner: 'octocat', name: 'other-repo', fullName: 'octocat/other-repo', defaultBranch: 'develop', private: true },
-      ]);
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({
+        hasInstallation: true,
+        repos: [
+          { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
+          { owner: 'octocat', name: 'other-repo', fullName: 'octocat/other-repo', defaultBranch: 'develop', private: true },
+        ],
+      });
 
       render(<GithubPanel isVisible onClose={noop} />);
 
       expect(screen.getByText('octocat')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
 
-      await waitFor(() => expect(listUserRepos).toHaveBeenCalledWith('tok-1'));
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalledWith('tok-1'));
 
       // Open the repo picker and confirm both repos are offered as options.
       fireEvent.click(await screen.findByText('Select a repository…'));
@@ -153,14 +159,17 @@ describe('GithubPanel', () => {
     });
 
     it('selecting a repo loads branches, and confirming an existing path shows the "exists" note', async () => {
-      (listUserRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
-      ]);
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({
+        hasInstallation: true,
+        repos: [
+          { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
+        ],
+      });
       (listBranches as ReturnType<typeof vi.fn>).mockResolvedValue([{ name: 'main' }, { name: 'dev' }]);
       (getFileContent as ReturnType<typeof vi.fn>).mockResolvedValue({ content: '<scxml/>', sha: 'file-sha-1' });
 
       render(<GithubPanel isVisible onClose={noop} />);
-      await waitFor(() => expect(listUserRepos).toHaveBeenCalled());
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalled());
 
       fireEvent.click(await screen.findByText('Select a repository…'));
       fireEvent.click(await screen.findByText('octocat/hello-world'));
@@ -192,14 +201,17 @@ describe('GithubPanel', () => {
     });
 
     it('shows the "will create" note when the path does not exist (404 -> null)', async () => {
-      (listUserRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
-      ]);
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({
+        hasInstallation: true,
+        repos: [
+          { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
+        ],
+      });
       (listBranches as ReturnType<typeof vi.fn>).mockResolvedValue([{ name: 'main' }]);
       (getFileContent as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       render(<GithubPanel isVisible onClose={noop} />);
-      await waitFor(() => expect(listUserRepos).toHaveBeenCalled());
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalled());
 
       fireEvent.click(await screen.findByText('Select a repository…'));
       fireEvent.click(await screen.findByText('octocat/hello-world'));
@@ -223,9 +235,12 @@ describe('GithubPanel', () => {
     });
 
     it('Link stays disabled until the existence check for the current path resolves - no linking with a stale/unchecked sha', async () => {
-      (listUserRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-        { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
-      ]);
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({
+        hasInstallation: true,
+        repos: [
+          { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
+        ],
+      });
       (listBranches as ReturnType<typeof vi.fn>).mockResolvedValue([{ name: 'main' }]);
 
       // Keep getFileContent pending so we can observe the state while the
@@ -239,7 +254,7 @@ describe('GithubPanel', () => {
       );
 
       render(<GithubPanel isVisible onClose={noop} />);
-      await waitFor(() => expect(listUserRepos).toHaveBeenCalled());
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalled());
 
       fireEvent.click(await screen.findByText('Select a repository…'));
       fireEvent.click(await screen.findByText('octocat/hello-world'));
@@ -280,13 +295,36 @@ describe('GithubPanel', () => {
     });
 
     it('401 while loading repos clears auth and shows the reconnect message', async () => {
-      (listUserRepos as ReturnType<typeof vi.fn>).mockRejectedValue(new GithubApiError(401, 'Bad credentials'));
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockRejectedValue(new GithubApiError(401, 'Bad credentials'));
 
       render(<GithubPanel isVisible onClose={noop} />);
 
       await waitFor(() => expect(useGithubStore.getState().accessToken).toBeNull());
       const feedback = getFeedback();
       expect(feedback.some(f => f.message.includes('expired or was revoked'))).toBe(true);
+    });
+
+    it('shows an install prompt (not the repo picker) when the account has no installation, and refresh re-fetches', async () => {
+      vi.stubEnv('NEXT_PUBLIC_GITHUB_INSTALL_URL', 'https://github.com/apps/scxml-editor/installations/new');
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({ hasInstallation: false, repos: [] });
+
+      render(<GithubPanel isVisible onClose={noop} />);
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalledTimes(1));
+
+      expect(screen.queryByText('Select a repository…')).not.toBeInTheDocument();
+      const installLink = screen.getByRole('button', { name: /install on github/i });
+      expect(installLink).toBeInTheDocument();
+
+      (listInstalledRepos as ReturnType<typeof vi.fn>).mockResolvedValue({
+        hasInstallation: true,
+        repos: [{ owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false }],
+      });
+      fireEvent.click(screen.getByRole('button', { name: /i've installed it/i }));
+
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText('Select a repository…')).toBeInTheDocument();
+
+      vi.unstubAllEnvs();
     });
   });
 
@@ -312,7 +350,7 @@ describe('GithubPanel', () => {
       // the repo-list fetch effect - wait for it to settle so its state
       // update doesn't land after the test (and this file's `cleanup()` in
       // `afterEach`) as an unwrapped act() warning.
-      await waitFor(() => expect(listUserRepos).toHaveBeenCalled());
+      await waitFor(() => expect(listInstalledRepos).toHaveBeenCalled());
     });
 
     it('push reads editor content, calls createOrUpdateFile, updates sha, and shows success feedback', async () => {

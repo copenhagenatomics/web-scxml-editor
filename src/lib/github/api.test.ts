@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getAuthenticatedUser,
-  listUserRepos,
+  listInstalledRepos,
   listBranches,
   getFileContent,
   createOrUpdateFile,
@@ -87,38 +87,65 @@ describe('getAuthenticatedUser', () => {
   });
 });
 
-describe('listUserRepos', () => {
-  it('GETs /user/repos with the correct query params and maps items to GithubRepoSummary', async () => {
-    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
-      mockResponse(200, [
-        {
-          owner: { login: 'octocat' },
-          name: 'hello-world',
-          full_name: 'octocat/hello-world',
-          default_branch: 'main',
-          private: false,
-        },
-        {
-          owner: { login: 'octocat' },
-          name: 'secret-repo',
-          full_name: 'octocat/secret-repo',
-          default_branch: 'master',
-          private: true,
-        },
-      ])
-    );
+describe('listInstalledRepos', () => {
+  it('GETs /user/installations, then /user/installations/{id}/repositories per installation, merging into GithubRepoSummary[]', async () => {
+    (fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockResponse(200, { installations: [{ id: 111 }, { id: 222 }] }))
+      .mockResolvedValueOnce(
+        mockResponse(200, {
+          repositories: [
+            {
+              owner: { login: 'octocat' },
+              name: 'hello-world',
+              full_name: 'octocat/hello-world',
+              default_branch: 'main',
+              private: false,
+            },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        mockResponse(200, {
+          repositories: [
+            {
+              owner: { login: 'octocat-org' },
+              name: 'secret-repo',
+              full_name: 'octocat-org/secret-repo',
+              default_branch: 'master',
+              private: true,
+            },
+          ],
+        })
+      );
 
-    const repos = await listUserRepos(TOKEN);
+    const result = await listInstalledRepos(TOKEN);
 
-    const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toBe(
-      'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member'
-    );
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0][0]).toBe('https://api.github.com/user/installations?per_page=100');
+    expect(calls[1][0]).toBe('https://api.github.com/user/installations/111/repositories?per_page=100');
+    expect(calls[2][0]).toBe('https://api.github.com/user/installations/222/repositories?per_page=100');
 
-    expect(repos).toEqual([
-      { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
-      { owner: 'octocat', name: 'secret-repo', fullName: 'octocat/secret-repo', defaultBranch: 'master', private: true },
-    ]);
+    expect(result).toEqual({
+      hasInstallation: true,
+      repos: [
+        { owner: 'octocat', name: 'hello-world', fullName: 'octocat/hello-world', defaultBranch: 'main', private: false },
+        { owner: 'octocat-org', name: 'secret-repo', fullName: 'octocat-org/secret-repo', defaultBranch: 'master', private: true },
+      ],
+    });
+  });
+
+  it('returns hasInstallation: false and an empty repo list when the user has not installed the app anywhere', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(mockResponse(200, { installations: [] }));
+
+    const result = await listInstalledRepos(TOKEN);
+
+    expect(result).toEqual({ hasInstallation: false, repos: [] });
+  });
+
+  it('throws GithubApiError on a non-2xx /user/installations response', async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(mockResponse(401, { message: 'Bad credentials' }));
+
+    await expect(listInstalledRepos(TOKEN)).rejects.toMatchObject({ status: 401 });
   });
 });
 
