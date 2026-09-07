@@ -40,8 +40,14 @@ export async function getValidAccessToken(): Promise<string | null> {
   if (!clientId || !tokenEndpoint) return accessToken;
 
   if (!inFlightRefresh) {
-    inFlightRefresh = refreshAccessToken(clientId, refreshToken, tokenEndpoint)
+    // Captured so the completion handlers below can detect a stale
+    // refresh - if the store's refreshToken has since moved on (a sign-out
+    // or a reconnect completed while this request was in flight), this
+    // request's result no longer applies and must not mutate auth state.
+    const requestRefreshToken = refreshToken;
+    inFlightRefresh = refreshAccessToken(clientId, requestRefreshToken, tokenEndpoint)
       .then((tokens) => {
+        if (useGithubStore.getState().refreshToken !== requestRefreshToken) return null;
         updateTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn, tokens.refreshTokenExpiresIn);
         return tokens.accessToken;
       })
@@ -49,7 +55,7 @@ export async function getValidAccessToken(): Promise<string | null> {
         // The refresh token was rejected (revoked, or GitHub-side expiry disagrees
         // with our locally-tracked deadline) - treat exactly like an expired
         // refresh token: sign out and let the caller prompt to reconnect.
-        clearAuth();
+        if (useGithubStore.getState().refreshToken === requestRefreshToken) clearAuth();
         return null;
       })
       .finally(() => {
