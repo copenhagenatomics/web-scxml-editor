@@ -12,7 +12,8 @@ This is a real W3C-SCXML-compatible authoring tool, but it enforces additional p
 |---|---|---|
 | `viz:xywh` | `"x,y,width,height"` comma-separated | Position + size of a state/note |
 | `viz:rgb` | hex color, e.g. `#e1f5fe` | Fill color override |
-| `viz:sourceHandle` / `viz:targetHandle` | `top`\|`bottom`\|`left`\|`right` | Which side of a node a transition connects to |
+ | `viz:sourceHandle` / `viz:targetHandle` | side name (`top`\|`bottom`\|`left`\|`right`), optionally suffixed with an anchor index such as `top-1` | Which connection-point anchor a transition uses |
+ | `viz:anchors` | `"side:count;side:count"`, e.g. `"bottom:3;right:2"` | Per-side connection-point counts above the default of one |
 | `viz:waypoints` | `"x1,y1;x2,y2;..."` semicolon-separated | Manually-routed edge path points |
 | `viz:curve-type`, `viz:marker-type`, `viz:label-offset`, `viz:z-index` | — | Legacy/secondary — extracted by `VisualMetadataManager`, not clearly round-tripped by the live editing path |
 | `viz:note` (element, not attribute) | child of a state or the document root | Sticky-note annotation; id-prefixed `note:` |
