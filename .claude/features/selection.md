@@ -7,7 +7,7 @@ Let a user pick one or more states and/or one transition as the target of subseq
 ## User behavior
 
 - **Single state**: click selects it and opens the State Actions panel.
-- **Multiple states**: Ctrl/Cmd+click toggles a state's membership in the selection; the Multi-Select Toolbar appears once 2+ are selected, offering copy/delete.
+ - **Multiple states**: Ctrl/Cmd+click toggles a state's membership in the selection; the Multi-Select Toolbar appears once 2+ are selected, offering copy/cut/delete (Ctrl/Cmd+X also cuts the selection).
 - **Marquee (box) select**: hold Ctrl or Meta and drag on empty canvas to select everything inside the box.
 - **Transition**: click selects it (shows waypoint handles if any exist, and opens the Transition panel).
 - Selecting a new single state/transition replaces the previous selection; Ctrl/Cmd+click is the only way to build a multi-state selection.
