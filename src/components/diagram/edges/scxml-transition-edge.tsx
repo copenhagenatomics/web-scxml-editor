@@ -411,10 +411,13 @@ export const SCXMLTransitionEdge: React.FC<
     return parts.join(' ');
   };
 
-  const lineLength = Math.sqrt((targetX - sourceX) ** 2 + (targetY - sourceY) ** 2);
-  const maxLabelWidth = Math.max(lineLength * 0.7, 60);
-
   const labelContent = getLabelContent();
+
+  // Size the label box to the text itself, not the edge's on-screen length —
+  // tying it to line length (the previous approach) clipped labels to a tiny
+  // floor width on short edges regardless of how long the condition text was.
+  const estimatedLabelWidth = labelContent.length * 6 + 16; // ~6px/char at the 10px semibold label font, plus horizontal padding
+  const maxLabelWidth = Math.min(Math.max(estimatedLabelWidth, 60), 260);
 
   // Update marker color to match edge color
   const updatedMarkerEnd =
