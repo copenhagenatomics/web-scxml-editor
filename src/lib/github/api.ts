@@ -116,9 +116,13 @@ function mapRepoItem(item: unknown): GithubRepoSummary {
  * reflect that scoping and must not be used here (confirmed against
  * GitHub's docs).
  *
- * `hasInstallation` distinguishes "not installed anywhere yet" (show an
- * install prompt) from "installed, but zero repos granted" (both cases
- * that yield an empty `repos` array).
+ * `hasInstallation` is `false` for both "not installed anywhere yet" and
+ * "installed, but zero repos this user can see are granted" - both cases
+ * leave the caller with an empty `repos` array and nothing to do but show
+ * the install/configure prompt (see `.claude/features/github-integration.md`).
+ * It is therefore derived from `repos`, not from `installations.length`:
+ * an installation can exist yet still resolve to zero repos for this user
+ * (e.g. their collaborator access to the granted repos was later revoked).
  *
  * Only fetches the first page of installations, and the first page of
  * repos per installation (100 each) - same documented MVP pagination
@@ -147,9 +151,10 @@ export async function listInstalledRepos(
     })
   );
 
+  const repos = reposByInstallation.flat();
   return {
-    repos: reposByInstallation.flat(),
-    hasInstallation: installations.length > 0,
+    repos,
+    hasInstallation: repos.length > 0,
   };
 }
 
