@@ -49,6 +49,13 @@ export default function Home() {
   // --- Refs ---
   const editorRef = useRef<XMLEditorRef>(null);
   const pendingNavigateRef = useRef<{ line: number; column: number } | null>(null);
+  const normalizeCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (normalizeCommitTimerRef.current) clearTimeout(normalizeCommitTimerRef.current);
+    };
+  }, []);
 
   // --- Derived ---
   const totalErrors = useMemo(
@@ -65,8 +72,19 @@ export default function Home() {
   // --- Handlers ---
   const handleContentChange = useCallback(
     (newContent: string) => {
-      setContent(newContent);
+      // Update immediately, un-normalized, so live preview/validation keep
+      // up with every keystroke without rewriting the buffer under the
+      // user's cursor. The auto-<parallel>-wrap normalization only commits
+      // once typing pauses, piggybacking on the same 500ms debounce boundary
+      // trackTextEdit already uses for history entries.
+      setContent(newContent, { immediate: false });
       if (!isUpdatingFromHistory) historyManager.trackTextEdit(newContent);
+
+      if (normalizeCommitTimerRef.current) clearTimeout(normalizeCommitTimerRef.current);
+      normalizeCommitTimerRef.current = setTimeout(() => {
+        normalizeCommitTimerRef.current = null;
+        setContent(useEditorStore.getState().content, { immediate: true });
+      }, 500);
     },
     [setContent, historyManager, isUpdatingFromHistory]
   );

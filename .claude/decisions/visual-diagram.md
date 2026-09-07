@@ -302,3 +302,56 @@ Commit `d9b7d0d`; current `scxml-transition-edge.tsx` renders a static `<path>` 
 
 ### Status
 Accepted (no animation); animated transitions are Superseded.
+
+---
+
+## 13. Auto-wrapped Parallel State groups render as an invisible wrapper + live-recomputed divider lines, not a labeled box
+
+### Context
+`scxml.md` decision #10 restructures 2+ Initial-State work trees into a real `<parallel>` element live on the document. That structure needs *some* visual representation on the canvas, but the group's members already render flattened at the same level as ordinary siblings (see `.claude/features/parallel-state-auto-grouping.md`) — there is no natural "box" for a `<parallel>` state the way there is for an ordinary compound state.
+
+### Decision
+The group gets an invisible ReactFlow wrapper node (`ParallelGroupWrapperNode`) with no border/background/label — its only purpose is to be a group-drag handle and to carry the group's geometry data. The only visible cue is a full-height, viewport-synced, dashed divider line per gap between horizontally-adjacent regions (`ParallelRegionDividerOverlay`), drawn as a sibling to `<ReactFlow>` rather than embedded in the wrapper node, so a line always spans the whole canvas regardless of the group's own bounding box. Divider x-positions are recomputed **live**, every render, from the current `nodes` array's actual positions (`computeLiveParallelDividerXs`) rather than read off the wrapper's own `data.dividerLines` — that field is only a snapshot as of the last full SCXML re-parse and goes stale the instant a member is dragged or a fresh re-parse's result gets dropped by the resync-gate race (see next section).
+
+### Reason
+Matches this feature's explicit, narrower-than-`801145d` requirement (see `scxml.md` #10) — no separate labeled parallel-state box, unlike that reverted prior implementation. The live-recompute design for the divider is a direct fix for a real, reported bug: the divider only updated once some unrelated event (e.g. clicking empty canvas to deselect) happened to resync `nodes` from a fresh parse — reading positions directly off the live `nodes` array (already updated in real time by ReactFlow's own drag handling) sidesteps that resync path entirely for the divider's own correctness.
+
+### Constraints
+- `computeLiveParallelDividerXs` needs each wrapper node's `data.regions` (`{memberIds}[]`), not just the flat `data.memberIds` — both are populated by `computeParallelGroupWrapperNodes`.
+- Any new visual cue for a group must go through the divider overlay's pooled, viewport-synced pattern, not a per-node embedded element, or it will fail to span panning/zooming correctly the same way a node-embedded element would.
+- Do not reintroduce a visible border/label on `ParallelGroupWrapperNode` without confirming this is a deliberate scope change, not a stylistic "improvement" — see this feature's "Things that must NOT be changed."
+
+### Alternatives
+**Directly evidenced**: the wrapper node's own `data.dividerLines` field (still populated by `computeParallelGroupWrapperNodes` for backward-compat/other potential consumers) *is* the rejected "read a parse-time snapshot" alternative — kept in place but no longer the source of truth `visual-diagram.tsx` actually reads for rendering the overlay.
+
+### Evidence
+`src/components/diagram/nodes/parallel-group-wrapper-node.tsx`, `src/components/diagram/parallel/parallel-region-divider-overlay.tsx`, `src/lib/layout/parallel-group-bbox.ts` (`computeLiveParallelDividerXs`), `src/components/diagram/visual-diagram.tsx` (`parallelDividerXs`), `.claude/features/parallel-state-auto-grouping.md`.
+
+### Status
+Accepted.
+
+---
+
+## 14. A resync effect gated on `isUpdatingPositionRef` gets an explicit one-shot retry once the gate reopens, instead of relying on incidental re-triggers
+
+### Context
+`visual-diagram.tsx`'s main "apply freshly re-parsed nodes/edges" effect deliberately skips applying while `isUpdatingPositionRef.current` is true — a short window several call sites (the drag-stop position commit, `onConnect`) hold open around their own `onSCXMLChange` call, specifically to stop this effect from snapping an in-flight gesture's nodes back to a stale pre-gesture layout. If the async SCXML re-parse that same `onSCXMLChange` call triggers happens to resolve *inside* that window, the effect's dependency-driven re-run (`enhancedNodes` did change) finds the gate still shut and skips — and because nothing else touches that effect's dependencies afterward, the fresh result is dropped, not merely delayed. This was reported twice as the same user-visible symptom (a moved node, or a just-drawn transition's effect on a Parallel State group's divider line, not reflecting on screen until an unrelated event like a pane click happened to resync `nodes`/`edges` for its own reasons).
+
+### Decision
+Every call site that sets `isUpdatingPositionRef.current = true` around an `onSCXMLChange` call also calls a shared `applyLatestEnhancedNodes()` (via `applyLatestEnhancedNodesRef`, since the call sites are defined earlier in the file than `enhancedNodes`/`hierarchyFilteredEdges` are computed) immediately after clearing the flag back to `false`. This re-applies whatever `enhancedNodes`/`hierarchyFilteredEdges` currently are — a safety-net retry, not a replacement for the main effect: if the async parse hadn't landed yet, this call is a harmless no-op (nothing changed), and the main effect's normal dependency-driven re-run still handles that case correctly once the gate is open by the time the parse does land.
+
+### Reason
+Directly fixes the race described above, discovered via two separate user reports of the same underlying defect (a dragged node's position, and a Parallel State divider line, both failing to reflect a just-committed change until an unrelated event happened to help). The fix is deliberately a targeted retry at the specific points that create the race, not a broader change to how/when the gate is held (e.g. converting `isUpdatingPositionRef` from a ref to reactive state, which would make the gate's own clearing a dependency the effect could react to automatically) — that would touch every one of this ref's several call sites and their surrounding drag-in-progress logic, a much larger change for the same fix.
+
+### Constraints
+- Any **new** call site that sets `isUpdatingPositionRef.current = true` around an `onSCXMLChange` call must also call `applyLatestEnhancedNodesRef.current()` when it clears the flag, or it silently reintroduces this exact race for its own gesture.
+- `applyLatestEnhancedNodes` checks `draggingNodeIdsRef.current.length === 0` before applying — it must never fire while a *new* drag is already in progress by the time the retry runs, or it would snap that new gesture's nodes back the same way the gate was originally introduced to prevent.
+
+### Alternatives
+Converting `isUpdatingPositionRef` from a plain ref to `React.useState` (so clearing it would itself be a dependency change the main effect reacts to automatically, eliminating the need for an explicit retry at each call site) was considered and rejected for this fix — it touches significantly more surface area (every read/write of the ref, and the extra re-renders a state flip causes during rapid drag events) for the same practical outcome.
+
+### Evidence
+`src/components/diagram/visual-diagram.tsx` (`applyLatestEnhancedNodesRef`, `applyLatestEnhancedNodes`, the two call sites in the drag-stop position commit and `onConnect`), `.claude/features/parallel-state-auto-grouping.md` ("divider-recompute race" edge case).
+
+### Status
+Accepted.

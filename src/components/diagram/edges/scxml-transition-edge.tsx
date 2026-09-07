@@ -29,6 +29,7 @@ import {
   approximateOrthogonalRoute,
   routeIntersectsAnyRect,
   simplifyOrthogonalGridPath,
+  isRoutingObstacleNode,
   type HandleSide,
   type Rect,
 } from '@/lib/layout/edge-obstacle-utils';
@@ -275,12 +276,16 @@ export const SCXMLTransitionEdge: React.FC<
     // Only nodes at the edge's own hierarchy level count as obstacles —
     // including an enclosing container would wall off routing inside it.
     // Notes are annotations, not diagram structure, so edges must ignore
-    // them entirely rather than routing around them.
+    // them entirely rather than routing around them. A Parallel State
+    // wrapper node deliberately overlaps its own member nodes, so it must
+    // be excluded too — otherwise it "blocks" routing between the very
+    // states it visually surrounds.
     const siblings = nodes.filter(
       (n) =>
         n.parentNode === sourceNode.parentNode &&
         !n.hidden &&
-        !isNoteId(n.id)
+        !isNoteId(n.id) &&
+        isRoutingObstacleNode(n)
     );
 
     const nodeRect = (n: Node): Rect | null => {
