@@ -85,7 +85,7 @@ Accepted.
 The static-export build (see `architecture.md` #1) needs to know where its GitHub Device Flow relay endpoints are, but that location differs between local development and a LoopControl-embedded deployment.
 
 ### Decision
-`NEXT_PUBLIC_GITHUB_CLIENT_ID`, `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT`, `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT` are baked into the static bundle at build time, sourced from GitHub Actions repository variables in CI (`.github/workflows/release.yml`) or a local `.env.local` for development.
+`NEXT_PUBLIC_GITHUB_CLIENT_ID`, `NEXT_PUBLIC_GITHUB_INSTALL_URL`, `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT`, and `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT` are baked into the static bundle at build time, sourced from GitHub Actions repository variables in CI (`.github/workflows/release.yml`) or a local `.env.local` for development.
 
 ### Reason
 Directly follows from the static-export decision — there is no runtime server to read environment variables from at request time, so configuration that varies by deployment target must be resolved at build time instead. The release workflow's own comment explains the endpoints are relative/same-origin specifically because each LoopControl device is reached at its own local IP/hostname, so a single fixed absolute URL baked into one shared release build wouldn't work across a fleet of devices.
