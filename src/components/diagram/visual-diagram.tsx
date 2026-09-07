@@ -2764,14 +2764,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   );
 
   const handleNodeDrag = useCallback(
-    (event: React.MouseEvent, node: Node) => {
+    (_event: React.MouseEvent, node: Node) => {
       // Dragging a Parallel State wrapper moves its group of member states —
       // it's never itself a valid drag-to-nest source (it has no SCXML
       // element of its own to reparent), so skip drop-target detection
       // entirely rather than have the wrapper's own (huge) bounding box
       // spuriously match whatever member node it happens to overlap.
       if ((node.data as any)?.isParallelGroupWrapper) return;
-      computeDropTarget(event, {
+      computeDropTarget({
         x: node.position.x,
         y: node.position.y,
         width: node.width || 120,
