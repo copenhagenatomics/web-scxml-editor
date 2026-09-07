@@ -93,7 +93,7 @@ export function formatAfterSyntax(
  * {stateId}_t_{N}_timeEvent_{N}.
  */
 export function isTimeEventName(name: string): boolean {
-  return /_t_\d+_timeEvent_\d+/.test(name);
+  return /^.+_t_\d+_timeEvent_\d+$/.test(name);
 }
 
 /**

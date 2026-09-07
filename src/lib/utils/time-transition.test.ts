@@ -90,6 +90,10 @@ describe('isTimeEventName', () => {
   it('rejects a plain event name', () => {
     expect(isTimeEventName('skippurge')).toBe(false);
   });
+
+  it('rejects a user-authored name that merely contains the timer pattern as a substring', () => {
+    expect(isTimeEventName('Idle_t_0_timeEvent_0_backup')).toBe(false);
+  });
 });
 
 describe('isTimerGeneratedActionString', () => {
@@ -111,6 +115,12 @@ describe('isTimerGeneratedActionString', () => {
 
   it('rejects an assign row regardless of content', () => {
     expect(isTimerGeneratedActionString('assign|this_x|Idle_t_0_timeEvent_0')).toBe(false);
+  });
+
+  it('rejects a send row for a user-authored event that merely contains the timer pattern', () => {
+    expect(
+      isTimerGeneratedActionString('send|Idle_t_0_timeEvent_0_backup|delay|2s')
+    ).toBe(false);
   });
 });
 
