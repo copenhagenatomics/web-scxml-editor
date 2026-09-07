@@ -200,7 +200,7 @@ Each file contains multiple numbered decision records, each following the same t
 | [configuration.md](decisions/configuration.md) | The `conf_` convention; local-edits-win merge precedence; usage-checked config deletion; build-time `NEXT_PUBLIC_*` GitHub endpoint config |
 | [naming-conventions.md](decisions/naming-conventions.md) | `conf_`/`this_`/`main_`; state label = SCXML id; the `note:` id prefix; synthetic timer-event names; the "Events" vs. "User Actions" divergence (Inferred) |
 | [ui-ux.md](decisions/ui-ux.md) | Single-panel-at-a-time; standard keyboard shortcuts; the theme flash-prevention script; double-click-to-rename; separate Host Alerts tab; teaching-moment empty states; the absent context menu (Inferred) |
-| [integrations.md](decisions/integrations.md) | GitHub Device Flow; the `_q` pre-ready queue and stub-upgrade-in-place pattern; deferred embedding detection (with its traced flash-bug fix); host-side-only vs. SCXML-persisted data ownership |
+| [integrations.md](decisions/integrations.md) | GitHub Device Flow; the `_q` pre-ready queue and stub-upgrade-in-place pattern; deferred embedding detection (with its traced flash-bug fix); host-side-only vs. SCXML-persisted data ownership; per-refresh-token keying of the concurrent token-refresh dedup |
 | [performance.md](decisions/performance.md) | Debouncing as the primary performance strategy; full re-parse/re-layout per change (Inferred tradeoff); per-level ELK as a performance boundary; the traffic-aware handle-assignment cost model |
 
 ### Searchable decision index — find a decision by keyword
@@ -278,6 +278,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...a host script calling the API too early doesn't crash (mostly) | [integrations.md](decisions/integrations.md) #2 |
 | ...embedding detection runs after mount, not during render | [integrations.md](decisions/integrations.md) #3 |
 | ...Channel Mappings aren't saved into the `.scxml` file | [integrations.md](decisions/integrations.md) #4 |
+| ...a stale token refresh can't sign a freshly-reconnected user back out | [integrations.md](decisions/integrations.md) #6 |
 | ...typing feels smooth despite full re-validation running | [performance.md](decisions/performance.md) #1 |
 | ...a huge SCXML file might feel slow | [performance.md](decisions/performance.md) #2 (Inferred tradeoff) |
 | ...edges auto-route to avoid a "busy" side of a node | [performance.md](decisions/performance.md) #4 |

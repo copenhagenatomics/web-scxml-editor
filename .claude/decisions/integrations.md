@@ -127,3 +127,28 @@ Persisting all three kinds of data into the SCXML document uniformly (e.g., a hy
 
 ### Status
 Accepted.
+
+---
+
+## 6. Concurrent access-token refresh is deduped per refresh-token, not globally
+
+### Context
+`getValidAccessToken()` (`src/lib/github/token.ts`) shares one in-flight refresh promise across concurrent callers, since GitHub rotates refresh tokens on use and a second concurrent refresh with the same (already-spent) refresh token would fail and sign the user out from under a refresh that had already succeeded. The original implementation keyed this dedup by nothing — a single global `inFlightRefresh` variable — so a call made for a *different* session (after a sign-out or a reconnect completed while an old refresh was still pending) could join the stale promise and be resolved incorrectly by it.
+
+### Decision
+`inFlightRefresh` is now `{ forToken: string; promise: Promise<string | null> }`, keyed by the `refreshToken` value that started it. A call whose current store `refreshToken` doesn't match `inFlightRefresh.forToken` starts its own refresh instead of joining. Both the success and failure completion handlers additionally re-check `useGithubStore.getState().refreshToken` against the token the request started with before calling `updateTokens()`/`clearAuth()` — a stale completion (one whose session moved on while it was in flight) is discarded rather than mutating auth state.
+
+### Reason
+Found and fixed via a GitHub Copilot code review comment during this session: without the per-token key, a completion for an old session could run `clearAuth()` (or write stale tokens) after the user had already signed out and reconnected, incorrectly tearing down or corrupting the new, valid session.
+
+### Constraints
+Any future change to this dedup mechanism must preserve both checks together — keying `inFlightRefresh` by the request's refresh token (so a differently-keyed caller doesn't join a stale promise) and re-checking the store's current `refreshToken` inside the completion handlers (so a result that arrives after the store has moved on doesn't mutate it). Removing either half reopens the race.
+
+### Alternatives
+The original unkeyed-singleton implementation (a single global `Promise<string | null> | null`) is the actual prior implementation, replaced for the reason above — not a hypothetical.
+
+### Evidence
+`src/lib/github/token.ts` (`inFlightRefresh`, `getValidAccessToken`), `src/lib/github/token.test.ts`.
+
+### Status
+Accepted.

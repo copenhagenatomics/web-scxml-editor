@@ -9,7 +9,11 @@ const REFRESH_SKEW_MS = 60_000;
 // the same (now-spent) refresh token would fail and sign the user out from
 // under a refresh that already succeeded. Share one in-flight refresh so
 // concurrent callers join it instead of each spending the token themselves.
-let inFlightRefresh: Promise<string | null> | null = null;
+// Keyed by the refresh token that started it, so a call for a different
+// session (a sign-out/reconnect that happened while the old refresh was
+// still pending) starts its own refresh instead of joining - and getting
+// resolved to null by - a promise for a session that's no longer current.
+let inFlightRefresh: { forToken: string; promise: Promise<string | null> } | null = null;
 
 /**
  * Returns a token safe to use for the next API call, transparently
@@ -39,14 +43,13 @@ export async function getValidAccessToken(): Promise<string | null> {
   const tokenEndpoint = process.env.NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT;
   if (!clientId || !tokenEndpoint) return accessToken;
 
-  if (!inFlightRefresh) {
-    // Captured so the completion handlers below can detect a stale
-    // refresh - if the store's refreshToken has since moved on (a sign-out
-    // or a reconnect completed while this request was in flight), this
-    // request's result no longer applies and must not mutate auth state.
+  if (!inFlightRefresh || inFlightRefresh.forToken !== refreshToken) {
     const requestRefreshToken = refreshToken;
-    inFlightRefresh = refreshAccessToken(clientId, requestRefreshToken, tokenEndpoint)
+    const promise = refreshAccessToken(clientId, requestRefreshToken, tokenEndpoint)
       .then((tokens) => {
+        // The store's refreshToken may have moved on (a sign-out or a
+        // reconnect completed) while this request was in flight - if so,
+        // this result no longer applies and must not mutate auth state.
         if (useGithubStore.getState().refreshToken !== requestRefreshToken) return null;
         updateTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn, tokens.refreshTokenExpiresIn);
         return tokens.accessToken;
@@ -59,9 +62,10 @@ export async function getValidAccessToken(): Promise<string | null> {
         return null;
       })
       .finally(() => {
-        inFlightRefresh = null;
+        if (inFlightRefresh?.forToken === requestRefreshToken) inFlightRefresh = null;
       });
+    inFlightRefresh = { forToken: requestRefreshToken, promise };
   }
 
-  return inFlightRefresh;
+  return inFlightRefresh.promise;
 }

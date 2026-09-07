@@ -4,7 +4,7 @@ The GitHub push/pull feature (`.claude/features/github-integration.md`) needs a 
 
 ## Steps
 
-1. **Register a GitHub OAuth App with Device Flow enabled.** Follow `server/README.md` for the exact steps (App creation, enabling Device Flow, obtaining the Client ID — no client secret is ever needed for this flow).
+1. **Register a GitHub App with Device Flow enabled.** Follow `server/README.md` for the exact steps (App creation, enabling Device Flow, obtaining the Client ID — no client secret is ever needed for this flow).
 2. **Configure the editor's environment.** Copy `.env.local.example` to `.env.local` and fill in:
    - `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the GitHub App's Client ID (safe to expose in the browser bundle, not a secret).
     - `NEXT_PUBLIC_GITHUB_INSTALL_URL=https://github.com/apps/<slug>/installations/new`

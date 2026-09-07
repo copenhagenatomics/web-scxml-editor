@@ -17,7 +17,7 @@ Searched the entire `src/` tree for any right-click/context-menu implementation:
 Every action a context menu might typically expose in a diagram editor is instead reachable through:
 - **The toolbar's "more" (⋮) menu** (`src/app/page.tsx`'s `renderActions`) — Upload, Clean SCXML export, Download-with-metadata.
 - **Click/double-click/Ctrl-click on canvas elements** (see `.claude/features/selection.md`, `.claude/features/labels.md`) — selection, rename.
-- **The Multi-Select Toolbar** (`.claude/features/diagram-interaction.md`) — copy/delete for a multi-selection, appearing as a persistent small toolbar rather than a menu triggered by any specific gesture.
+ - **The Multi-Select Toolbar** (`.claude/features/diagram-interaction.md`) — copy/cut/delete for a multi-selection, appearing as a persistent small toolbar rather than a menu triggered by any specific gesture.
 - **Dedicated side panels** (Config, Channel Mapping, Events, GitHub, Transition, State Actions) toggled via toolbar buttons — each panel's own inline "+"/trash/copy icons handle per-item actions (add/delete/copy a row) rather than a right-click menu on that row.
 - **Keyboard shortcuts** (Delete, Ctrl+C/V, Ctrl+Z/Y — see `.claude/project/ui-rules.md`).
 
