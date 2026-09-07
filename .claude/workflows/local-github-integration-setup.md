@@ -6,7 +6,8 @@ The GitHub push/pull feature (`.claude/features/github-integration.md`) needs a 
 
 1. **Register a GitHub OAuth App with Device Flow enabled.** Follow `server/README.md` for the exact steps (App creation, enabling Device Flow, obtaining the Client ID — no client secret is ever needed for this flow).
 2. **Configure the editor's environment.** Copy `.env.local.example` to `.env.local` and fill in:
-   - `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the OAuth App's Client ID (safe to expose in the browser bundle, not a secret).
+   - `NEXT_PUBLIC_GITHUB_CLIENT_ID` — the GitHub App's Client ID (safe to expose in the browser bundle, not a secret).
+    - `NEXT_PUBLIC_GITHUB_INSTALL_URL=https://github.com/apps/<slug>/installations/new`
    - `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT=http://localhost:4000/api/github/device/code`
    - `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT=http://localhost:4000/api/github/device/token`
 3. **Configure the relay's environment.** The relay needs `ALLOWED_ORIGIN` set (it refuses to start without it when run standalone) — matching wherever your local Next.js dev server runs (typically `http://localhost:3000`).

@@ -14,7 +14,7 @@ This single command (`release.ps1`) does all of the following, and **aborts if t
 
 Pushing the `vX.Y.Z` tag then triggers `.github/workflows/release.yml` (GitHub Actions), which:
 1. Checks out full history (`fetch-depth: 0` — needed to diff against the previous tag for the changelog).
-2. `npm ci --build-from-source`, then `npm run build` (static export — see `.claude/decisions/architecture.md` #1) with the GitHub OAuth env vars baked in from repo variables (`NEXT_PUBLIC_GITHUB_CLIENT_ID`, `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT`, `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT` — these are the **relative/same-origin** LoopControl-embedded endpoints, per the workflow's own comment, not the local-dev `server/` ones).
+2. `npm ci --build-from-source`, then `npm run build` (static export — see `.claude/decisions/architecture.md` #1) with the GitHub App env vars baked in from repo variables (`NEXT_PUBLIC_GITHUB_CLIENT_ID`, `NEXT_PUBLIC_GITHUB_INSTALL_URL`, `NEXT_PUBLIC_GITHUB_DEVICE_CODE_ENDPOINT`, `NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT` — the endpoint values are the **relative/same-origin** LoopControl-embedded endpoints, per the workflow's own comment, not the local-dev `server/` ones).
 3. Zips the static `out/` directory as `scxml-editor-vX.Y.Z.zip`, generates a SHA256 checksum.
 4. Runs `scripts/generate-release-notes.mjs` to build a categorized "What's New" changelog from **conventional-commit messages** (`feat:`, `fix:`, `refactor:`, etc.) between the previous tag and this one — no manual changelog editing needed, but this means **commit message discipline directly determines release-note quality**.
 5. Creates the GitHub Release with the zip + checksum + generated notes attached.

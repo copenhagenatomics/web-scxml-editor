@@ -17,7 +17,7 @@ Only one hierarchy level is shown on the canvas at any time — clicking into a 
 
 - Selection state is **not** ReactFlow's native selection except during an actual marquee (box) drag. Click / Ctrl+Click / double-click on a node go through hand-rolled disambiguation (`handleStateClick`, a 250ms timer) — do not wire a new interaction through `node.onClick` assuming native RF selection semantics apply.
 - Ctrl/Cmd+Click toggles a node's membership in the multi-select set; a plain click replaces the whole selection and opens the State Actions panel for that one state.
-- The Multi-Select Toolbar appears once **2 or more** nodes are selected, offering bulk copy and bulk delete.
+- The Multi-Select Toolbar appears once **2 or more** nodes are selected, offering bulk copy, cut, and delete.
 - Marquee (drag-a-box) selection requires holding Ctrl or Meta while dragging on empty canvas (`selectionKeyCode`).
 
 ## State type visuals — the rules a user relies on
