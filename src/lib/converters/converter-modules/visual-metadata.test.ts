@@ -24,6 +24,18 @@ describe('parseAnchorsAttribute', () => {
   it('ignores a non-numeric count', () => {
     expect(parseAnchorsAttribute('bottom:abc')).toEqual({});
   });
+
+  it('ignores a count with trailing junk instead of truncating it', () => {
+    expect(parseAnchorsAttribute('bottom:2junk')).toEqual({});
+  });
+
+  it('ignores a count above the per-side maximum', () => {
+    expect(parseAnchorsAttribute('bottom:999999')).toEqual({});
+  });
+
+  it('accepts a count at the per-side maximum', () => {
+    expect(parseAnchorsAttribute('bottom:6')).toEqual({ bottom: 6 });
+  });
 });
 
 describe('formatAnchorsAttribute', () => {

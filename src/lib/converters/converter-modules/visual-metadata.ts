@@ -20,18 +20,23 @@ export interface VisualMetadata {
   anchors?: Partial<Record<HandleSide, number>>;
 }
 
+/** Hard cap on anchors per side — guards against runaway shift-clicking or malformed XML. */
+export const MAX_ANCHORS_PER_SIDE = 6;
+
 /**
  * Parses the viz:anchors attribute value ("side:count;side:count") into a
- * per-side count map. Malformed entries (unknown side, non-positive count)
- * are skipped rather than throwing, since this reads user-editable XML.
+ * per-side count map. Malformed entries (unknown side, non-integer, or
+ * out-of-range count) are skipped rather than throwing, since this reads
+ * user-editable XML.
  */
 export function parseAnchorsAttribute(value: string): Partial<Record<HandleSide, number>> {
   const result: Partial<Record<HandleSide, number>> = {};
   const sides: HandleSide[] = ['top', 'bottom', 'left', 'right'];
   for (const entry of value.split(';')) {
     const [side, countStr] = entry.split(':').map((s) => s.trim());
-    const count = parseInt(countStr, 10);
-    if (sides.includes(side as HandleSide) && Number.isFinite(count) && count > 1) {
+    if (!countStr || !/^\d+$/.test(countStr)) continue;
+    const count = Number(countStr);
+    if (sides.includes(side as HandleSide) && count > 1 && count <= MAX_ANCHORS_PER_SIDE) {
       result[side as HandleSide] = count;
     }
   }

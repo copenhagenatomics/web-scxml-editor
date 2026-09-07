@@ -3,10 +3,8 @@ import type { HandleSide } from '@/lib/layout/edge-obstacle-utils';
 import {
   parseAnchorsAttribute,
   formatAnchorsAttribute,
+  MAX_ANCHORS_PER_SIDE,
 } from '@/lib/converters/converter-modules/visual-metadata';
-
-/** Hard cap on anchors per side — guards against runaway shift-clicking. */
-const MAX_ANCHORS_PER_SIDE = 6;
 
 /**
  * AddAnchorPointCommand
