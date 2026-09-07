@@ -4,6 +4,7 @@ import {
   formatAfterSyntax,
   isTimeEventName,
   isTimerGeneratedActionString,
+  mergeHiddenActions,
   findTimeEventToken,
   resolveTimeEventDisplay,
 } from './time-transition';
@@ -121,6 +122,44 @@ describe('isTimerGeneratedActionString', () => {
     expect(
       isTimerGeneratedActionString('send|Idle_t_0_timeEvent_0_backup|delay|2s')
     ).toBe(false);
+  });
+});
+
+describe('mergeHiddenActions', () => {
+  it('reconstructs the original order when nothing was edited', () => {
+    const hidden = [
+      { index: 1, action: 'send|Idle_t_0_timeEvent_0|delay|2s' },
+      { index: 3, action: 'cancel|Idle_t_0_timeEvent_0' },
+    ];
+    const edited = ['assign|a|1', 'assign|b|2'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'send|Idle_t_0_timeEvent_0|delay|2s',
+      'assign|b|2',
+      'cancel|Idle_t_0_timeEvent_0',
+    ]);
+  });
+
+  it('keeps a hidden action next to its original neighbor after a later row is removed', () => {
+    const hidden = [{ index: 1, action: 'send|Idle_t_0_timeEvent_0|delay|2s' }];
+    const edited = ['assign|a|1'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'send|Idle_t_0_timeEvent_0|delay|2s',
+    ]);
+  });
+
+  it('clamps an out-of-range original index to the end of the edited list', () => {
+    const hidden = [{ index: 5, action: 'cancel|Idle_t_0_timeEvent_0' }];
+    const edited = ['assign|a|1'];
+    expect(mergeHiddenActions(edited, hidden)).toEqual([
+      'assign|a|1',
+      'cancel|Idle_t_0_timeEvent_0',
+    ]);
+  });
+
+  it('returns the edited list unchanged when there is nothing hidden', () => {
+    expect(mergeHiddenActions(['assign|a|1'], [])).toEqual(['assign|a|1']);
   });
 });
 

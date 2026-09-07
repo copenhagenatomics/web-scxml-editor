@@ -33,7 +33,7 @@ None dedicated — this is pure parse/format logic invoked from the Transition p
 
 ## Relevant utilities
 
-`src/lib/utils/time-transition.ts` — `parseAfterSyntax`, `formatAfterSyntax`, `ensureMsConversion`, `isTimeEventName`, `generateTimeEventName`, `resolveTimeEventDisplay`, `findTimeEventToken`, `renameTimeEventTokensInEventList`.
+`src/lib/utils/time-transition.ts` — `parseAfterSyntax`, `formatAfterSyntax`, `ensureMsConversion`, `isTimeEventName`, `generateTimeEventName`, `resolveTimeEventDisplay`, `findTimeEventToken`, `renameTimeEventTokensInEventList`, `isTimerGeneratedActionString`, `mergeHiddenActions` (the latter two back the State Actions panel's hide/merge-back — see `state-actions-panel.md` and `decisions/editing.md` #9).
 
 ## SCXML behavior
 

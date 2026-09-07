@@ -113,6 +113,28 @@ export function isTimerGeneratedActionString(actionString: string): boolean {
 }
 
 /**
+ * Re-inserts timer-generated action strings (hidden from the State Actions panel by
+ * `isTimerGeneratedActionString`) back into an edited action list at their original
+ * position, rather than appending them at the end. Callers record each hidden action's
+ * index in the pre-edit array; this splices them back in ascending index order so
+ * interleaved `<send>`/`<cancel>` pairs keep their execution order relative to the
+ * surrounding onentry/onexit actions (e.g. a `delayexpr` still reads a variable's value
+ * as of its original position, not after later assignments). Indices are clamped to the
+ * current array length so this degrades gracefully when the user added/removed rows.
+ */
+export function mergeHiddenActions(
+  editedActions: string[],
+  hiddenActions: Array<{ index: number; action: string }>
+): string[] {
+  const result = [...editedActions];
+  const sorted = [...hiddenActions].sort((a, b) => a.index - b.index);
+  for (const { index, action } of sorted) {
+    result.splice(Math.min(index, result.length), 0, action);
+  }
+  return result;
+}
+
+/**
  * Finds the single time-event token inside a possibly comma-merged `@_event` value
  * (event-merge can combine a time event with a plain event sharing the same
  * target/cond/actions). Returns undefined if no token matches the time-event pattern.

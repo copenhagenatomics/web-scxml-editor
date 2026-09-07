@@ -75,7 +75,7 @@ import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
-import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString } from '@/lib/utils/time-transition';
+import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString, mergeHiddenActions } from '@/lib/utils/time-transition';
 import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
@@ -279,10 +279,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     exitActions: ParsedActionRow[];
     // Raw send/cancel action strings backing an "after X" time transition,
     // filtered out of entryActions/exitActions above so they don't show up
-    // as editable rows. Re-appended to whatever the panel applies so they're
-    // never dropped from the underlying SCXML — see isTimerGeneratedActionString.
-    hiddenEntryActions: string[];
-    hiddenExitActions: string[];
+    // as editable rows, paired with their original index in that array. Merged
+    // back into whatever the panel applies (at their original position, via
+    // mergeHiddenActions) so they're never dropped from the underlying SCXML
+    // and don't jump past unrelated actions — see isTimerGeneratedActionString.
+    hiddenEntryActions: Array<{ index: number; action: string }>;
+    hiddenExitActions: Array<{ index: number; action: string }>;
     internalEventActions: Array<{ event: string; location: string; expr: string; type: 'internal' | 'external' }>;
     stateType: 'simple' | 'compound' | 'parallel' | 'final';
     isInitial: boolean;
@@ -845,8 +847,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const result = apply.kind === 'actions'
           ? new UpdateActionsCommand(
               stateId,
-              [...apply.entryActions, ...selectedStateForActions.hiddenEntryActions],
-              [...apply.exitActions, ...selectedStateForActions.hiddenExitActions],
+              mergeHiddenActions(apply.entryActions, selectedStateForActions.hiddenEntryActions),
+              mergeHiddenActions(apply.exitActions, selectedStateForActions.hiddenExitActions),
             ).execute(base)
           : new UpdateInternalEventsCommand(stateId, apply.actions).execute(base);
 
@@ -1295,8 +1297,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     id: stateId,
                     entryActions: parseActions(node.data.entryActions || []),
                     exitActions: parseActions(node.data.exitActions || []),
-                    hiddenEntryActions: (node.data.entryActions || []).filter(isTimerGeneratedActionString),
-                    hiddenExitActions: (node.data.exitActions || []).filter(isTimerGeneratedActionString),
+                    hiddenEntryActions: (node.data.entryActions || [])
+                      .map((action: string, index: number) => ({ index, action }))
+                      .filter(({ action }: { action: string }) => isTimerGeneratedActionString(action)),
+                    hiddenExitActions: (node.data.exitActions || [])
+                      .map((action: string, index: number) => ({ index, action }))
+                      .filter(({ action }: { action: string }) => isTimerGeneratedActionString(action)),
                     internalEventActions: node.data.internalEventActions || [],
                     stateType: node.data.stateType,
                     isInitial: isInitialFlag,
@@ -3338,8 +3344,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           if (selectedStateForActions) {
             handleNodeActionsChange(
               selectedStateForActions.id,
-              [...entryActions, ...selectedStateForActions.hiddenEntryActions],
-              [...exitActions, ...selectedStateForActions.hiddenExitActions],
+              mergeHiddenActions(entryActions, selectedStateForActions.hiddenEntryActions),
+              mergeHiddenActions(exitActions, selectedStateForActions.hiddenExitActions),
             );
           }
         }}
