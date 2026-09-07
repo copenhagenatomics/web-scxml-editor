@@ -142,6 +142,16 @@ describe('listInstalledRepos', () => {
     expect(result).toEqual({ hasInstallation: false, repos: [] });
   });
 
+  it('returns hasInstallation: false when an installation exists but resolves to zero repos for this user', async () => {
+    (fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockResponse(200, { installations: [{ id: 111 }] }))
+      .mockResolvedValueOnce(mockResponse(200, { repositories: [] }));
+
+    const result = await listInstalledRepos(TOKEN);
+
+    expect(result).toEqual({ hasInstallation: false, repos: [] });
+  });
+
   it('throws GithubApiError on a non-2xx /user/installations response', async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(mockResponse(401, { message: 'Bad credentials' }));
 
