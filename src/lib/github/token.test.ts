@@ -116,4 +116,34 @@ describe('getValidAccessToken', () => {
     expect(useGithubStore.getState().accessToken).toBeNull();
     expect(useGithubStore.getState().refreshToken).toBeNull();
   });
+
+  it('coalesces concurrent calls into a single refresh request', async () => {
+    useGithubStore.getState().setAuth('tok-1', testUser, 'refresh-1', 30, 15897600);
+    let resolveRefresh!: (tokens: {
+      accessToken: string;
+      refreshToken: string;
+      expiresIn: number;
+      refreshTokenExpiresIn: number;
+    }) => void;
+    (refreshAccessToken as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      })
+    );
+
+    const call1 = getValidAccessToken();
+    const call2 = getValidAccessToken();
+
+    resolveRefresh({
+      accessToken: 'tok-2',
+      refreshToken: 'refresh-2',
+      expiresIn: 28800,
+      refreshTokenExpiresIn: 15897600,
+    });
+    const [token1, token2] = await Promise.all([call1, call2]);
+
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(token1).toBe('tok-2');
+    expect(token2).toBe('tok-2');
+  });
 });

@@ -5,6 +5,12 @@ import { refreshAccessToken } from './oauth';
 // just under the deadline doesn't race the expiry.
 const REFRESH_SKEW_MS = 60_000;
 
+// GitHub rotates refresh tokens on use, so a second concurrent refresh with
+// the same (now-spent) refresh token would fail and sign the user out from
+// under a refresh that already succeeded. Share one in-flight refresh so
+// concurrent callers join it instead of each spending the token themselves.
+let inFlightRefresh: Promise<string | null> | null = null;
+
 /**
  * Returns a token safe to use for the next API call, transparently
  * refreshing it first if it's at/near expiry. Every direct GitHub REST call
@@ -33,15 +39,23 @@ export async function getValidAccessToken(): Promise<string | null> {
   const tokenEndpoint = process.env.NEXT_PUBLIC_GITHUB_DEVICE_TOKEN_ENDPOINT;
   if (!clientId || !tokenEndpoint) return accessToken;
 
-  try {
-    const tokens = await refreshAccessToken(clientId, refreshToken, tokenEndpoint);
-    updateTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn, tokens.refreshTokenExpiresIn);
-    return tokens.accessToken;
-  } catch {
-    // The refresh token was rejected (revoked, or GitHub-side expiry disagrees
-    // with our locally-tracked deadline) - treat exactly like an expired
-    // refresh token: sign out and let the caller prompt to reconnect.
-    clearAuth();
-    return null;
+  if (!inFlightRefresh) {
+    inFlightRefresh = refreshAccessToken(clientId, refreshToken, tokenEndpoint)
+      .then((tokens) => {
+        updateTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn, tokens.refreshTokenExpiresIn);
+        return tokens.accessToken;
+      })
+      .catch(() => {
+        // The refresh token was rejected (revoked, or GitHub-side expiry disagrees
+        // with our locally-tracked deadline) - treat exactly like an expired
+        // refresh token: sign out and let the caller prompt to reconnect.
+        clearAuth();
+        return null;
+      })
+      .finally(() => {
+        inFlightRefresh = null;
+      });
   }
+
+  return inFlightRefresh;
 }
