@@ -92,12 +92,16 @@ export function buildPolylinePath(
  * real source/target and the grid can be slightly diagonal — elbows are
  * inserted there to keep every segment orthogonal.
  */
-export function buildRoundedOrthogonalPath(
+// Shared by buildRoundedOrthogonalPath and getOrthogonalPathMidpoint so the
+// label position is always derived from the exact same corner list the line
+// itself is drawn through — see getOrthogonalPathMidpoint for why this
+// matters (the smart-edge library's own "edge center" is computed from a
+// different, unrelated point list and does not track the rendered path).
+function computeOrthogonalCorners(
   source: Point,
   target: Point,
-  gridPath: number[][],
-  borderRadius = 8
-): string {
+  gridPath: number[][]
+): Point[] {
   const raw: Point[] = [
     source,
     ...gridPath.map(([x, y]) => ({ x, y })),
@@ -143,6 +147,17 @@ export function buildRoundedOrthogonalPath(
     if (!collinear) pts.push(p);
   });
 
+  return pts;
+}
+
+export function buildRoundedOrthogonalPath(
+  source: Point,
+  target: Point,
+  gridPath: number[][],
+  borderRadius = 8
+): string {
+  const pts = computeOrthogonalCorners(source, target, gridPath);
+
   if (pts.length < 2) return `M ${source.x},${source.y}`;
 
   // Step `dist` from an axis-aligned corner toward a neighbor point
@@ -167,6 +182,44 @@ export function buildRoundedOrthogonalPath(
   const last = pts[pts.length - 1];
   d += ` L ${last.x},${last.y}`;
   return d;
+}
+
+/**
+ * Midpoint (by arc length) of the corner-to-corner route that
+ * buildRoundedOrthogonalPath renders — i.e. a point that actually sits on the
+ * visible line. Needed because @tisoap/react-flow-smart-edge's own
+ * `edgeCenterX/edgeCenterY` is computed from its raw, unsimplified A* grid
+ * walk rather than the simplified/rounded path we actually draw, so it can
+ * land far from the rendered line whenever the two point lists diverge
+ * (which they normally do for anything but a dead-straight route).
+ */
+export function getOrthogonalPathMidpoint(
+  source: Point,
+  target: Point,
+  gridPath: number[][]
+): Point {
+  const pts = computeOrthogonalCorners(source, target, gridPath);
+  if (pts.length === 0) return source;
+  if (pts.length === 1) return pts[0];
+
+  const segmentLengths = pts.slice(1).map((p, i) => {
+    const prev = pts[i];
+    return Math.sqrt((p.x - prev.x) ** 2 + (p.y - prev.y) ** 2);
+  });
+  const totalLength = segmentLengths.reduce((sum, len) => sum + len, 0);
+
+  let remaining = totalLength / 2;
+  for (let i = 0; i < segmentLengths.length; i++) {
+    const segLen = segmentLengths[i];
+    if (remaining <= segLen || i === segmentLengths.length - 1) {
+      const t = segLen === 0 ? 0 : remaining / segLen;
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      return { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t };
+    }
+    remaining -= segLen;
+  }
+  return pts[Math.floor(pts.length / 2)];
 }
 
 /**

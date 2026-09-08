@@ -24,6 +24,7 @@ import {
   buildRoundedOrthogonalPath,
   buildSelfLoopPath,
   buildSmoothBezierPath,
+  getOrthogonalPathMidpoint,
 } from '@/lib/layout/path-builders';
 import {
   approximateOrthogonalRoute,
@@ -85,9 +86,6 @@ const generateOrthogonalPath: PathFindingFunction = (grid, start, end) => {
   return { fullPath: result.fullPath, smoothedPath: simplified };
 };
 
-// Draw the grid walk in smoothstep style: orthogonal segments, rounded corners
-const drawSmoothStepPath: SVGDrawFunction = (source, target, path) =>
-  buildRoundedOrthogonalPath(source, target, path, 8);
 
 /**
  * Calculate an offset smoothstep path for parallel edges
@@ -324,7 +322,26 @@ export const SCXMLTransitionEdge: React.FC<
     if (!routeIntersectsAnyRect(directRoute, obstacles)) return null;
 
     try {
-      return getSmartEdge({
+      // The library's own edgeCenterX/edgeCenterY (used below as a fallback)
+      // is computed from its raw, unsimplified A* grid walk — a different
+      // point list than the one actually drawn — so it can land far off the
+      // rendered line. Capture the real midpoint from the exact same points
+      // drawEdge renders through instead.
+      const renderedMidpointBox: Array<{ x: number; y: number }> = [];
+      const drawSmoothStepPathCapturingMidpoint: SVGDrawFunction = (
+        pathSource,
+        pathTarget,
+        path
+      ) => {
+        renderedMidpointBox[0] = getOrthogonalPathMidpoint(
+          pathSource,
+          pathTarget,
+          path
+        );
+        return buildRoundedOrthogonalPath(pathSource, pathTarget, path, 8);
+      };
+
+      const result = getSmartEdge({
         sourceX,
         sourceY,
         targetX,
@@ -337,9 +354,14 @@ export const SCXMLTransitionEdge: React.FC<
           // smoothstep style of the other edges — the defaults produce
           // diagonal smoothed curves.
           generatePath: generateOrthogonalPath,
-          drawEdge: drawSmoothStepPath,
+          drawEdge: drawSmoothStepPathCapturingMidpoint,
         },
       });
+      if (!result) return null;
+      const midpoint = renderedMidpointBox[0];
+      return midpoint
+        ? { ...result, edgeCenterX: midpoint.x, edgeCenterY: midpoint.y }
+        : result;
     } catch {
       return null;
     }
