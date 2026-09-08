@@ -333,12 +333,20 @@ export const SCXMLTransitionEdge: React.FC<
         pathTarget,
         path
       ) => {
+        const targetSide = targetPosition as unknown as HandleSide;
         renderedMidpointBox[0] = getOrthogonalPathMidpoint(
           pathSource,
           pathTarget,
-          path
+          path,
+          targetSide
         );
-        return buildRoundedOrthogonalPath(pathSource, pathTarget, path, 8);
+        return buildRoundedOrthogonalPath(
+          pathSource,
+          pathTarget,
+          path,
+          8,
+          targetSide
+        );
       };
 
       const result = getSmartEdge({

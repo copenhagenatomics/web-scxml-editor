@@ -5,6 +5,11 @@ export interface Point {
   y: number;
 }
 
+// Matches src/lib/layout/edge-obstacle-utils.ts's HandleSide — not imported
+// from there to keep this module dependency-free, but kept structurally
+// identical (both alias reactflow's Position enum's string values).
+export type HandleSide = 'top' | 'bottom' | 'left' | 'right';
+
 /**
  * Build polyline path (straight segments through waypoints)
  * Returns: [pathString, labelX, labelY]
@@ -100,7 +105,8 @@ export function buildPolylinePath(
 function computeOrthogonalCorners(
   source: Point,
   target: Point,
-  gridPath: number[][]
+  gridPath: number[][],
+  targetSide?: HandleSide
 ): Point[] {
   const raw: Point[] = [
     source,
@@ -147,6 +153,63 @@ function computeOrthogonalCorners(
     if (!collinear) pts.push(p);
   });
 
+  // The A* grid search that produces gridPath is only constrained to reach a
+  // cell near the target — nothing forces its last hop to arrive from the
+  // side the target's handle is actually on, so the final segment above can
+  // legitimately end up on the wrong axis (e.g. horizontal into a 'top'
+  // handle). SVG's orient="auto" marker rotates strictly from that segment's
+  // tangent, so a wrong-axis final segment renders as an arrowhead pointing
+  // sideways into the node instead of through its handle.
+  //
+  // Every consecutive pair in `pts` already shares an x or a y (that's what
+  // the elbow-insertion above guarantees), so when the axis is wrong, `prev`
+  // is guaranteed to share the *other* coordinate with target — e.g. for a
+  // 'top' target, prev.y === target.y already (the route already arrived
+  // level with the handle, just from the wrong side). Inserting a brand-new
+  // detour past that point would make the line double back on itself — the
+  // route already went as far as target's own row/column, so backing out to
+  // some further offset and back in reads as a stray loop right at the
+  // arrowhead. Instead, slide the *earlier* corner (before prev) so the turn
+  // toward target happens there instead of at prev — reusing distance the
+  // path already covers rather than adding a new detour.
+  if (targetSide && pts.length >= 2) {
+    const last = pts[pts.length - 1];
+    const prev = pts[pts.length - 2];
+    const beforePrev = pts.length >= 3 ? pts[pts.length - 3] : null;
+    const needsVertical = targetSide === 'top' || targetSide === 'bottom';
+    const isAligned = needsVertical ? prev.x === last.x : prev.y === last.y;
+    // Reusing beforePrev only pays off if the resulting final segment is
+    // long enough to carry a full rounded corner — otherwise the existing
+    // half-leg radius clamp (below, in buildRoundedOrthogonalPath) shrinks
+    // toward 0 on the short segment, rendering as a sharp corner right next
+    // to the arrowhead instead of the usual rounded one. The stub fallback
+    // guarantees this same minimum length, so require it here too.
+    const minApproachLength = 12;
+    const beforePrevUsable = beforePrev
+      ? needsVertical
+        ? Math.abs(beforePrev.y - last.y) >= minApproachLength
+        : Math.abs(beforePrev.x - last.x) >= minApproachLength
+      : false;
+    if (!isAligned && beforePrev && beforePrevUsable) {
+      pts[pts.length - 2] = needsVertical
+        ? { x: last.x, y: beforePrev.y }
+        : { x: beforePrev.x, y: last.y };
+    } else if (!isAligned) {
+      // No usable earlier corner to reuse (the route arrives at prev almost
+      // directly from source, or the earlier corner is also too close to
+      // target) — fall back to a short perpendicular stub, accepting the
+      // small added detour since there's no existing geometry to reuse.
+      const stub = minApproachLength;
+      const approach: Point = needsVertical
+        ? { x: last.x, y: last.y + (targetSide === 'top' ? -stub : stub) }
+        : { x: last.x + (targetSide === 'left' ? -stub : stub), y: last.y };
+      const elbow: Point = needsVertical
+        ? { x: prev.x, y: approach.y }
+        : { x: approach.x, y: prev.y };
+      pts.splice(pts.length - 1, 0, elbow, approach);
+    }
+  }
+
   return pts;
 }
 
@@ -154,9 +217,10 @@ export function buildRoundedOrthogonalPath(
   source: Point,
   target: Point,
   gridPath: number[][],
-  borderRadius = 8
+  borderRadius = 8,
+  targetSide?: HandleSide
 ): string {
-  const pts = computeOrthogonalCorners(source, target, gridPath);
+  const pts = computeOrthogonalCorners(source, target, gridPath, targetSide);
 
   if (pts.length < 2) return `M ${source.x},${source.y}`;
 
@@ -196,9 +260,10 @@ export function buildRoundedOrthogonalPath(
 export function getOrthogonalPathMidpoint(
   source: Point,
   target: Point,
-  gridPath: number[][]
+  gridPath: number[][],
+  targetSide?: HandleSide
 ): Point {
-  const pts = computeOrthogonalCorners(source, target, gridPath);
+  const pts = computeOrthogonalCorners(source, target, gridPath, targetSide);
   if (pts.length === 0) return source;
   if (pts.length === 1) return pts[0];
 
