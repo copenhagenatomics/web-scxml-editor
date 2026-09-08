@@ -25,7 +25,7 @@ Let the app match the user's system preference or explicit choice for light vs. 
 
 ## Relevant components
 
-`src/components/ui/theme-toggle.tsx`, `src/app/layout.tsx` (the blocking script). `src/components/diagram/edges/scxml-transition-edge.tsx` also calls `useIsDark()` directly (to pick a light-vs-dark selection-shadow color for a selected transition's edge/label) — this means every rendered edge instance runs its own independent `useIsDark()`/`MutationObserver`, not just one shared canvas-level call (see `.claude/features/selection.md`).
+`src/components/ui/theme-toggle.tsx`, `src/app/layout.tsx` (the blocking script). `src/components/diagram/visual-diagram.tsx` calls `useIsDark()` once (`canvasDark`, computed at the top of the component) and threads it through each edge's `data.canvasDark` in `displayFilteredEdges`; `src/components/diagram/edges/scxml-transition-edge.tsx` reads `data?.canvasDark` (not its own `useIsDark()` call) to pick the light-vs-dark selection-shadow color for a selected transition's edge/label — this keeps a single shared `MutationObserver` regardless of how many edges are rendered (see `.claude/features/selection.md`).
 
 ## Relevant state/store
 

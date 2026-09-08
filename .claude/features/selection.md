@@ -27,7 +27,7 @@ Selected states get a visual highlight (via `node.selected`/style, not ReactFlow
 
 ## Relevant components
 
-`src/components/diagram/visual-diagram.tsx` (all selection logic), `src/components/diagram/multi-select-toolbar.tsx` (appears at 2+ selected), `src/components/diagram/nodes/scxml-state-node.tsx` (reads `selected` prop to show `NodeResizer`), `src/components/diagram/edges/scxml-transition-edge.tsx` (reads `selected` to show waypoint handles and to apply the label's theme-aware selection shadow, via its own `useIsDark()` call).
+`src/components/diagram/visual-diagram.tsx` (all selection logic), `src/components/diagram/multi-select-toolbar.tsx` (appears at 2+ selected), `src/components/diagram/nodes/scxml-state-node.tsx` (reads `selected` prop to show `NodeResizer`), `src/components/diagram/edges/scxml-transition-edge.tsx` (reads `selected` to show waypoint handles and to apply the label's theme-aware selection shadow, via `data?.canvasDark` — see `.claude/features/theme-and-appearance.md`).
 
 ## Relevant state/store
 

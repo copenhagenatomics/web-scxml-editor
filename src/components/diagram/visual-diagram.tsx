@@ -2928,6 +2928,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const displayFilteredEdges = React.useMemo(() => {
     const applySelectionStyles = (edge: Edge) => {
       const isSelected = selectedTransitions.has(edge.id);
+      // Threaded through edge data so SCXMLTransitionEdge can derive its own
+      // theme-aware selection shadow without each edge instance running its
+      // own useIsDark()/MutationObserver.
+      const data = { ...edge.data, canvasDark };
       if (isSelected) {
         const existingMarker = (edge.markerEnd as any) || {
           type: MarkerType.ArrowClosed,
@@ -2943,6 +2947,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           : 'rgba(0, 0, 0, 0.55)';
         return {
           ...edge,
+          data,
           selected: true, // CRITICAL: This prop enables waypoint handles to show
           style: {
             ...edge.style,
@@ -2963,6 +2968,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
       return {
         ...edge,
+        data,
         selected: false,
         selectable: true,
         focusable: true,

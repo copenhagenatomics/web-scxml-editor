@@ -36,7 +36,6 @@ import {
 } from '@/lib/layout/edge-obstacle-utils';
 import { getTransitionColor } from '@/lib/consts/transition-colors';
 import { isNoteId } from '@/types/visual-metadata';
-import { useIsDark } from '@/lib/theme/use-is-dark';
 
 // Extra room around the label's foreignObject so the selection box-shadow
 // isn't clipped by the foreignObject's own overflow:hidden — without this,
@@ -54,6 +53,7 @@ export interface SCXMLTransitionEdgeData {
   fullLabel?: string; // Full label text for tooltip
   displayEvent?: string; // "after 2s" / "after 714ms" / "after (expr) s" for _t_ time-transition edges
   waypoints?: Waypoint[]; // Waypoint control points for edge routing
+  canvasDark?: boolean; // Dark-mode flag computed once by the canvas (see visual-diagram.tsx) — avoids one MutationObserver per rendered edge
 
   // Handlers for waypoint editing
   onWaypointDrag?: (
@@ -229,10 +229,12 @@ export const SCXMLTransitionEdge: React.FC<
   markerEnd,
   style,
 }) => {
-  const isDark = useIsDark();
   // Dark canvas needs a lighter/brighter glow to read as a shadow; light
   // canvas needs a darker one — a flat black shadow disappears on dark bg.
-  const selectionShadowColor = isDark
+  // canvasDark is computed once for the whole canvas (visual-diagram.tsx)
+  // and threaded through edge data instead of each edge instance running
+  // its own useIsDark()/MutationObserver.
+  const selectionShadowColor = data?.canvasDark
     ? 'rgba(255, 255, 255, 0.60)'
     : 'rgba(0, 0, 0, 0.55)';
 
