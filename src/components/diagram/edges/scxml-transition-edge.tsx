@@ -35,6 +35,12 @@ import {
 } from '@/lib/layout/edge-obstacle-utils';
 import { getTransitionColor } from '@/lib/consts/transition-colors';
 import { isNoteId } from '@/types/visual-metadata';
+import { useIsDark } from '@/lib/theme/use-is-dark';
+
+// Extra room around the label's foreignObject so the selection box-shadow
+// isn't clipped by the foreignObject's own overflow:hidden — without this,
+// the pill's fit-content width leaves no horizontal margin for the shadow.
+const LABEL_SHADOW_MARGIN = 6;
 
 export interface SCXMLTransitionEdgeData {
   event?: string;
@@ -225,6 +231,13 @@ export const SCXMLTransitionEdge: React.FC<
   markerEnd,
   style,
 }) => {
+  const isDark = useIsDark();
+  // Dark canvas needs a lighter/brighter glow to read as a shadow; light
+  // canvas needs a darker one — a flat black shadow disappears on dark bg.
+  const selectionShadowColor = isDark
+    ? 'rgba(255, 255, 255, 0.60)'
+    : 'rgba(0, 0, 0, 0.55)';
+
   // Safely extract data properties FIRST
   const event = data?.event;
   const condition = data?.condition;
@@ -494,10 +507,10 @@ export const SCXMLTransitionEdge: React.FC<
       {labelContent && (
         <g style={{ pointerEvents: 'none', zIndex: 10000 }}>
           <foreignObject
-            width={maxLabelWidth}
-            height={26}
-            x={labelX - maxLabelWidth / 2 + labelOffset.x + labelOffsetX}
-            y={labelY - 13 + labelOffset.y + labelOffsetY}
+            width={maxLabelWidth + LABEL_SHADOW_MARGIN * 2}
+            height={26 + LABEL_SHADOW_MARGIN * 2}
+            x={labelX - maxLabelWidth / 2 - LABEL_SHADOW_MARGIN + labelOffset.x + labelOffsetX}
+            y={labelY - 13 - LABEL_SHADOW_MARGIN + labelOffset.y + labelOffsetY}
             style={{
               overflow: 'hidden',
               zIndex: 10000,
@@ -529,6 +542,9 @@ export const SCXMLTransitionEdge: React.FC<
                   color: '#fff',
                   opacity: 0.95,
                   cursor: 'pointer',
+                  boxShadow: selected
+                    ? `0 0 4px 1px ${selectionShadowColor}`
+                    : 'none',
                 pointerEvents: 'auto', // Re-enable pointer events only on the label itself
                 userSelect: 'none', // Prevent text selection
                 WebkitUserSelect: 'none', // Safari/Chrome

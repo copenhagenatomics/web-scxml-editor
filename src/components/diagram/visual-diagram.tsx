@@ -2936,6 +2936,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
         // Determine selection color based on edge type
         const selectionColor = getTransitionColor(edge.data?.condition, edge.data?.event);
+        // Dark canvas needs a lighter/brighter glow to read as a shadow;
+        // light canvas needs a darker one — matches the edge label's shadow.
+        const selectionShadowColor = canvasDark
+          ? 'rgba(255, 255, 255, 0.45)'
+          : 'rgba(0, 0, 0, 0.55)';
         return {
           ...edge,
           selected: true, // CRITICAL: This prop enables waypoint handles to show
@@ -2943,7 +2948,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             ...edge.style,
             stroke: selectionColor,
             strokeWidth: 3,
-            filter: 'drop-shadow(0 0 3px rgba(0, 0, 0, 0.3))',
+            filter: `drop-shadow(0 0 4px ${selectionShadowColor})`,
           },
           animated: false,
           // markerEnd: {
@@ -2967,7 +2972,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     return hierarchyFilteredEdges
       .filter((edge) => true)
       .map((edge) => applySelectionStyles(edge));
-  }, [hierarchyFilteredEdges, activeStates, selectedTransitions]);
+  }, [hierarchyFilteredEdges, activeStates, selectedTransitions, canvasDark]);
 
   // Pooled across every currently-visible Parallel State wrapper node —
   // ParallelRegionDividerOverlay draws one full-height line per gap,
