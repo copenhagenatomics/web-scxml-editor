@@ -31,11 +31,12 @@ export function expandWrapperPositionChanges(
   nodes: SimpleNode[]
 ): PositionChange[] {
   const result: PositionChange[] = [];
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
 
   changes.forEach((change) => {
     result.push(change);
 
-    const wrapperNode = nodes.find((n) => n.id === change.id);
+    const wrapperNode = nodesById.get(change.id);
     if (!wrapperNode?.data?.isParallelGroupWrapper) return;
 
     // React Flow's own NodePositionChange marks `position` optional — its
@@ -50,7 +51,7 @@ export function expandWrapperPositionChanges(
     const memberIds = wrapperNode.data.memberIds ?? [];
 
     memberIds.forEach((memberId) => {
-      const member = nodes.find((n) => n.id === memberId);
+      const member = nodesById.get(memberId);
       if (!member) return;
       result.push({
         type: 'position',
