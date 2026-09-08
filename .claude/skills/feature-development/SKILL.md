@@ -5,7 +5,7 @@ description: Add new capability to the SCXML Editor (a new panel, command, editi
 
 # Feature Development
 
-This is the default skill for adding new capability to the SCXML Editor. It specializes `.claude/workflows/development.md`'s 19-step process — follow that process; this skill adds the feature-development-specific investigation steps, extension-point knowledge, and pitfalls for *this* codebase.
+This is the default skill for adding new capability to the SCXML Editor. It specializes `.claude/workflows/development.md`'s 21-step process — follow that process; this skill adds the feature-development-specific investigation steps, extension-point knowledge, and pitfalls for *this* codebase.
 
 ## When to use
 

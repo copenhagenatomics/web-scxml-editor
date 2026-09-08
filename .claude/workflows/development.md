@@ -2,7 +2,9 @@
 
 This is the default process for **any** task in this repository — bug fix, new feature, UI change, refactor, performance work, SCXML/state-machine change, validation change, test change, configuration change, integration change, or documentation change. It is feature-neutral: it tells you *how to approach* a task, not what any specific feature does (that's `.claude/features/*.md`) or what rule governs it (that's `.claude/project/project-rules.md`).
 
-Follow the 19 steps below in order. Steps can be quick for a small task (a one-line bug fix might spend one sentence on step 8) but should never be skipped outright — a step that seems irrelevant should be explicitly dismissed ("no test exists for this," "no decision doc covers this area"), not silently omitted, so nothing gets missed by assumption.
+Follow the 21 steps below in order. Steps can be quick for a small task (a one-line bug fix might spend one sentence on step 8) but should never be skipped outright — a step that seems irrelevant should be explicitly dismissed ("no test exists for this," "no decision doc covers this area"), not silently omitted, so nothing gets missed by assumption.
+
+**Knowledge synchronization (steps 17–20) is a mandatory phase of every task, not an optional cleanup pass.** A task that changed the implementation is not complete when the code works and the tests pass — it is complete when the `.claude/` knowledge base has been checked against that change and updated wherever it would otherwise mislead a future reader. The developer should never have to ask "did you update the docs?" — running this phase without being asked is the entire point of it existing. See the Phase overview below for how steps 1–21 group into that shape, and `.claude/workflows/knowledge-maintenance.md` for the detailed procedure steps 17–20 invoke.
 
 ---
 
@@ -11,13 +13,36 @@ Follow the 19 steps below in order. Steps can be quick for a small task (a one-l
 - **Never assume how the system works without inspecting the repository.** This codebase has multiple confirmed cases where a plausible-sounding assumption is wrong (e.g. "the history manager uses two stacks" — it doesn't; see `.claude/decisions/state-management.md` #2). Read the actual code before acting on a belief about it.
 - **Never rely only on static documentation when current source code is available.** `DEVELOPER_GUIDE.md` and `.claude/context/CLAUDE.md` are *known stale* — they describe a design that no longer matches the code (§`.claude/project/overview.md`). The `.claude/` knowledge base itself is a distillation, not a replacement for reading source when precision matters — treat every doc's file:line pointers as a starting point to verify, not a final answer, especially for anything load-bearing to your change.
 - **If documentation conflicts with source code, investigate and identify the discrepancy** — don't silently pick one side. Say explicitly which one is right and, if the doc is wrong, note it (and consider fixing the doc per step 18).
-- **Never make unrelated changes.** Fix the bug / add the feature / do the refactor asked for — do not also rename a variable you find ugly, reformat unrelated code, or fix an unrelated bug you notice in passing (mention it instead; see step 19).
+- **Never make unrelated changes.** Fix the bug / add the feature / do the refactor asked for — do not also rename a variable you find ugly, reformat unrelated code, or fix an unrelated bug you notice in passing (mention it instead; see step 21).
 - **Preserve existing behavior unless the user's request explicitly changes it.** This applies especially to the many documented invariants in `.claude/project/project-rules.md` — an `[EXPLICIT]` rule should not be broken as a side effect of an unrelated change.
 - **Before modifying behavior, identify dependencies and possible regressions** (steps 8–9 exist specifically for this — don't jump straight to editing).
 
 ---
 
-## The 19 steps
+## The 21 steps
+
+### Phase overview
+
+The 21 detailed steps below implement these 14 higher-level phases. Use this table to see the shape of the process at a glance; use the numbered steps for the actual mechanics.
+
+| Phase | Covers steps |
+|---|---|
+| 1. Understand request | 1 |
+| 2. Identify affected areas | 2 |
+| 3. Read relevant project knowledge | 3–6 |
+| 4. Inspect source code | 7 |
+| 5. Identify dependencies and risks | 8–9 |
+| 6. Create implementation plan | 10–11 |
+| 7. Implement change | 12 |
+| 8. Run tests/typecheck/lint as appropriate | 13–14 |
+| 9. Review the diff (incl. regression check) | 15–16 |
+| 10. Perform knowledge impact analysis | 17 |
+| 11. Update relevant `.md` files when necessary | 18 |
+| 12. Review the documentation diff | 19 |
+| 13. Verify documentation is consistent with the final source code | 20 |
+| 14. Complete the task | 21 |
+
+(A few phases above are split more finely in the numbered steps than this summary implies — "read relevant project knowledge" is really four separate lookups, and "identify dependencies and risks" is inspection plus a distinct side-effects pass — but the phase grouping is the right level to think at before diving into the mechanics. Phases 10–13 are the knowledge-synchronization phase referenced above; it is not optional.)
 
 ### 1. Understand the user's request
 
@@ -70,7 +95,7 @@ For this codebase specifically:
 Cross-check your planned change against:
 - `.claude/project/project-rules.md`'s numbered rules for the relevant category — does your change risk violating an `[EXPLICIT]` rule?
 - The **Related features** section of every feature doc touched in step 5 — a change rarely affects exactly one feature in this codebase (e.g. anything touching state rename cascades into transitions, initial attributes, and timer tokens simultaneously).
-- The **Known issues** list in `index.md` — are you about to touch code adjacent to a confirmed defect? If so, decide explicitly whether to fix it as part of this task (only if in scope) or leave it and note it in your summary (step 19).
+- The **Known issues** list in `index.md` — are you about to touch code adjacent to a confirmed defect? If so, decide explicitly whether to fix it as part of this task (only if in scope) or leave it and note it in your summary (step 21).
 
 ### 10. Identify existing tests
 
@@ -108,19 +133,31 @@ Read your own diff before calling the task done. Specifically check:
 ### 16. Check for regressions
 
 - Re-run the tests from step 13.
-- For anything UI/interaction-related: this repo has **no e2e coverage**, so browser exercise is the only real verification for canvas drag/select/zoom, Monaco autocomplete, and similar behavior (`.claude/decisions/testing.md` #1) — but **Claude does not perform this step itself**. Per rule 17.5 (`.claude/decisions/testing.md` #5), Claude has no tool in this environment that can observe a rendered browser page, so Claude must not start `npm run dev` for this purpose or claim the behavior is verified. Instead, prepare a concrete manual verification checklist for the developer (see step 19) — regression-checking a UI change means re-reading the **Important edge cases** below for what the checklist needs to cover, not exercising it yourself.
-- Specifically re-check the **Important edge cases** section of every feature doc touched in step 5 — these are exactly the cases most likely to silently break, and exactly what the handoff checklist in step 19 should ask the developer to confirm.
+- For anything UI/interaction-related: this repo has **no e2e coverage**, so browser exercise is the only real verification for canvas drag/select/zoom, Monaco autocomplete, and similar behavior (`.claude/decisions/testing.md` #1) — but **Claude does not perform this step itself**. Per rule 17.5 (`.claude/decisions/testing.md` #5), Claude has no tool in this environment that can observe a rendered browser page, so Claude must not start `npm run dev` for this purpose or claim the behavior is verified. Instead, prepare a concrete manual verification checklist for the developer (see step 21) — regression-checking a UI change means re-reading the **Important edge cases** below for what the checklist needs to cover, not exercising it yourself.
+- Specifically re-check the **Important edge cases** section of every feature doc touched in step 5 — these are exactly the cases most likely to silently break, and exactly what the handoff checklist in step 21 should ask the developer to confirm.
 - If you touched a shared utility (step 8), verify *every* call site still behaves correctly, not just the one you were focused on.
 
 ### 17. Check whether project documentation or decisions need updating
 
-Run the **10 trigger questions** in `.claude/workflows/knowledge-maintenance.md` against your change (externally visible behavior, architecture, data flow, invariants, project rules, new/invalidated decisions, newly-important undocumented behavior, tests establishing new expected behavior, integration/dependency changes). That document is the authoritative, detailed version of this step — it also defines the **materiality test** that keeps this from becoming "update docs for every diff": update knowledge only when a future reader would be actively misled or would miss something needed if the docs were left as-is, not simply because code changed.
+Run the **11 trigger questions** in `.claude/workflows/knowledge-maintenance.md` against your change (externally visible behavior, architecture/state ownership, data flow, invariants, project rules, new/invalidated decisions, newly-important undocumented behavior, tests establishing new expected behavior, integration/dependency changes, and onboarding impact). That document is the authoritative, detailed version of this step — it also defines the **materiality test** that keeps this from becoming "update docs for every diff": update knowledge only when a future reader would be actively misled or would miss something needed if the docs were left as-is, not simply because code changed.
 
 ### 18. Update knowledge when the implementation has meaningfully changed
 
-This is the follow-through on step 17 — actually make the edits, not just note that they're needed. Follow `.claude/workflows/knowledge-maintenance.md`'s category-by-category guidance (which knowledge file, which section, how much to write) and its decision-record template if trigger question 6 or 7 fired. Match existing templates/structure exactly, fix any cross-references you touch, and update `.claude/index.md`'s registries if you added or reclassified anything. For anything you deliberately decided *not* to update, say so in your summary (step 19) rather than leaving it ambiguous whether you considered it.
+This is the follow-through on step 17 — actually make the edits, not just note that they're needed. Follow `.claude/workflows/knowledge-maintenance.md`'s category-by-category guidance (which knowledge file, which section, how much to write) and its decision-record template if trigger question 6 or 7 fired. Match existing templates/structure exactly, fix any cross-references you touch, and update `.claude/index.md`'s registries if you added or reclassified anything. For anything you deliberately decided *not* to update, say so in your summary (step 21) rather than leaving it ambiguous whether you considered it.
 
-### 19. Provide a concise summary of the work
+### 19. Review the documentation diff
+
+Read the actual diff of every `.claude/*.md` (or other knowledge file) edit made in step 18, the same way step 15 reviews the source diff. Specifically check:
+- Does the edit follow the target file's existing template/structure exactly (feature-doc section names, decision-record fields, rule numbering), rather than improvising a new shape?
+- Is it scoped to what actually changed — no unrelated rewriting of a section that was already accurate?
+- Are `[EXPLICIT]`/`[INFERRED]` tags (project-rules.md) and `Status` fields (decisions/*.md) set deliberately, not copy-pasted from a neighboring entry?
+- Did the edit fix every cross-reference it touched (a renamed section, a new decision number, a moved file) — a stale cross-reference is its own form of drift, per `.claude/workflows/knowledge-maintenance.md`'s practical workflow step 6.
+
+### 20. Verify documentation is consistent with the final source code
+
+This is a distinct check from step 19, and easy to skip because it feels redundant with it — it isn't. Step 19 checks that the *documentation edit itself* is well-formed; this step checks that what it now claims still matches the *actual final state of the code*, after every change from steps 12 onward (including anything adjusted during steps 13–16 after the original plan in step 11 was written). Concretely: re-read the specific behavior/file:line references the updated doc now makes, against the real current file — not against your memory of what you intended to implement. If implementation drifted from the plan during steps 12–16 (a common, normal occurrence) and the knowledge update in step 18 was written from the plan rather than the final diff, this is where that mismatch gets caught before it ships as a new stale-doc problem — precisely the failure mode this whole knowledge base exists to eliminate (`.claude/project/overview.md`'s "Ground truth vs. stale docs").
+
+### 21. Provide a concise summary of the work
 
 State what changed and why, in the terms established by this codebase's own vocabulary (cite the Command/validator/feature/decision by name, not a generic description). Call out:
 - Anything from step 9 you deliberately chose *not* to fix (so it's not mistaken for an oversight).
@@ -133,13 +170,13 @@ Keep it short — this repo's own conventions (per `.claude/project/coding-rules
 
 ## Adapting the workflow by task type
 
-The 19 steps above are the same for every task type — what differs is *emphasis*. Use this table to know which steps deserve the most attention for a given kind of request.
+The 21 steps above are the same for every task type — what differs is *emphasis*. Use this table to know which steps deserve the most attention for a given kind of request.
 
 | Task type | Emphasize | Specific things to check |
 |---|---|---|
 | **Bug fix** | 1, 7, 8, 10, 16 | Reproduce the *expected vs. actual* precisely (step 1) before touching code. Check `index.md`'s Known Issues list first — you may be looking at an already-diagnosed defect with a documented root cause. Trace the exact data flow (step 8) rather than guessing at the fix location. |
 | **New feature** | 2, 3, 6, 11, 12, 18 | Check `decisions/*.md` for whether a similar feature was tried and reverted/superseded (e.g. edge bundling, inferred event/condition mode) before re-implementing something similar. Follow `.claude/workflows/adding-a-command.md`/`adding-a-side-panel.md` for the standard extension points. Always add a new `.claude/features/*.md` doc for a genuinely new feature, and add it to `index.md`'s registry. |
-| **UI change** | 5, 9, 13, 16, 19 | Check `.claude/project/ui-rules.md` and the relevant feature's **UI behavior** section first — this repo has many specific, tested-by-feedback conventions (single-panel-at-a-time, no context menus, specific keyboard shortcuts, amber not red, no transition animation). Run typecheck/lint/unit tests/build (step 13/14) — Claude does **not** start `npm run dev` or otherwise attempt browser verification itself (rule 17.5, `.claude/decisions/testing.md` #5); end the task with a concrete manual verification checklist for the developer instead (step 19), and never claim the UI behavior is verified until the developer confirms it. |
+| **UI change** | 5, 9, 13, 16, 21 | Check `.claude/project/ui-rules.md` and the relevant feature's **UI behavior** section first — this repo has many specific, tested-by-feedback conventions (single-panel-at-a-time, no context menus, specific keyboard shortcuts, amber not red, no transition animation). Run typecheck/lint/unit tests/build (step 13/14) — Claude does **not** start `npm run dev` or otherwise attempt browser verification itself (rule 17.5, `.claude/decisions/testing.md` #5); end the task with a concrete manual verification checklist for the developer instead (step 21), and never claim the UI behavior is verified until the developer confirms it. |
 | **Refactoring** | 0, 7, 9, 15, 16 | The "preserve existing behavior" rule is paramount here — a refactor that changes behavior is actually a feature/bug-fix task wearing a refactor's clothes; call that out explicitly if it happens. Re-run all affected tests, not just the ones near the refactored file, since this repo has several places where logic is deliberately shared across features (step 8/9). |
 | **Performance improvement** | 8, 9, 16, 18 | Read `.claude/decisions/performance.md` first — several current "slow" behaviors (full re-parse per change, no incremental diagram updates) are known, documented tradeoffs, not oversights; understand why before "fixing" them. If you introduce debouncing/memoization, follow the existing patterns (`.claude/project/coding-rules.md` §5, `history-manager.ts`'s per-category debounce timers) rather than a new mechanism. |
 | **SCXML change** (new element/attribute support, spec compliance) | 4, 6, 7, 8 | Read `.claude/project/scxml-rules.md` and `.claude/decisions/scxml.md` fully — this app layers significant product-specific rules (cross-hierarchy restriction, transition slots, Initial-State groups, `conf_`/`this_`/`main_` conventions) on top of plain SCXML; know which constraint is a W3C rule vs. a product rule vs. a downstream-generator constraint before changing it. |
@@ -172,6 +209,8 @@ Copy this into your working notes for a non-trivial task:
 - [ ] 14. Ran lint / type check
 - [ ] 15. Reviewed the diff for scope creep
 - [ ] 16. Checked for regressions (for UI changes: prepared what the developer needs to check — did not run `npm run dev` myself)
-- [ ] 17. Decided whether docs/decisions need updating
-- [ ] 18. Made those doc/decision updates
-- [ ] 19. Wrote a concise, specific summary (for UI changes: automated-check results reported as such, plus a manual verification checklist — no claim of "verified"/"working" without developer confirmation)
+- [ ] 17. Decided whether docs/decisions need updating (ran the trigger questions in `knowledge-maintenance.md`)
+- [ ] 18. Made those doc/decision updates (or explicitly noted why none were needed)
+- [ ] 19. Reviewed the documentation diff itself (template followed, scoped, cross-references fixed)
+- [ ] 20. Verified the updated docs match the actual final code, not the original plan
+- [ ] 21. Wrote a concise, specific summary (for UI changes: automated-check results reported as such, plus a manual verification checklist — no claim of "verified"/"working" without developer confirmation)

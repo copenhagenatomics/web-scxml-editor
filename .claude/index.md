@@ -4,7 +4,7 @@
 
 This knowledge base documents the **SCXML Visual Editor** (industrial statechart authoring tool for Copenhagen Atomics' "LoopControl" platform) as it actually exists in code today — not as aspirationally described in `DEVELOPER_GUIDE.md` or `.claude/context/CLAUDE.md`, both of which are stale. See `PROJECT_ANALYSIS.md` at the repo root for the exhaustive, file:line-referenced research this knowledge base was distilled from.
 
-**Start here if you're new to this repo**: `project/overview.md` → `project/architecture.md` → `project/terminology.md`.
+**Start here if you're new to this repo**: [`onboarding/README.md`](onboarding/README.md) → `project/overview.md` → `project/architecture.md` → `project/terminology.md`.
 
 **`.claude/` is the single source of truth for all SCXML-Editor-specific AI development knowledge.** Architecture, features, decisions, project rules, workflows, skills, and terminology all live here, and nowhere else in the repository. There is no separate plugin, no separate MCP server, and no second knowledge base to keep in sync — a prior iteration of this system packaged the skills as an installable Claude Code Plugin with a companion MCP server; both were removed as unnecessary indirection once it was clear every capability they added was either (a) already available through Claude Code's native Read/Grep/Glob/Bash tools, or (b) better served by this `.claude/` tree directly. See `decisions/architecture.md` if that removal's reasoning is ever relevant again.
 
@@ -12,12 +12,13 @@ This knowledge base documents the **SCXML Visual Editor** (industrial statechart
 
 ```
 Project
+ ├── Onboarding     → onboarding/README.md         (start here — first-day mental model, links out to everything else)
  ├── Architecture   → project/architecture.md, project/scxml-rules.md, project/ui-rules.md, project/coding-rules.md
  ├── Rules          → project/project-rules.md   (the 23-section constitution)
  ├── Features       → features/*.md               (38 docs, one per feature, equal depth)
  ├── Decisions      → decisions/*.md               (14 topical files, ~80 numbered records)
  ├── Skills         → skills/*/SKILL.md            (10 skills — how to approach a kind of task)
- └── Workflows      → workflows/*.md               (step-by-step processes the skills specialize)
+ └── Workflows      → workflows/*.md               (step-by-step processes the skills specialize, incl. how knowledge sync itself works)
 ```
 
 ### How Claude finds the right context without being told
@@ -30,9 +31,13 @@ A developer should never need to say "use the debugging skill" or "read the tran
 
 Because the 10 skills are organized by **activity shape** (what kind of work is this) rather than by **feature** (which part of the app), a task about a genuinely new area the knowledge base doesn't yet cover still routes correctly — it matches `feature-development` or `codebase-exploration`, which instruct searching this index and the codebase directly rather than assuming a pre-existing doc exists.
 
-This same routing also runs in reverse after the work is done: `.claude/skills/knowledge-maintenance/SKILL.md` and `.claude/workflows/knowledge-maintenance.md` define exactly when a completed change requires a `.claude/*.md` update (and, just as importantly, when it doesn't) — see `workflows/development.md` steps 17–18 for where this fits in the overall task sequence, and `workflows/knowledge-maintenance.md` for the full decision procedure.
+This same routing also runs in reverse after the work is done: `.claude/skills/knowledge-maintenance/SKILL.md` and `.claude/workflows/knowledge-maintenance.md` define exactly when a completed change requires a `.claude/*.md` update (and, just as importantly, when it doesn't) — see `workflows/development.md` steps 17–20 for where this fits in the overall task sequence (impact analysis → update → review the doc diff → verify it matches the final code), and `workflows/knowledge-maintenance.md` for the full decision procedure. This closing phase runs automatically as part of finishing any task — a developer should never need to separately ask "update the documentation."
 
 All 38 feature documents in `features/` follow the identical template and are treated at equal depth — no feature was prioritized over another: **Purpose, User behavior, UI behavior, Architecture, Relevant components, State/store relationships, Data flow, SCXML behavior, Validation, Related features, Related files, Tests, Edge cases, Known limitations, Important invariants, Design decisions, Things that must not be broken** (the two earlier research passes used a slightly different section order/naming for the same content — treat section names as equivalent, e.g. "Internal architecture" ≈ "Architecture", "Relevant utilities" folds into "Data flow").
+
+## `onboarding/` — read this first if you're new
+
+[`README.md`](onboarding/README.md) is the single, deliberately short first-day file — what the product is, the one rule that matters most (`.claude/` over stale docs, source over docs when they disagree), local setup commands, how the development/knowledge-sync workflow operates, and the handful of things that trip up a new developer immediately (the `__tests__/` exclusion bug, Claude never self-verifying UI in a browser, the Command-pattern-only mutation rule). It exists specifically to reduce onboarding time and human knowledge-transfer — this project's stated reason for having `.claude/` at all — and stays short by linking into the rest of this tree rather than restating it.
 
 ## `project/` — always-relevant reference (read these first, every session)
 
@@ -48,7 +53,7 @@ All 38 feature documents in `features/` follow the identical template and are tr
 
 ## `skills/` — how to approach a recurring kind of task (10 skills)
 
-Skills encode **how** to work; everything else in `.claude/` encodes **what** the project contains. Each skill specializes `workflows/development.md`'s 19-step process for one recurring task shape, and points into the knowledge base rather than restating it. See [skills/README.md](skills/README.md) for the full design rationale, including which categories (code review, performance, per-feature skills) were deliberately *not* given a dedicated skill and why.
+Skills encode **how** to work; everything else in `.claude/` encodes **what** the project contains. Each skill specializes `workflows/development.md`'s 21-step process for one recurring task shape, and points into the knowledge base rather than restating it. See [skills/README.md](skills/README.md) for the full design rationale, including which categories (code review, performance, per-feature skills) were deliberately *not* given a dedicated skill and why.
 
 | Skill | Use for |
 |---|---|
@@ -294,8 +299,8 @@ Each file contains multiple numbered decision records, each following the same t
 
 | File | Use when you need to... |
 |---|---|
-| [knowledge-maintenance.md](workflows/knowledge-maintenance.md) | **The detailed, mechanical process for deciding whether and how to update `.claude/` after a change** — the materiality test, 10 trigger questions, per-category (overview/architecture/features/rules/decisions/workflows/skills/terminology) update guidance, a step-by-step procedure, and the copy-paste decision-record template. Run this at the close of any non-trivial task; invoked by the `knowledge-maintenance` skill. |
-| [development.md](workflows/development.md) | **The standard process for any task in this repo** — bug fix, feature, UI change, refactor, perf, SCXML/state-machine change, validation change, test change, config change, integration change, or doc change. The 19-step workflow (understand → investigate → plan → implement → verify → update knowledge → summarize), with a task-type adaptation table and a quick-reference checklist. Start here for anything non-trivial. |
+| [knowledge-maintenance.md](workflows/knowledge-maintenance.md) | **The detailed, mechanical process for deciding whether and how to update `.claude/` after a change** — the materiality test, 11 trigger questions (incl. onboarding), per-category (overview/architecture/features/rules/decisions/workflows/skills/terminology/onboarding) update guidance, how to detect and resolve doc-vs-code conflicts, how to avoid duplicating knowledge across files, a step-by-step procedure, and the copy-paste decision-record template. Run this at the close of any non-trivial task; invoked by the `knowledge-maintenance` skill. |
+| [development.md](workflows/development.md) | **The standard process for any task in this repo** — bug fix, feature, UI change, refactor, perf, SCXML/state-machine change, validation change, test change, config change, integration change, or doc change. The 21-step workflow (understand → investigate → plan → implement → verify → **knowledge impact analysis → update knowledge → review the doc diff → verify docs match final code** → summarize), with a phase overview, a task-type adaptation table, and a quick-reference checklist. Start here for anything non-trivial. |
 | [adding-a-command.md](workflows/adding-a-command.md) | Add a new undoable SCXML mutation |
 | [adding-a-validation-rule.md](workflows/adding-a-validation-rule.md) | Add or extend a validator check |
 | [adding-a-side-panel.md](workflows/adding-a-side-panel.md) | Add a new panel to the single-panel-slot system |
