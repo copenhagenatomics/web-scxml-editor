@@ -14,7 +14,7 @@ Let a user pick one or more states and/or one transition as the target of subseq
 
 ## UI behavior
 
-Selected states get a visual highlight (via `node.selected`/style, not ReactFlow's default selection outline necessarily — verify exact styling in `scxml-state-node.tsx` if pixel-perfect behavior matters). Selected transitions show waypoint handles (if any waypoints exist) and highlight their path.
+Selected states get a visual highlight (via `node.selected`/style, not ReactFlow's default selection outline necessarily — verify exact styling in `scxml-state-node.tsx` if pixel-perfect behavior matters). Selected transitions show waypoint handles (if any waypoints exist), highlight their path with a colored stroke + drop-shadow, and also apply the same drop-shadow to the edge's label pill (`scxml-transition-edge.tsx`) — both shadows are theme-aware (a brighter/lighter shadow in dark mode, a darker one in light mode, since a flat black shadow is invisible against a dark canvas) rather than a single fixed color.
 
 ## Internal architecture
 
@@ -27,7 +27,7 @@ Selected states get a visual highlight (via `node.selected`/style, not ReactFlow
 
 ## Relevant components
 
-`src/components/diagram/visual-diagram.tsx` (all selection logic), `src/components/diagram/multi-select-toolbar.tsx` (appears at 2+ selected), `src/components/diagram/nodes/scxml-state-node.tsx` (reads `selected` prop to show `NodeResizer`), `src/components/diagram/edges/scxml-transition-edge.tsx` (reads `selected` to show waypoint handles).
+`src/components/diagram/visual-diagram.tsx` (all selection logic), `src/components/diagram/multi-select-toolbar.tsx` (appears at 2+ selected), `src/components/diagram/nodes/scxml-state-node.tsx` (reads `selected` prop to show `NodeResizer`), `src/components/diagram/edges/scxml-transition-edge.tsx` (reads `selected` to show waypoint handles and to apply the label's theme-aware selection shadow, via its own `useIsDark()` call).
 
 ## Relevant state/store
 
@@ -68,6 +68,7 @@ None.
 
 ## Important edge cases
 
+- The label's `foreignObject` in `scxml-transition-edge.tsx` uses `overflow: hidden` and is sized close to the pill's own content width — a `boxShadow` on the pill would otherwise get clipped on the left/right (vertical clipping was less visible since the box has more height headroom than width headroom). `LABEL_SHADOW_MARGIN` pads the `foreignObject`'s width/height (with `x`/`y` shifted to keep the pill centered) specifically to give the selection shadow room to render.
 - A marquee drag that starts on empty canvas but happens to end over a node does not accidentally trigger that node's own click handler — `marqueeStartedRef` and ReactFlow's own selection-vs-click event separation prevent this, but it's a genuinely fragile interaction between two different selection mechanisms coexisting in one component.
 - Clicking a different single state while a multi-selection is active **replaces** the entire selection with just that one state (does not add to or clear-and-reselect only that one within the existing set) — Ctrl/Cmd must be held to extend an existing multi-selection.
 
