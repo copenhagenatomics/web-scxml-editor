@@ -48,6 +48,32 @@ describe('editor-store setFileInfo normalization', () => {
     });
     expect(useEditorStore.getState().content).toContain('<parallel');
   });
+
+  it('keeps fileInfo.content/size in sync with the normalized buffer, not the raw upload', () => {
+    useEditorStore.getState().setFileInfo({
+      name: 'test.scxml',
+      size: XML_TWO_INITIAL_GROUPS.length,
+      lastModified: new Date(0),
+      content: XML_TWO_INITIAL_GROUPS,
+    });
+    const { content, fileInfo } = useEditorStore.getState();
+    expect(fileInfo?.content).toBe(content);
+    expect(fileInfo?.size).toBe(content.length);
+  });
+
+  it('does not mark the document dirty when re-normalizing content unchanged since load', () => {
+    useEditorStore.getState().setFileInfo({
+      name: 'test.scxml',
+      size: XML_TWO_INITIAL_GROUPS.length,
+      lastModified: new Date(0),
+      content: XML_TWO_INITIAL_GROUPS,
+    });
+    const loadedContent = useEditorStore.getState().content;
+    // Simulate the debounced "commit" pass that re-normalizes the current
+    // buffer after typing pauses (see page.tsx's normalizeCommitTimerRef).
+    useEditorStore.getState().setContent(loadedContent, { immediate: true });
+    expect(useEditorStore.getState().isDirty).toBe(false);
+  });
 });
 
 describe('editor-store focusTarget', () => {

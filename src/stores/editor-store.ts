@@ -96,8 +96,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setFileInfo: (fileInfo: FileInfo | null) => {
     const normalized = fileInfo ? normalizeContent(fileInfo.content) : '';
+    // Keep fileInfo.content/size in sync with the normalized buffer so the
+    // dirty-tracking baseline in setContent() compares against what's
+    // actually loaded, not the pre-normalization original.
+    const normalizedFileInfo = fileInfo ? { ...fileInfo, content: normalized, size: normalized.length } : null;
     set({
-      fileInfo,
+      fileInfo: normalizedFileInfo,
       content: normalized,
       isDirty: false,
       errors: []
