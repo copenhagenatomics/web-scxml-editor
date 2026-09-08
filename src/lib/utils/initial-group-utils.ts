@@ -15,15 +15,47 @@ import type {
   InitialElement,
 } from "@/types/scxml";
 import { parseStateIdList } from "@/lib/validators/validator-utils";
+import { AUTO_PARALLEL_MARKER, AUTO_REGION_MARKER } from "./parallel-group-markers";
 
 export type ContainerElement = SCXMLElement | StateElement;
 
-/** Direct child <state> elements of a container (root scxml, or a compound state). */
+function asArray<T>(v: T | T[] | undefined): T[] {
+  if (!v) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+/**
+ * Direct child <state> elements of a container (root scxml, or a compound
+ * state), transparently unwrapping any auto-wrapped <parallel> child (see
+ * parallel-group-normalization.ts) so a flattened member is still treated
+ * as this container's own direct child for every initial-group purpose
+ * below — exactly as it was before wrapping. A hand-authored <parallel>
+ * (no viz:auto-parallel marker) is left alone; only its content is not
+ * flattened in here.
+ */
 export function getDirectChildStates(
   container: ContainerElement,
 ): StateElement[] {
-  if (!container.state) return [];
-  return Array.isArray(container.state) ? container.state : [container.state];
+  // Copy, never reuse container.state's own array reference — this function
+  // is called many times per single check (findParentContainer's recursive
+  // search, getInitialIds, getSiblingEdges all call it again on the same
+  // container), and pushing flattened parallel members directly onto the
+  // shared array would permanently corrupt the document a little more with
+  // every call.
+  const result = [...asArray(container.state)];
+
+  asArray((container as any).parallel).forEach((parallel: any) => {
+    if (parallel[AUTO_PARALLEL_MARKER] !== "true") return;
+    asArray(parallel.state).forEach((region: any) => {
+      if (region[AUTO_REGION_MARKER] === "true") {
+        result.push(...asArray(region.state));
+      } else {
+        result.push(region);
+      }
+    });
+  });
+
+  return result;
 }
 
 /**
@@ -77,6 +109,22 @@ function getInitialElementTargetIds(
  * representation SCXML allows: the `initial` attribute (space-separated
  * list) and/or the `<initial>` child element (older, single-target form).
  * Both are unioned since either can independently mark a state Initial.
+ *
+ * Once a container has been auto-wrapped (2+ Initial-marked work trees),
+ * its own `@_initial` attribute normally names the synthetic <parallel> id
+ * instead of any real child — that steady-state case is recovered
+ * separately below, straight from the wrapper's own structure (a bare
+ * region's own id, or a multi-member auto-region's own @_initial), the same
+ * recovery parallel-group-normalization.ts's buildLogicalView performs when
+ * deciding whether to re-wrap.
+ *
+ * That structural recovery is only ever a *fallback*, used when `@_initial`
+ * doesn't already resolve to real ids on its own — e.g. right after
+ * ToggleInitialStateCommand writes a real, already-updated token list onto
+ * `@_initial` but before the next normalization pass has restructured the
+ * still-wrapped <parallel> to match. In that intermediate state, a bare
+ * region's mere physical presence is stale evidence, not proof it's still
+ * Initial — `@_initial` naming real ids is authoritative over it.
  */
 export function getInitialIds(container: ContainerElement): Set<string> {
   const childIds = new Set(
@@ -84,13 +132,33 @@ export function getInitialIds(container: ContainerElement): Set<string> {
   );
 
   const result = new Set<string>();
+  let attributeResolvedRealIds = false;
   const raw = (container as any)["@_initial"] as string | undefined;
   if (raw) {
-    parseStateIdList(raw, childIds).forEach((id) => result.add(id));
+    parseStateIdList(raw, childIds).forEach((id) => {
+      if (childIds.has(id)) {
+        result.add(id);
+        attributeResolvedRealIds = true;
+      }
+    });
   }
-  getInitialElementTargetIds(container, childIds).forEach((id) =>
-    result.add(id),
-  );
+  getInitialElementTargetIds(container, childIds).forEach((id) => {
+    result.add(id);
+    attributeResolvedRealIds = true;
+  });
+
+  if (attributeResolvedRealIds) return result;
+
+  asArray((container as any).parallel).forEach((parallel: any) => {
+    if (parallel[AUTO_PARALLEL_MARKER] !== "true") return;
+    asArray(parallel.state).forEach((region: any) => {
+      if (region[AUTO_REGION_MARKER] === "true") {
+        if (region["@_initial"]) result.add(region["@_initial"]);
+      } else {
+        result.add(region["@_id"]);
+      }
+    });
+  });
 
   return result;
 }
@@ -233,7 +301,6 @@ export function wouldConflictIfMarkedInitial(
   scxmlDoc: SCXMLDocument,
   stateId: string,
 ): { blocked: boolean; reason?: string } {
-  debugger;
   const container = findParentContainer(scxmlDoc, stateId);
   if (!container) return { blocked: false };
 

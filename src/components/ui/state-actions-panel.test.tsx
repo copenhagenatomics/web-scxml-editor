@@ -116,6 +116,56 @@ describe('StateActionsPanel reaction ordering', () => {
   });
 });
 
+describe('StateActionsPanel onexit tab visibility', () => {
+  it('hides the onexit tab when the state has no onexit actions', () => {
+    renderPanel();
+
+    expect(screen.queryByText(/^onexit/)).not.toBeInTheDocument();
+  });
+
+  it('shows the onexit tab when the state has onexit actions', () => {
+    renderPanel({
+      exitActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    expect(screen.getByText(/^onexit/)).toBeInTheDocument();
+  });
+
+  it('falls back to onentry when switching to a state with no onexit actions while onexit was active', () => {
+    const { rerender } = renderPanel({
+      stateId: 'StateA',
+      exitActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    fireEvent.click(screen.getByText(/^onexit/));
+    expect(screen.getByText(/^onexit/)).toHaveClass('text-primary');
+
+    // Same component instance, new stateId with an empty exitActions list —
+    // exactly how VisualDiagram drives this panel when the user selects a
+    // different state on the canvas.
+    rerender(
+      <StateActionsPanel
+        isVisible
+        onClose={noop}
+        stateId='StateB'
+        entryActions={[]}
+        exitActions={[]}
+        internalEventActions={[]}
+        scxmlContent='<scxml xmlns="http://www.w3.org/2005/07/scxml"><state id="StateB"/></scxml>'
+        stateType='simple'
+        isInitial={false}
+        canMarkInitial
+        onToggleInitial={noop}
+        onApply={noop}
+        onApplyReactions={noop}
+      />
+    );
+
+    expect(screen.queryByText(/^onexit/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^onentry/)).toHaveClass('text-primary');
+  });
+});
+
 describe('StateActionsPanel new-channel suggestions', () => {
   it('offers a "(new channel)" suggestion for an unmatched this_-prefixed location', () => {
     renderPanel();
@@ -164,6 +214,7 @@ describe('StateActionsPanel new-channel suggestions', () => {
     const onNewChannel = vi.fn();
     renderPanel({
       entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+      exitActions: [{ type: 'assign', location: 'existingExit', expr: '9' }],
       onApply,
       onNewChannel,
     });
@@ -179,7 +230,7 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(onNewChannel).toHaveBeenCalledWith('this_channel', {
       kind: 'actions',
       entryActions: ['assign|a|1'],
-      exitActions: ['assign|this_channel|0'],
+      exitActions: ['assign|existingExit|9', 'assign|this_channel|0'],
     });
     expect(onApply).not.toHaveBeenCalled();
   });
@@ -274,6 +325,7 @@ describe('StateActionsPanel new-channel suggestions', () => {
     const onNewChannel = vi.fn();
     renderPanel({
       entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+      exitActions: [{ type: 'assign', location: 'existingExit', expr: '9' }],
       onApply,
       onNewChannel,
     });
@@ -288,7 +340,7 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(onNewChannel).toHaveBeenCalledWith('this_new_thing', {
       kind: 'actions',
       entryActions: ['assign|a|1'],
-      exitActions: [],
+      exitActions: ['assign|existingExit|9'],
     });
     expect(onApply).not.toHaveBeenCalled();
   });
@@ -558,12 +610,16 @@ describe('StateActionsPanel paste action', () => {
       kind: 'action',
       row: { type: 'assign', location: 'copied', expr: '42' },
     });
-    renderPanel({ onApply, entryActions: [{ type: 'assign', location: 'a', expr: '1' }] });
+    renderPanel({
+      onApply,
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+      exitActions: [{ type: 'assign', location: 'existingExit', expr: '9' }],
+    });
 
     fireEvent.click(screen.getByText(/onexit/));
     fireEvent.click(screen.getByTitle('Paste action'));
 
-    expect(onApply).toHaveBeenCalledWith(['assign|a|1'], ['assign|copied|42']);
+    expect(onApply).toHaveBeenCalledWith(['assign|a|1'], ['assign|existingExit|9', 'assign|copied|42']);
   });
 
   it('pastes the same copied action twice, producing two independent rows', () => {

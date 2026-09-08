@@ -6,7 +6,7 @@ Let a user edit a state's behavioral content — what happens on entry, what hap
 
 ## User behavior
 
-- Clicking a state (single click, not double) opens this panel scoped to that state, with three tabs: **onentry**, **onexit**, **event reactions**.
+- Clicking a state (single click, not double) opens this panel scoped to that state, with up to three tabs: **onentry**, **onexit**, **event reactions**. The **onexit** tab is hidden whenever the state has zero onexit actions (`localExit.length === 0`) — onentry and event reactions are always shown. There is no in-panel affordance to add a *first* onexit action once hidden; a user who wants one has to switch to the Code tab and hand-write the `<onexit>` element, after which the tab reappears. If `activeTab` is `'onexit'` and `localExit` empties out — the last row is deleted, or a state switch lands on a state with no onexit actions while onexit was the active tab — the panel falls back to `'onentry'` rather than leaving `activeTab` pointed at a tab with no visible button.
 - Each tab lists existing action rows; clicking a row opens it for inline editing; "+" opens a blank inline form to add a new one.
 - Rows can be **drag-reordered** (grip handle), **copied** (clipboard icon, cross-tab-type-aware — actions and reactions have separate clipboards), and **pasted** (only enabled when a clipboard entry of the matching kind exists).
 - The panel also hosts the **"Initial State" checkbox** for simple/compound states — checking it can be blocked (disabled, with an explanatory tooltip) if doing so would merge two Initial State groups (see `initial-state-groups.md`); unchecking is always allowed.

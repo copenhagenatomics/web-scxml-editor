@@ -12,6 +12,12 @@ import { computeAdaptiveSpacing } from '@/lib/layout/adaptive-spacing';
 import { computeHubCentroidNudges } from '@/lib/layout/hub-centroid-nudge';
 import { shouldWrapLevel } from '@/lib/layout/chain-wrapping';
 import { parseStateIdList } from '@/lib/validators/validator-utils';
+import {
+  computeParallelGroupBBoxes,
+  computeRegionSeparationTranslations,
+  type NodeRect,
+} from '@/lib/layout/parallel-group-bbox';
+import type { AutoParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
 import type { StateRegistryEntry } from './state-registry';
 
 /**
@@ -78,6 +84,150 @@ export function positionHistoryStates(
       height: wrapperHeight,
     };
   });
+}
+
+/**
+ * Pulls each region of every auto-wrapped Initial-state group into its own
+ * contiguous, non-overlapping horizontal band. The flat, per-level layout
+ * `applyDefaultELKLayout` produces has no notion of "region" — a region's
+ * members can end up interleaved with, or even fully sandwiched inside,
+ * another region's x-span, which makes a single straight divider line
+ * (see computeParallelGroupBBoxes/ParallelRegionDividerOverlay) impossible
+ * to place correctly no matter how its midpoint is computed.
+ *
+ * Mutates node positions in place (x only — y is left untouched). Must run
+ * after layout has assigned every member node its position, and before
+ * computeParallelGroupWrapperNodes computes the wrapper/divider geometry
+ * from those positions.
+ */
+export function separateParallelRegions(
+  allNodes: HierarchicalNode[],
+  groups: AutoParallelGroupInfo[]
+): void {
+  if (groups.length === 0) return;
+
+  const nodeRects = new Map<string, NodeRect>();
+  allNodes.forEach((n) => {
+    const data = n.data as any;
+    nodeRects.set(n.id, {
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+      width: data?.width || 160,
+      height: data?.height || 80,
+    });
+  });
+
+  const translations = computeRegionSeparationTranslations(groups, nodeRects);
+  if (translations.size === 0) return;
+
+  allNodes.forEach((n) => {
+    const dx = translations.get(n.id);
+    if (dx) {
+      n.position = { ...n.position, x: n.position.x + dx };
+    }
+  });
+}
+
+/**
+ * Flags every real member node of every auto-wrapped Initial-state group
+ * with `data.isParallelGroupMember = true`. Consumed downstream (see
+ * resolveEnhancedNodePosition in visual-diagram.tsx) so a node's saved
+ * viz:xywh position — normally given priority so a manually-placed node
+ * never "jumps" — is never re-applied on top of this converter's own
+ * position for a group member, which would silently undo
+ * separateParallelRegions' work the moment the member's *old*, pre-grouping
+ * position happened to already be saved.
+ */
+export function markParallelGroupMembers(
+  allNodes: HierarchicalNode[],
+  groups: AutoParallelGroupInfo[]
+): void {
+  if (groups.length === 0) return;
+
+  const memberIds = new Set<string>();
+  for (const group of groups) {
+    for (const region of group.regions) {
+      for (const id of region.memberIds) memberIds.add(id);
+    }
+  }
+  if (memberIds.size === 0) return;
+
+  allNodes.forEach((n) => {
+    if (memberIds.has(n.id)) {
+      (n.data as any).isParallelGroupMember = true;
+    }
+  });
+}
+
+/**
+ * Synthesizes one "Parallel State" wrapper node per auto-wrapped group (see
+ * collectAutoParallelGroups), sized/positioned from the union bounding box
+ * of its already-laid-out flattened member nodes. Never drillable/selectable
+ * as a state in its own right — no visible border/background/label at all
+ * (see ParallelGroupWrapperNode); the only visual cue is the full-height
+ * divider lines drawn separately by ParallelRegionDividerOverlay.
+ *
+ * pointer-events:auto here means the whole node area is a drag zone
+ * (`dragHandle` targets the entire node, not just a small sub-element), so
+ * the group can be grabbed from any empty space within its bounds and
+ * dragged as a unit — visual-diagram.tsx translates every member node by
+ * the same delta, since there's no real React Flow parent-child
+ * relationship to move them automatically. Real member nodes still render
+ * at the same flattened level as before wrapping (see
+ * collectEffectiveStateChildren in state-registry.ts) as separate, later-
+ * painted elements, so a click that actually lands on a member reaches it
+ * first — this relies on the wrapper node being inserted FIRST into the
+ * node array by the caller (scxml-to-xstate.ts uses unshift, not push), so
+ * it's earliest in DOM order and therefore paints below every member node
+ * at the tied z-index:0 stacking level.
+ *
+ * Run after normal layout has positioned every node.
+ */
+export function computeParallelGroupWrapperNodes(
+  allNodes: HierarchicalNode[],
+  groups: AutoParallelGroupInfo[]
+): HierarchicalNode[] {
+  const nodeRects = new Map<string, NodeRect>();
+  allNodes.forEach((n) => {
+    const data = n.data as any;
+    nodeRects.set(n.id, {
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+      width: data?.width || 160,
+      height: data?.height || 80,
+    });
+  });
+
+  const boxes = computeParallelGroupBBoxes(groups, nodeRects);
+
+  return boxes.map(
+    (box) =>
+      ({
+        id: box.parallelId,
+        type: 'scxmlParallelGroupWrapper',
+        position: { x: box.x, y: box.y },
+        parentId: box.containerId ?? undefined,
+        depth: 0,
+        selectable: false,
+        draggable: true,
+        dragHandle: '.parallel-group-drag-handle',
+        connectable: false,
+        zIndex: 0,
+        style: { width: box.width, height: box.height, zIndex: 0, pointerEvents: 'auto' },
+        data: {
+          label: box.parallelId,
+          stateType: 'parallel',
+          isParallelGroupWrapper: true,
+          width: box.width,
+          height: box.height,
+          memberIds: box.regions.flatMap((r) => r.memberIds),
+          regions: box.regions.map((r) => ({ memberIds: r.memberIds })),
+          dividerLines: box.dividerLines,
+        },
+      }) as unknown as HierarchicalNode
+  );
 }
 
 /**
@@ -296,6 +446,42 @@ export function calculateHierarchicalPosition(
 }
 
 /**
+ * Recovers Initial status for a state flattened out of an auto-wrapped
+ * <parallel viz:auto-parallel="true"> child of `container` (see
+ * src/lib/utils/parallel-group-normalization.ts and
+ * collectEffectiveStateChildren in state-registry.ts) — once wrapped, the
+ * container's own @_initial names the <parallel>'s id, not any member's id
+ * anymore, so the normal @_initial / <initial> checks above no longer see
+ * it. A member is Initial when it's the sole state of a bare region, or the
+ * @_initial target of a multi-member viz:auto-region wrapper.
+ */
+function isInitialViaAutoParallel(
+  stateId: string,
+  container: any,
+  getAttribute: (element: any, attrName: string) => string | undefined,
+  getElements: (parent: any, elementName: string) => any
+): boolean {
+  const parallels = getElements(container, 'parallel');
+  const parallelArray = parallels ? (Array.isArray(parallels) ? parallels : [parallels]) : [];
+
+  for (const parallel of parallelArray) {
+    if (getAttribute(parallel, 'viz:auto-parallel') !== 'true') continue;
+
+    const regions = getElements(parallel, 'state');
+    const regionArray = regions ? (Array.isArray(regions) ? regions : [regions]) : [];
+    for (const region of regionArray) {
+      if (getAttribute(region, 'viz:auto-region') === 'true') {
+        if (getAttribute(region, 'initial') === stateId) return true;
+      } else if (getAttribute(region, 'id') === stateId) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Check if a state is an initial state in its parent context
  */
 export function isInitialState(
@@ -335,7 +521,7 @@ export function isInitialState(
       }
     }
 
-    return false;
+    return isInitialViaAutoParallel(stateId, rootScxml, getAttribute, getElements);
   }
 
   // Find parent state and check its (possibly multiple) initial ids
@@ -362,6 +548,8 @@ export function isInitialState(
           if (stateId === target) return true;
         }
       }
+
+      return isInitialViaAutoParallel(stateId, parentInfo.state, getAttribute, getElements);
     }
   }
 

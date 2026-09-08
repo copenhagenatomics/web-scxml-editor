@@ -1,6 +1,10 @@
 import { BaseCommand, type CommandResult } from './base-command';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
-import { wouldConflictIfMarkedInitial } from '@/lib/utils/initial-group-utils';
+import {
+  wouldConflictIfMarkedInitial,
+  findParentContainer,
+  getInitialIds,
+} from '@/lib/utils/initial-group-utils';
 import {
   clearWaypointsForTouchingTransitions,
   restoreClearedWaypoints,
@@ -39,6 +43,22 @@ import {
  * too — see waypoint-invalidation.ts. This command's undo doesn't re-run
  * execute() (unlike Rename/UpdateActions/ChangeStateType), so it must
  * explicitly restore the cleared snapshot.
+ *
+ * "Direct parent" above means the *logical* container, not necessarily the
+ * state's real DOM parentElement: once 2+ Initial States get auto-wrapped
+ * into a real <parallel> (parallel-group-normalization.ts), a member's real
+ * DOM parent is that <parallel> or one of its viz:auto-region wrappers —
+ * neither of which ever carries an `initial` attribute — so this command
+ * resolves the logical container via findParentContainer (which already
+ * sees through auto-wrapping) and reads/writes ITS `initial` attribute,
+ * using getInitialIds (also auto-wrap-aware) rather than a raw attribute
+ * read to determine the current, real set of Initial ids — the raw
+ * attribute on a wrapped container names the synthetic <parallel>'s id, not
+ * any real state. The actual document restructuring (moving the toggled
+ * state in or out of the <parallel>) is left entirely to
+ * normalizeParallelGroups, which every mutation path already runs through
+ * downstream (useEditorStore.setContent) — this command only ever needs to
+ * get the `initial` attribute's real token list right.
  */
 export class ToggleInitialStateCommand extends BaseCommand {
   private previousInitialAttr?: string | null;
@@ -55,13 +75,6 @@ export class ToggleInitialStateCommand extends BaseCommand {
     );
   }
 
-  private getInitialElementTargetTokens(initialElement: Element | null): string[] {
-    if (!initialElement) return [];
-    const transition = initialElement.querySelector('transition');
-    const target = transition?.getAttribute('target') || '';
-    return target.split(/\s+/).filter(Boolean);
-  }
-
   execute(scxmlContent: string): CommandResult {
     const { doc, error } = this.parseXML(scxmlContent);
     if (!doc) {
@@ -69,28 +82,50 @@ export class ToggleInitialStateCommand extends BaseCommand {
     }
 
     const stateElement = this.findStateElement(doc, this.stateId);
-    if (!stateElement || !stateElement.parentElement) {
+    if (!stateElement) {
       return this.createFailureResult(
         `State element not found: ${this.stateId}`,
         scxmlContent
       );
     }
-    const parent = stateElement.parentElement;
+
+    const parseResult = new SCXMLParser().parse(scxmlContent);
+    if (!parseResult.success || !parseResult.data) {
+      return this.createFailureResult(
+        parseResult.errors?.[0]?.message || 'Failed to parse XML for initial-group analysis',
+        scxmlContent
+      );
+    }
+    const scxmlDoc = parseResult.data;
+
+    const logicalContainer = findParentContainer(scxmlDoc, this.stateId);
+    if (!logicalContainer) {
+      return this.createFailureResult(
+        `Could not resolve the container for state: ${this.stateId}`,
+        scxmlContent
+      );
+    }
+    const containerId = (logicalContainer as any)['@_id'] as string | undefined;
+    const parent = containerId ? this.findStateElement(doc, containerId) : doc.documentElement;
+    if (!parent) {
+      return this.createFailureResult(
+        `Container element not found: ${containerId}`,
+        scxmlContent
+      );
+    }
 
     const initialElement = this.findInitialElement(parent);
-    const attrTokens = (parent.getAttribute('initial') || '').split(/\s+/).filter(Boolean);
-    const elementTokens = this.getInitialElementTargetTokens(initialElement);
-    const mergedTokens = Array.from(new Set([...attrTokens, ...elementTokens]));
+    const currentIds = getInitialIds(logicalContainer);
 
     this.previousInitialAttr = parent.hasAttribute('initial')
       ? parent.getAttribute('initial')
       : null;
     this.previousInitialElement = initialElement;
 
-    const isCurrentlyInitial = mergedTokens.includes(this.stateId);
+    const isCurrentlyInitial = currentIds.has(this.stateId);
 
     if (isCurrentlyInitial) {
-      const updated = mergedTokens.filter((t) => t !== this.stateId);
+      const updated = [...currentIds].filter((id) => id !== this.stateId);
       if (initialElement) parent.removeChild(initialElement);
       if (updated.length > 0) {
         parent.setAttribute('initial', updated.join(' '));
@@ -98,18 +133,15 @@ export class ToggleInitialStateCommand extends BaseCommand {
         parent.removeAttribute('initial');
       }
     } else {
-      const parseResult = new SCXMLParser().parse(scxmlContent);
-      if (parseResult.success && parseResult.data) {
-        const conflict = wouldConflictIfMarkedInitial(parseResult.data, this.stateId);
-        if (conflict.blocked) {
-          return this.createFailureResult(
-            conflict.reason || `Cannot mark '${this.stateId}' as an Initial State.`,
-            scxmlContent
-          );
-        }
+      const conflict = wouldConflictIfMarkedInitial(scxmlDoc, this.stateId);
+      if (conflict.blocked) {
+        return this.createFailureResult(
+          conflict.reason || `Cannot mark '${this.stateId}' as an Initial State.`,
+          scxmlContent
+        );
       }
       if (initialElement) parent.removeChild(initialElement);
-      parent.setAttribute('initial', [...mergedTokens, this.stateId].join(' '));
+      parent.setAttribute('initial', [...currentIds, this.stateId].join(' '));
     }
 
     this.clearedWaypoints = clearWaypointsForTouchingTransitions(doc, this.stateId);

@@ -11,6 +11,7 @@ import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
 import type { ValidationError } from '@/types/common';
 import { Download, Eye, Github, MoreVertical, Upload as UploadIcon } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { CodeEditorPane } from './_components/code-editor-pane';
 import { VisualEditorPane } from './_components/visual-editor-pane';
@@ -30,6 +31,12 @@ export default function Home() {
   const hostErrors = useHostAPIStore(state => state.hostErrors);
   const requestedValidationTab = useHostAPIStore(state => state.requestedValidationTab);
   const { setRequestedValidationTab } = useHostAPIStore();
+  // Host-registered commands opted into rendering inside this "More options" menu
+  // (placement: 'menu') rather than as their own toolbar button.
+  const menuCommands = useHostAPIStore(
+    useShallow(state => state.commands.filter(cmd => cmd.placement === 'menu'))
+  );
+  const executeCommand = useHostAPIStore(state => state.executeCommand);
 
   // --- Stable instances ---
   const historyManager = useMemo(() => HistoryManager.getInstance(), []);
@@ -49,6 +56,13 @@ export default function Home() {
   // --- Refs ---
   const editorRef = useRef<XMLEditorRef>(null);
   const pendingNavigateRef = useRef<{ line: number; column: number } | null>(null);
+  const normalizeCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (normalizeCommitTimerRef.current) clearTimeout(normalizeCommitTimerRef.current);
+    };
+  }, []);
 
   // --- Derived ---
   const totalErrors = useMemo(
@@ -65,8 +79,19 @@ export default function Home() {
   // --- Handlers ---
   const handleContentChange = useCallback(
     (newContent: string) => {
-      setContent(newContent);
+      // Update immediately, un-normalized, so live preview/validation keep
+      // up with every keystroke without rewriting the buffer under the
+      // user's cursor. The auto-<parallel>-wrap normalization only commits
+      // once typing pauses, piggybacking on the same 500ms debounce boundary
+      // trackTextEdit already uses for history entries.
+      setContent(newContent, { immediate: false });
       if (!isUpdatingFromHistory) historyManager.trackTextEdit(newContent);
+
+      if (normalizeCommitTimerRef.current) clearTimeout(normalizeCommitTimerRef.current);
+      normalizeCommitTimerRef.current = setTimeout(() => {
+        normalizeCommitTimerRef.current = null;
+        setContent(useEditorStore.getState().content, { immediate: true });
+      }, 500);
     },
     [setContent, historyManager, isUpdatingFromHistory]
   );
@@ -182,6 +207,22 @@ export default function Home() {
                   Download
                 </button>
               )}
+              {menuCommands.map(cmd => (
+                <button
+                  key={cmd.id}
+                  onClick={() => { executeCommand(cmd.id); setIsMoreMenuOpen(false); }}
+                  disabled={cmd.isExecuting}
+                  title={cmd.tooltip}
+                  className='w-full flex items-center gap-3 px-4 py-2 text-sm text-default hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                >
+                  {cmd.isExecuting ? (
+                    <span className='h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block' />
+                  ) : (
+                    <Download className='h-4 w-4 text-muted' />
+                  )}
+                  {cmd.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -192,6 +233,7 @@ export default function Home() {
       activePanel, setActivePanel, totalErrors, totalWarnings, hasErrors, hasWarnings,
       moreMenuRef, isMoreMenuOpen, setIsMoreMenuOpen,
       handleNewFileUpload, handleDownloadClean, handleDownloadWithVisualData, content,
+      menuCommands, executeCommand,
     ]
   );
 

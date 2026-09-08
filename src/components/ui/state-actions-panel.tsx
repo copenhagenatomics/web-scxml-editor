@@ -335,6 +335,16 @@ export function StateActionsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateId]);
 
+  // The onexit tab is only shown while onexit actions exist (see tab bar
+  // below); if it empties out — the last row was removed, or a state switch
+  // landed on an onexit tab that has nothing in it — fall back to onentry
+  // rather than leaving activeTab pointed at a tab with no visible button.
+  React.useEffect(() => {
+    if (activeTab === 'onexit' && localExit.length === 0) {
+      setActiveTab('onentry');
+    }
+  }, [activeTab, localExit.length]);
+
   // Cleanup blur timer on unmount
   React.useEffect(() => {
     return () => {
@@ -885,7 +895,9 @@ export function StateActionsPanel({
 
         {/* Tabs */}
         <div className='flex border-b border-default flex-shrink-0'>
-          {(['onentry', 'onexit', 'reactions'] as Tab[]).map((tab) => (
+          {(['onentry', 'onexit', 'reactions'] as Tab[])
+            .filter((tab) => tab !== 'onexit' || localExit.length > 0)
+            .map((tab) => (
             <button
               key={tab}
               onClick={() => {

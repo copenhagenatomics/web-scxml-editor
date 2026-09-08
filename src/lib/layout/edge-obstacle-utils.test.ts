@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getHandleAnchor, parseHandleId, type Rect } from './edge-obstacle-utils';
+import { getHandleAnchor, isRoutingObstacleNode, parseHandleId, type Rect } from './edge-obstacle-utils';
 
 const rect: Rect = { x: 0, y: 0, width: 100, height: 50 };
 
@@ -42,5 +42,19 @@ describe('parseHandleId', () => {
   it('parses an indexed handle id', () => {
     expect(parseHandleId('top-1')).toEqual({ side: 'top', index: 1 });
     expect(parseHandleId('right-2')).toEqual({ side: 'right', index: 2 });
+  });
+});
+
+describe('isRoutingObstacleNode', () => {
+  it('is true for an ordinary state node', () => {
+    expect(isRoutingObstacleNode({ data: { label: 'A' } })).toBe(true);
+  });
+
+  it('is true for a node with no data at all', () => {
+    expect(isRoutingObstacleNode({})).toBe(true);
+  });
+
+  it('is false for a Parallel State wrapper node — it visually surrounds its own member nodes, so treating it as an obstacle makes routing between them impossible', () => {
+    expect(isRoutingObstacleNode({ data: { isParallelGroupWrapper: true } })).toBe(false);
   });
 });

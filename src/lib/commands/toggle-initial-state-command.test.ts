@@ -172,6 +172,46 @@ describe('ToggleInitialStateCommand', () => {
     });
   });
 
+  describe('auto-wrapped <parallel> (parallel-group-normalization.ts)', () => {
+    const AUTO_HEADER =
+      '<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0"';
+
+    it('unmarks a bare-region member of an auto-wrapped root <parallel> (reproduces the reported bug: unchecking Initial State did nothing)', () => {
+      // Before the fix, ToggleInitialStateCommand read/wrote the *real DOM
+      // parent* (<parallel>, which never has an `initial` attribute) instead
+      // of the logical container (root <scxml>), so unmarking a wrapped bare
+      // region silently wrote initial="state_1" onto the <parallel> element
+      // itself — invisible, and discarded by the next normalization pass —
+      // leaving the state still marked Initial.
+      const xml = `${AUTO_HEADER} initial="__root_parallel"><parallel id="__root_parallel" viz:auto-parallel="true"><state id="main_region"/><state id="state_2"/><state id="state_1"/></parallel></scxml>`;
+      const result = new ToggleInitialStateCommand('state_1').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('initial="main_region state_2"');
+      expect(result.newContent).not.toMatch(/initial="[^"]*state_1[^"]*"/);
+    });
+
+    it('unmarks the Initial member of a multi-member auto-region, clearing the group entirely when it was the only one', () => {
+      const xml = `${AUTO_HEADER} initial="__root_parallel"><parallel id="__root_parallel" viz:auto-parallel="true"><state id="main_region_region" initial="main_region" viz:auto-region="true"><state id="main_region"><transition event="go" target="state_1"/></state><state id="state_1"/></state><state id="state_2"/></parallel></scxml>`;
+      const result = new ToggleInitialStateCommand('main_region').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('initial="state_2"');
+    });
+
+    it('marks a new sibling Initial (joining the group) when the container is already auto-wrapped', () => {
+      const xml = `${AUTO_HEADER} initial="__root_parallel"><parallel id="__root_parallel" viz:auto-parallel="true"><state id="main_region"/><state id="state_2"/></parallel><state id="state_3"/></scxml>`;
+      const result = new ToggleInitialStateCommand('state_3').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('initial="main_region state_2 state_3"');
+    });
+
+    it('refuses to mark a state Initial when it is already transitively connected to an Initial member inside a wrapped multi-member region', () => {
+      const xml = `${AUTO_HEADER} initial="__root_parallel"><parallel id="__root_parallel" viz:auto-parallel="true"><state id="main_region_region" initial="main_region" viz:auto-region="true"><state id="main_region"><transition event="go" target="state_1"/></state><state id="state_1"/></state><state id="state_2"/></parallel></scxml>`;
+      const result = new ToggleInitialStateCommand('state_1').execute(xml);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('main_region');
+    });
+  });
+
   describe('waypoint invalidation on resize', () => {
     // Marking/unmarking changes the node's rendered width for the "Initial"
     // badge. SCXMLTransitionEdge always prefers a persisted viz:waypoints

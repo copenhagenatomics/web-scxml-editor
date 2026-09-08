@@ -228,3 +228,31 @@ N/A — not an independently-made decision.
 
 ### Status
 Inferred behavior.
+
+---
+
+## 10. Multiple Initial-State groups (#3) are live-restructured into a real `<parallel>` element, not just displayed as if they were
+
+### Context
+Decision #3 lets multiple disconnected Initial-State work trees exist at one hierarchy level, but treats this purely as flat, unrelated siblings at the document level — it establishes the *connectivity* rule, not the *concurrency* semantics real SCXML `<parallel>` implies. A prior attempt to give this real `<parallel>`/region structure (commit `801145d`) was implemented and then reverted (`bf0ab49`).
+
+### Decision
+The moment a container has 2+ distinct Initial-marked work trees, the editor restructures the actual document (not a display-only or export-only view) into a real `<parallel>` element — one region per work tree, a single-member tree used bare, a 2+-member tree wrapped in a synthetic region `<state>`. The synthetic `<parallel>`/region elements are marked `viz:auto-parallel="true"`/`viz:auto-region="true"` so this is distinguishable from a hand-authored `<parallel>`, which is never touched. If the container later drops back below 2 groups, it is symmetrically unwrapped back to flat siblings — there is no one-way "once parallel, always parallel" ratchet.
+
+### Reason
+`docs/parallel-states-requirement.md`'s "Support for N-Parallel Machines" phase calls for genuine parallel-machine semantics, not just a visual arrangement of disconnected trees — decision #3 alone (connectivity-only) does not satisfy that on its own. The prior `801145d` attempt shows this was tried once already; per the user's explicit direction this reintroduction is deliberately scoped **narrower** than that attempt — automatic-grouping-triggered only, with the diagram kept flattened/non-drillable and no visible wrapper box, rather than a general manual "convert to parallel" feature with its own visible state box.
+
+### Constraints
+- Depends on decision #3's union-find connectivity analysis (`initial-group-utils.ts`) as its grouping input — a change to that analysis changes what triggers wrapping here too.
+- `collectEffectiveStateChildren` (`state-registry.ts`) must keep flattening an auto-wrapped `<parallel>`'s members into its container's effective child list, or the "no visible wrapper, no drill-down needed" UI requirement breaks.
+- A hand-authored `<parallel>` (no marker) must never be touched by this normalization, flattening, or wrapper-synthesis logic.
+- See `.claude/features/parallel-state-auto-grouping.md` for the full implementation (normalization algorithm, layout pipeline ordering, wrapper node, divider overlay, group-drag, region-crossing connection guard).
+
+### Alternatives
+**Directly evidenced, not inferred**: commit `801145d` implemented `<parallel>`/region structure with the group shown as its own labeled box; it was reverted in `bf0ab49`. There is also a separate, unrelated, not-yet-merged sibling branch `new-parrallel-state-design` implementing a different, *manual* region-drilldown editing view for existing `<parallel>` states — designed to coexist with this feature via the `viz:auto-parallel` marker, but not integrated as of this writing.
+
+### Evidence
+`src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/parallel-group-markers.ts`, `src/stores/editor-store.ts` (`normalizeContent`, the single choke point), `docs/parallel-states-requirement.md`, commits `801145d`/`bf0ab49`.
+
+### Status
+Accepted.

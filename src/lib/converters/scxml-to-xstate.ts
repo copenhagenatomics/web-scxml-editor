@@ -20,7 +20,11 @@ import {
   applyDefaultELKLayout,
   isInitialState,
   positionHistoryStates,
+  computeParallelGroupWrapperNodes,
+  separateParallelRegions,
+  markParallelGroupMembers,
 } from './converter-modules/layout-positioning';
+import { collectAutoParallelGroups } from '@/lib/utils/parallel-group-normalization';
 import {
   getAncestorChain,
   registerAllStates,
@@ -243,6 +247,29 @@ export class SCXMLToXStateConverter {
 
     // Apply ELK force-directed layout with viz:xywh priority
     await applyDefaultELKLayout(allNodes, edges);
+
+    // Separate auto-wrapped Initial-state group regions into non-overlapping
+    // horizontal bands (see separateParallelRegions) as early as possible —
+    // right after layout assigns positions, and before anything downstream
+    // reads or persists those positions: smart edge-handle selection below,
+    // the viz:xywh write-back further down (writeLayoutToSCXML), and the
+    // parallel-group wrapper/divider geometry synthesized later in this
+    // method all need to agree on the SAME final positions. Doing this late
+    // (only right before the wrapper synthesis) left the write-back — and
+    // therefore the persisted document — holding pre-separation positions,
+    // which is what caused the divider to reflect the corrected layout while
+    // the real state nodes kept rendering at their stale, unseparated spot.
+    const parallelGroupsForLayout = collectAutoParallelGroups({ scxml: this.rootScxml });
+    if (parallelGroupsForLayout.length > 0) {
+      separateParallelRegions(allNodes, parallelGroupsForLayout);
+      // visual-diagram.tsx independently re-reads each node's saved
+      // viz:xywh and gives it priority over whatever this converter just
+      // computed (see resolveEnhancedNodePosition) — flag every member here
+      // so that second pass knows to leave the just-separated position
+      // alone instead of silently reverting it to the member's old,
+      // pre-grouping saved position.
+      markParallelGroupMembers(allNodes, parallelGroupsForLayout);
+    }
 
     // Compute smart source/target handles for edges that have no saved viz:sourceHandle /
     // viz:targetHandle. Handles are chosen with a traffic-aware cost model: each candidate
@@ -485,6 +512,24 @@ export class SCXMLToXStateConverter {
 
     // Position history states (but allow them to also participate in sibling layout)
     positionHistoryStates(allNodes, this.stateRegistry);
+
+    // Synthesize "Parallel State" wrapper nodes around each auto-wrapped
+    // group of Initial-state work trees, now that every real member node
+    // has its final layout position (regions were already separated into
+    // non-overlapping bands right after ELK layout, above — see
+    // separateParallelRegions and its call site's comment). These are
+    // visual-only — never registered in stateRegistry, never drillable (see
+    // collectEffectiveStateChildren in state-registry.ts, which already
+    // renders the group's members flattened at this same level).
+    // Inserted FIRST (not appended) — with tied z-index, browsers break
+    // stacking ties by DOM order, so a wrapper appearing earlier in the
+    // node list paints below every member node, keeping clicks/drags on a
+    // member's own area from ever being intercepted by the wrapper's now
+    // pointer-events:auto drag zone (see ParallelGroupWrapperNode).
+    const parallelGroups = parallelGroupsForLayout;
+    if (parallelGroups.length > 0) {
+      allNodes.unshift(...computeParallelGroupWrapperNodes(allNodes, parallelGroups));
+    }
 
     // DON'T convert absolute positions to relative positions
     // We're using hierarchy navigation which removes parentId for flat rendering
