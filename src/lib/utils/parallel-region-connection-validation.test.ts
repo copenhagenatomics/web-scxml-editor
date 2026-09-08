@@ -62,6 +62,29 @@ describe('wouldCrossParallelRegions', () => {
     expect(wouldCrossParallelRegions(d, 'A1', 'B1').blocked).toBe(true);
   });
 
+  it('blocks across sibling regions of an outer parallel when the source is nested inside an inner parallel that does not itself contain the target', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'Outer',
+          state: [
+            {
+              '@_id': 'RegionA',
+              parallel: {
+                '@_id': 'Inner',
+                state: [{ '@_id': 'IA1', state: [{ '@_id': 'Src' }] }, { '@_id': 'IA2' }],
+              },
+            },
+            { '@_id': 'RegionB', state: [{ '@_id': 'Tgt' }] },
+          ],
+        },
+      } as any,
+    };
+    const result = wouldCrossParallelRegions(d, 'Src', 'Tgt');
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/Outer/);
+  });
+
   it('returns not blocked when either id does not exist in the document', () => {
     const d: SCXMLDocument = { scxml: { state: [{ '@_id': 'A' }] } as any };
     expect(wouldCrossParallelRegions(d, 'A', 'Missing').blocked).toBe(false);

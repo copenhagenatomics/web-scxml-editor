@@ -56,30 +56,37 @@ export function wouldCrossParallelRegions(
   const chainT = findAncestorChain(scxmlDoc.scxml, 'root', targetId, []);
   if (!chainS || !chainT) return { blocked: false };
 
-  const parallelIndex = [...chainS].reverse().findIndex((e) => e.kind === 'parallel');
-  if (parallelIndex === -1) return { blocked: false };
+  // Walk every <parallel> ancestor of the source, innermost first. The first
+  // one that also encloses the target is the LCCA for this pair, so its
+  // regions are the ones that matter — but if the target isn't inside a
+  // given enclosing parallel, an *outer* parallel further up the chain may
+  // still put source and target in sibling regions, so we must keep
+  // climbing rather than concluding "leaves the parallel" too early.
+  for (let i = chainS.length - 1; i >= 0; i--) {
+    if (chainS[i].kind !== 'parallel') continue;
 
-  const i = chainS.length - 1 - parallelIndex;
-  const enclosingParallel = chainS[i].element;
-  // A region is normally the intermediate ancestor entry right after the
-  // parallel — but for a bare single-member region (see
-  // parallel-group-normalization.ts), the member IS the region directly, so
-  // the chain ends at the parallel itself with no intermediate entry.
-  const sourceRegionId = i === chainS.length - 1 ? sourceId : chainS[i + 1].element['@_id'];
+    const enclosingParallel = chainS[i].element;
+    // A region is normally the intermediate ancestor entry right after the
+    // parallel — but for a bare single-member region (see
+    // parallel-group-normalization.ts), the member IS the region directly, so
+    // the chain ends at the parallel itself with no intermediate entry.
+    const sourceRegionId = i === chainS.length - 1 ? sourceId : chainS[i + 1].element['@_id'];
 
-  const j = chainT.findIndex((e) => e.element === enclosingParallel);
-  if (j === -1) {
-    // Target isn't inside this parallel at all — legal (leaves the parallel).
-    return { blocked: false };
+    const j = chainT.findIndex((e) => e.element === enclosingParallel);
+    if (j === -1) continue;
+
+    const targetRegionId = j === chainT.length - 1 ? targetId : chainT[j + 1].element['@_id'];
+
+    if (targetRegionId === sourceRegionId) {
+      return { blocked: false };
+    }
+
+    return {
+      blocked: true,
+      reason: `Cannot connect states that belong to different regions of the same parallel state ('${enclosingParallel['@_id']}').`,
+    };
   }
-  const targetRegionId = j === chainT.length - 1 ? targetId : chainT[j + 1].element['@_id'];
 
-  if (targetRegionId === sourceRegionId) {
-    return { blocked: false };
-  }
-
-  return {
-    blocked: true,
-    reason: `Cannot connect states that belong to different regions of the same parallel state ('${enclosingParallel['@_id']}').`,
-  };
+  // Target isn't inside any parallel ancestor of the source — legal.
+  return { blocked: false };
 }
