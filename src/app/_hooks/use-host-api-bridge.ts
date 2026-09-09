@@ -16,14 +16,15 @@ export function useHostAPIBridge() {
   const historyManager = useMemo(() => HistoryManager.getInstance(), []);
 
   // Anything the host reports via showFeedback('error') is operational error detail
-  // (e.g. program-generation/apply failures) meant for a developer to inspect, not toast
-  // copy — the full text goes to the persistent Error Panel, the toast stays short.
+  // (program generation, channel/event/config load, or any other host-side failure)
+  // meant for a developer to inspect, not toast copy — the full text goes to the
+  // persistent Error Panel, the toast stays short and doesn't assume which operation failed.
   // This repo's own showFeedback('error') calls (GitHub push/pull, panel saves, etc.) are
   // already short, curated strings and call the store directly, so they never pass through here.
   const hostShowFeedback = useCallback((message: string, level?: FeedbackItem['level']) => {
     if (level === 'error') {
       showErrors([{ message, level: 'error' }]);
-      showFeedback('Failed generating program. See Error Panel for details.', 'error');
+      showFeedback('Host reported an error. See Error Panel for details.', 'error');
     } else {
       showFeedback(message, level);
     }

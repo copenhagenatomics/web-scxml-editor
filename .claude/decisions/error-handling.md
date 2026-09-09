@@ -133,7 +133,7 @@ Accepted.
 The LoopControl host calls `window.ScxmlEditorAPI.showFeedback(message, 'error')` to report operational failures (observed case: an "Apply"/"Generate Program" action failing, with `message` being the raw exception text — anything from a multi-KB C# compiler dump with embedded generated-code snippets down to a single-sentence .NET `Process.Start` exception). The transient toast (`feedbackQueue`, auto-dismisses after 4s, `max-w-lg`) is unsuitable for this content regardless of its length — a user reported it rendering as an oversized, unreadable wall of text.
 
 ### Decision
-`src/app/_hooks/use-host-api-bridge.ts` wraps the host-facing `showFeedback` in a `hostShowFeedback` function (used for both the live `realApi.showFeedback` assignment and the pre-ready `_q.ops` queue replay — see decision #7 below for the queue's ordered-replay mechanism). Any call with `level === 'error'` is unconditionally split: the full, unmodified message is pushed into the persistent Host Alerts panel via `showErrors` (`useHostAPIStore.hostErrors`), and the toast itself is replaced with a fixed string, `"Failed generating program. See Error Panel for details."` — regardless of the original message's length or wording. `useHostAPIStore`'s own `showFeedback` action stays an unconditional passthrough; this repo's ~20 other `showFeedback('error', ...)` call sites (GitHub push/pull, state-actions-panel, transition-panel, config/events panels, `executeCommand`'s own catch block) all call the store directly and are unaffected.
+`src/app/_hooks/use-host-api-bridge.ts` wraps the host-facing `showFeedback` in a `hostShowFeedback` function (used for both the live `realApi.showFeedback` assignment and the pre-ready `_q.ops` queue replay — see decision #7 below for the queue's ordered-replay mechanism). Any call with `level === 'error'` is unconditionally split: the full, unmodified message is pushed into the persistent Host Alerts panel via `showErrors` (`useHostAPIStore.hostErrors`), and the toast itself is replaced with a fixed string, `"Host reported an error. See Error Panel for details."` — regardless of the original message's length, wording, or which host operation produced it (see decision #8 — this string was originally operation-specific and was generalized). `useHostAPIStore`'s own `showFeedback` action stays an unconditional passthrough; this repo's ~20 other `showFeedback('error', ...)` call sites (GitHub push/pull, state-actions-panel, transition-panel, config/events panels, `executeCommand`'s own catch block) all call the store directly and are unaffected.
 
 ### Reason
 Two more targeted approaches were tried first and both failed on real examples from this app, which is why the fix ended up at this specific boundary with no length condition:
@@ -143,7 +143,7 @@ Two more targeted approaches were tried first and both failed on real examples f
 ### Constraints
 - `hostShowFeedback` (not the store's `showFeedback`) must remain the assignment target for both `realApi.showFeedback` and the `_q.ops` queue replay in `use-host-api-bridge.ts` — reverting either to call the store's `showFeedback` directly reopens this bug.
 - Do not reintroduce a length- or content-pattern-based heuristic for deciding whether to redirect a toast — see the two failed alternatives above.
-- If the host is ever given a second reason to call `showFeedback('error', ...)` for something *other* than program generation, the fixed toast string ("Failed generating program...") would be misleading for that case — this decision assumes program generation is the sole use of host-originated error feedback, which was true at the time this was written but is not structurally enforced anywhere.
+- The fixed toast string must stay operation-agnostic (currently `"Host reported an error. See Error Panel for details."`) — see decision #8 for why an earlier, operation-specific wording ("Failed generating program...") was replaced.
 - `executeCommand`'s own `catch` block (`src/stores/host-api-store.ts`) independently does the same redirect-to-Host-Alerts pattern for a command that *throws*, using `` `${command.label} failed. See Error Panel for details.` `` instead of the fixed host-boundary string — kept as a defensive fallback for a command that violates the "catch your own errors" pattern the host currently follows, and to keep `executeCommand` failures out of the toast regardless of which layer eventually calls `showFeedback`.
 
 ### Alternatives
@@ -178,7 +178,32 @@ No rationale beyond direct correctness: the previous bucketed queue and the `hos
 The previous per-method-bucket queue (`feedback`/`hostErrors`/`clearErrors` as separate arrays/flag, replayed in a fixed hardcoded order) is the rejected prior implementation, replaced because it structurally cannot preserve call order across different methods.
 
 ### Evidence
-`src/app/layout.tsx` (inline `_q` stub), `src/app/_hooks/use-host-api-bridge.ts` (`QueuedOp`, `queue.ops.forEach`), `src/app/_hooks/use-host-api-bridge.test.ts` (ordering tests), `src/stores/host-api-store.ts` (`clearHostErrors`), `src/stores/host-api-store.test.ts`. Triggering: a GitHub Copilot automated PR review comment flagging the `requestedValidationTab` leak in the `clearErrors`-after-`showErrors` case.
+`src/lib/host-api/pre-ready-stub.ts` (`_q` stub script, embedded by `src/app/layout.tsx`), `src/app/_hooks/use-host-api-bridge.ts` (`QueuedOp`, `queue.ops.forEach`), `src/app/_hooks/use-host-api-bridge.test.ts` (ordering tests), `src/stores/host-api-store.ts` (`clearHostErrors`), `src/stores/host-api-store.test.ts`. Triggering: a GitHub Copilot automated PR review comment flagging the `requestedValidationTab` leak in the `clearErrors`-after-`showErrors` case.
+
+### Status
+Accepted.
+
+---
+
+## 8. The host-originated error toast's fixed string is operation-agnostic, not "Failed generating program"
+
+### Context
+Decision #6 originally used the fixed toast string `"Failed generating program. See Error Panel for details."`, under the assumption — noted as a known, structurally-unenforced risk in that decision's Constraints — that program generation/apply was the sole real-world use of `window.ScxmlEditorAPI.showFeedback(message, 'error')`. That assumption was already contradicted by this repo's own test suite: `use-host-api-bridge.test.ts`'s "redirects a short host error message too" test used `'Invalid channel mapping.'` as the raw error text while still asserting the "Failed generating program" toast — a channel-mapping failure, not a generation failure. `showFeedback` is a fully generic host API method (also documented as used for confirmation toasts in `events-user-actions-panel.md`/`state-actions-panel.md`), so nothing prevents a host from reporting a channel/event/config-load failure through it.
+
+### Decision
+The fixed toast string in `hostShowFeedback` (`src/app/_hooks/use-host-api-bridge.ts`) is now `"Host reported an error. See Error Panel for details."` — it no longer names a specific operation. The behavior otherwise (full message routed to `hostErrors`, fixed short toast, unconditional on level `'error'`) is unchanged from decision #6.
+
+### Reason
+Confirmed via a GitHub Copilot automated PR-review comment pointing out the test/code contradiction above, then verified against `host-api-embedding.md`'s own description of `showFeedback` as a generic API before making the fix.
+
+### Constraints
+- Do not reintroduce operation-specific wording (e.g. "generating program", "applying changes") in this fixed string — `showFeedback('error', ...)` is a generic host API call with no way to know which operation actually failed.
+
+### Alternatives
+None — the only change is the literal string; the redirect mechanism itself (decision #6) is unaffected.
+
+### Evidence
+`src/app/_hooks/use-host-api-bridge.ts` (`hostShowFeedback`), `src/app/_hooks/use-host-api-bridge.test.ts` (both the long- and short-message tests now assert the operation-agnostic string).
 
 ### Status
 Accepted.

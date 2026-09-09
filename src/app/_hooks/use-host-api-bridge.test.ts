@@ -2,6 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import { useHostAPIBridge } from './use-host-api-bridge';
 import { useHostAPIStore } from '@/stores/host-api-store';
+import { PRE_READY_STUB_SCRIPT } from '@/lib/host-api/pre-ready-stub';
+
+// Installs the actual production pre-ready stub (the same script layout.tsx embeds via
+// dangerouslySetInnerHTML) rather than hand-constructing a _q shape, so a producer/handler
+// mismatch between the stub's queued-op format and the bridge's drain logic fails here.
+function installRealPreReadyStub() {
+  new Function(PRE_READY_STUB_SCRIPT)();
+}
 
 const initialHostAPIState = useHostAPIStore.getState();
 
@@ -42,7 +50,7 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
     const { feedbackQueue, hostErrors } = useHostAPIStore.getState();
 
     expect(feedbackQueue).toHaveLength(1);
-    expect(feedbackQueue[0].message).toBe('Failed generating program. See Error Panel for details.');
+    expect(feedbackQueue[0].message).toBe('Host reported an error. See Error Panel for details.');
     expect(feedbackQueue[0].message).not.toContain(fullError);
     expect(feedbackQueue[0].level).toBe('error');
 
@@ -60,7 +68,7 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
 
     const { feedbackQueue, hostErrors } = useHostAPIStore.getState();
     expect(feedbackQueue).toHaveLength(1);
-    expect(feedbackQueue[0].message).toBe('Failed generating program. See Error Panel for details.');
+    expect(feedbackQueue[0].message).toBe('Host reported an error. See Error Panel for details.');
     expect(hostErrors).toHaveLength(1);
     expect(hostErrors[0].message).toBe('Invalid channel mapping.');
   });
@@ -94,7 +102,7 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
 
     const { feedbackQueue, hostErrors } = useHostAPIStore.getState();
     expect(feedbackQueue).toHaveLength(1);
-    expect(feedbackQueue[0].message).toBe('Failed generating program. See Error Panel for details.');
+    expect(feedbackQueue[0].message).toBe('Host reported an error. See Error Panel for details.');
     expect(hostErrors).toHaveLength(1);
     expect(hostErrors[0].message).toBe(fullError);
   });
@@ -175,6 +183,34 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
         ],
       },
     };
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(1);
+    expect(hostErrors[0].message).toBe('boom via showErrors');
+    expect(requestedValidationTab).toBe('host-alerts');
+  });
+
+  it('preserves clearErrors() -> error feedback ordering through the real pre-ready stub script', () => {
+    installRealPreReadyStub();
+    const fullError = 'boom while applying program';
+
+    window.ScxmlEditorAPI.clearErrors();
+    window.ScxmlEditorAPI.showFeedback(fullError, 'error');
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(1);
+    expect(hostErrors[0].message).toBe(fullError);
+  });
+
+  it('preserves clearErrors() -> showErrors() ordering through the real pre-ready stub script', () => {
+    installRealPreReadyStub();
+
+    window.ScxmlEditorAPI.clearErrors();
+    window.ScxmlEditorAPI.showErrors([{ message: 'boom via showErrors', level: 'error' }]);
 
     renderHook(() => useHostAPIBridge());
 

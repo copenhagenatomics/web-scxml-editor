@@ -81,6 +81,23 @@ describe('host-api-store executeCommand error handling', () => {
     expect(hostErrors).toHaveLength(0);
   });
 
+  it('normalizes a non-Error throw (e.g. a raw string) into the Error Panel message instead of losing the detail', async () => {
+    useHostAPIStore.getState().registerCommand({
+      id: 'throws-string',
+      label: 'Throws String',
+      order: 0,
+      run: () => {
+        throw 'raw string failure';
+      },
+    });
+
+    await useHostAPIStore.getState().executeCommand('throws-string');
+
+    const { hostErrors } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(1);
+    expect(hostErrors[0].message).toBe('raw string failure');
+  });
+
   it('clearHostErrors also cancels a pending Host Alerts tab request, not just the error list', () => {
     useHostAPIStore.getState().showErrors([{ message: 'boom', level: 'error' }]);
     expect(useHostAPIStore.getState().requestedValidationTab).toBe('host-alerts');
