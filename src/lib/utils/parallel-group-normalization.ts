@@ -314,9 +314,18 @@ export function collectAutoParallelGroups(scxmlDoc: SCXMLDocument): AutoParallel
             : [region['@_id']],
         }));
         result.push({ containerId, parallelId: parallel['@_id'], regions });
-      } else {
-        asArray(parallel.state).forEach((region) => walk(region, region['@_id']));
       }
+      // Recurse into every region regardless of whether this parallel is
+      // auto-wrapped or hand-authored — a region can independently grow its
+      // own nested 2+-group situation and get auto-wrapped one level deeper
+      // (mirrors normalizeContainer's unconditional region recursion during
+      // normalization). Previously this only recursed in the hand-authored
+      // (else) branch, so a nested auto-parallel living inside a region
+      // member of an already-auto-wrapped outer <parallel> was never
+      // reported here, even though normalizeParallelGroups had correctly
+      // wrapped it — leaving the diagram layer's region separation/wrapper
+      // synthesis blind to it.
+      asArray(parallel.state).forEach((region) => walk(region, region['@_id']));
     });
   }
 

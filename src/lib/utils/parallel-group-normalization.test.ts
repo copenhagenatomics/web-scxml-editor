@@ -346,6 +346,41 @@ describe('collectAutoParallelGroups', () => {
     };
     expect(collectAutoParallelGroups(d)).toEqual([]);
   });
+
+  it('finds a nested auto-parallel group living inside a region member of an outer auto-parallel (not just under a plain compound state)', () => {
+    // Regression test: collectAutoParallelGroups only recursed into a
+    // parallel's regions in the hand-authored (else) branch, skipping that
+    // recursion whenever the parallel itself was already auto-wrapped. So a
+    // nested auto-parallel group living inside one of THAT group's own
+    // region members (as opposed to nesting under an ordinary, unwrapped
+    // compound <state> — see the "nested auto-wrapped group under a
+    // compound state" test above, which never exercised this branch) was
+    // silently missed here even though normalizeParallelGroups had
+    // correctly wrapped it, leaving the diagram layer's region separation
+    // and wrapper-node synthesis blind to it.
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'main_region state_2',
+        state: [
+          { '@_id': 'main_region', transition: { '@_event': 'event', '@_target': 'state_1' } },
+          { '@_id': 'state_1' },
+          {
+            '@_id': 'state_2',
+            '@_initial': 'Inner1 Inner2',
+            state: [{ '@_id': 'Inner1' }, { '@_id': 'Inner2' }],
+          },
+        ],
+      } as any,
+    };
+
+    normalizeParallelGroups(d);
+    const groups = collectAutoParallelGroups(d);
+
+    expect(groups).toHaveLength(2);
+    const nested = groups.find((g) => g.containerId === 'state_2');
+    expect(nested).toBeDefined();
+    expect(nested!.regions.map((r) => r.memberIds).sort()).toEqual([['Inner1'], ['Inner2']]);
+  });
 });
 
 describe('hasAnyChildren', () => {
