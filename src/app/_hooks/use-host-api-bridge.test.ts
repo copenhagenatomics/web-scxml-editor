@@ -86,7 +86,7 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
       _q: {
         ready: [],
         commands: [],
-        feedback: [[fullError, 'error']],
+        ops: [{ type: 'feedback', message: fullError, level: 'error' }],
       },
     };
 
@@ -97,5 +97,48 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
     expect(feedbackQueue[0].message).toBe('Failed generating program. See Error Panel for details.');
     expect(hostErrors).toHaveLength(1);
     expect(hostErrors[0].message).toBe(fullError);
+  });
+
+  it('preserves clearErrors() -> error feedback ordering queued before React mounted', () => {
+    const fullError = 'boom while applying program';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).ScxmlEditorAPI = {
+      _q: {
+        ready: [],
+        commands: [],
+        ops: [
+          { type: 'clearErrors' },
+          { type: 'feedback', message: fullError, level: 'error' },
+        ],
+      },
+    };
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(1);
+    expect(hostErrors[0].message).toBe(fullError);
+  });
+
+  it('preserves error feedback -> clearErrors() ordering queued before React mounted', () => {
+    const fullError = 'boom while applying program';
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).ScxmlEditorAPI = {
+      _q: {
+        ready: [],
+        commands: [],
+        ops: [
+          { type: 'feedback', message: fullError, level: 'error' },
+          { type: 'clearErrors' },
+        ],
+      },
+    };
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(0);
   });
 });

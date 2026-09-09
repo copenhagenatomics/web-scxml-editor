@@ -89,30 +89,37 @@ export function useHostAPIBridge() {
       // Upgrade the stub object in place so any host reference already captured
       // (e.g. `var api = iframe.contentWindow.ScxmlEditorAPI` in a load handler)
       // automatically gets the real methods without needing to re-read the property.
+      type QueuedOp =
+        | { type: 'feedback'; message: string; level?: FeedbackItem['level'] }
+        | { type: 'showErrors'; errors: Array<{ message: string; level?: string }> }
+        | { type: 'clearErrors' };
       const queue = stub._q as {
         ready: (() => void)[];
         commands: any[];
-        feedback: [string, any][];
+        ops: QueuedOp[];
         channels?: ChannelInfo[];
         channelMappings?: ChannelMapping[];
         events?: EventEntry[];
-        hostErrors?: Array<{ message: string; level?: string }>;
-        clearErrors?: boolean;
       };
       Object.assign(stub, realApi);
       delete stub._q;
       queue.ready.forEach(cb => onReady(cb));
       queue.commands.forEach(o => registerCommand(o));
-      queue.feedback.forEach(([m, l]) => hostShowFeedback(m, l));
       if (queue.channels) useHostAPIStore.getState().setChannels(queue.channels);
       if (queue.channelMappings) useHostAPIStore.getState().setChannelMappings(queue.channelMappings);
       if (queue.events) useHostAPIStore.getState().setEvents(
         queue.events.map(e => ({ ...e, type: e.type ?? EVENT_FALLBACK_VALUE }))
       );
-      if (queue.clearErrors) useHostAPIStore.getState().clearHostErrors();
-      if (queue.hostErrors?.length) useHostAPIStore.getState().showErrors(
-        queue.hostErrors as Array<{ message: string; level?: 'info' | 'warning' | 'error' }>
-      );
+      // Replayed in original call order so a host's clearErrors() <-> error-feedback
+      // interleaving lands the same way it would have if the host API had been ready
+      // immediately (see use-host-api-bridge.test.ts ordering tests).
+      queue.ops.forEach(op => {
+        if (op.type === 'feedback') hostShowFeedback(op.message, op.level);
+        else if (op.type === 'showErrors') useHostAPIStore.getState().showErrors(
+          op.errors as Array<{ message: string; level?: 'info' | 'warning' | 'error' }>
+        );
+        else if (op.type === 'clearErrors') useHostAPIStore.getState().clearHostErrors();
+      });
     } else {
       window.ScxmlEditorAPI = realApi;
     }

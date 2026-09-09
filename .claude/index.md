@@ -269,7 +269,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...a GitHub push failure says "pull first" specifically | [error-handling.md](decisions/error-handling.md) #5 |
 | ...a host-reported ("Apply"/"Generate Program") error toast is short but the Host Alerts panel has the full detail | [error-handling.md](decisions/error-handling.md) #6 |
 | ...there's no Playwright/Cypress in this repo | [testing.md](decisions/testing.md) #1 |
-| ...only 7 components have `@testing-library/react` tests | [testing.md](decisions/testing.md) #2 |
+| ...only 10 components have `@testing-library/react` tests | [testing.md](decisions/testing.md) #2 |
 | ...`npm test` passes but a layout test still seems untested | [testing.md](decisions/testing.md) #3 (Inferred bug) |
 | ...Claude doesn't start `npm run dev` / doesn't claim a UI change is "verified" | [testing.md](decisions/testing.md) #5 |
 | ...older `.scxml` files still open fine after a namespace change | [backward-compatibility.md](decisions/backward-compatibility.md) #1 |
