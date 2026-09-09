@@ -115,6 +115,35 @@ function buildLogicalView(container: Container): {
   return { flat, initialIds, autoParallel, otherParallels };
 }
 
+/**
+ * JSON.stringify with object keys sorted recursively (array element order is
+ * left alone — only object property order is normalized). Used to compare a
+ * container's shape before/after `applyWrapDecision` rebuilds it: the rebuilt
+ * region/parallel objects are always constructed in the same fixed key order
+ * (id, initial, state, then the marker attribute appended last), which does
+ * not match the property order fast-xml-parser produces when the same shape
+ * is freshly parsed from XML (attributes and elements interleaved in source
+ * order). Plain JSON.stringify is key-order-sensitive, so it reported a
+ * "changed" shape on every already-correctly-wrapped container even when
+ * nothing about it actually differed — triggering a full document
+ * re-serialize (and Monaco cursor jump) on every edit to a document that
+ * already had an auto-<parallel> group, not just ones that actually needed
+ * re-wrapping.
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, function replacer(_key, val) {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      return Object.keys(val)
+        .sort()
+        .reduce((sorted: Record<string, unknown>, k) => {
+          sorted[k] = val[k];
+          return sorted;
+        }, {});
+    }
+    return val;
+  });
+}
+
 function autoRegionId(initialId: string): string {
   return `${initialId}_region`;
 }
@@ -153,7 +182,7 @@ function applyWrapDecision(container: Container, containerId: string | null): bo
     return false;
   }
 
-  const before = JSON.stringify({
+  const before = stableStringify({
     initial: (container as any)['@_initial'],
     hasInitialEl: !!(container as any).initial,
     state: container.state,
@@ -200,7 +229,7 @@ function applyWrapDecision(container: Container, containerId: string | null): bo
     delete (container as any).initial;
   }
 
-  const after = JSON.stringify({
+  const after = stableStringify({
     initial: (container as any)['@_initial'],
     hasInitialEl: !!(container as any).initial,
     state: container.state,

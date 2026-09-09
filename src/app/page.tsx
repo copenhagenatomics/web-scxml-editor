@@ -64,6 +64,16 @@ export default function Home() {
     };
   }, []);
 
+  // A pending normalize-commit from typing has no useful work left once a
+  // history restore has replaced the content it was scheduled for — drop it
+  // instead of letting it fire later against whatever is then current.
+  useEffect(() => {
+    if (isUpdatingFromHistory && normalizeCommitTimerRef.current) {
+      clearTimeout(normalizeCommitTimerRef.current);
+      normalizeCommitTimerRef.current = null;
+    }
+  }, [isUpdatingFromHistory]);
+
   // --- Derived ---
   const totalErrors = useMemo(
     () => errors.filter(e => e.severity === 'error').length + hostErrors.filter(e => e.level === 'error').length,
@@ -99,7 +109,12 @@ export default function Home() {
   const handleSCXMLChangeFromDiagram = useCallback(
     (newContent: string, changeType?: 'position' | 'structure' | 'property' | 'resize') => {
       setContent(newContent);
-      if (!isUpdatingFromHistory) historyManager.trackDiagramChange(newContent, undefined, changeType);
+      // Track the post-normalization content (already computed synchronously
+      // by setContent above), not the pre-normalization newContent, so a
+      // history entry always matches what was actually live at that point.
+      if (!isUpdatingFromHistory) {
+        historyManager.trackDiagramChange(useEditorStore.getState().content, undefined, changeType);
+      }
     },
     [setContent, historyManager, isUpdatingFromHistory]
   );

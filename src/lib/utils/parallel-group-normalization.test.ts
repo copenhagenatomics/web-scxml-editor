@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SCXMLDocument } from '@/types/scxml';
 import { normalizeParallelGroups, collectAutoParallelGroups, hasAnyChildren } from './parallel-group-normalization';
+import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 
 function ids(states: any): string[] {
   if (!states) return [];
@@ -92,6 +93,43 @@ describe('normalizeParallelGroups', () => {
     const result2 = normalizeParallelGroups(d);
     expect(result2.changed).toBe(false);
     expect(JSON.stringify(d)).toBe(after1);
+  });
+
+  it('reports no change for an already-wrapped document freshly parsed from XML (not just an in-memory rebuild)', () => {
+    // Regression test: the previous test above only re-runs normalization on
+    // the SAME in-memory object normalizeParallelGroups itself just rebuilt,
+    // so both "before" and "after" snapshots share the exact same property
+    // insertion order and the comparison can never catch an order mismatch.
+    // Real editing always re-parses fresh XML text on every keystroke
+    // (editor-store.ts's normalizeContent), and fast-xml-parser produces a
+    // different property order (attributes/elements interleaved in source
+    // order) than applyWrapDecision's rebuilt objects (id, initial, state,
+    // then the marker attribute appended last) — even when the document is
+    // already in the exact correct wrapped shape. That order mismatch used
+    // to make plain JSON.stringify comparison report `changed: true` on
+    // every single edit to an already-wrapped document, forcing a full
+    // re-serialize (and, in the editor, a Monaco cursor jump) even when
+    // nothing structural had changed at all.
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0" initial="__root_parallel">
+      <parallel id="__root_parallel" viz:auto-parallel="true">
+        <state id="main_region_region" initial="main_region" viz:auto-region="true">
+          <state id="state_1"/>
+          <state id="main_region">
+            <transition target="state_1"/>
+          </state>
+        </state>
+        <state id="state_2_region" initial="state_2" viz:auto-region="true">
+          <state id="state_3"/>
+          <state id="state_2">
+            <transition target="state_3"/>
+          </state>
+        </state>
+      </parallel>
+    </scxml>`;
+    const parseResult = new SCXMLParser().parse(xml);
+    expect(parseResult.success).toBe(true);
+    const result = normalizeParallelGroups(parseResult.data!);
+    expect(result.changed).toBe(false);
   });
 
   it('leaves a non-Initial-marked, disconnected sibling outside the wrapper', () => {

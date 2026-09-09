@@ -348,6 +348,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const metadataManagerRef = React.useRef<VisualMetadataManager | null>(null);
   const scxmlDocRef = React.useRef<SCXMLDocument | null>(null);
   const scxmlContentRef = React.useRef<string>('');
+  // Bumped every time the parse/layout effect below (re-)starts, so a run
+  // whose async ELK layout resolves after a newer run has already started
+  // can recognize it's stale and drop its results instead of applying them
+  // out of order (see the parseAndConvert effect's generation check).
+  const parseGenerationRef = React.useRef(0);
 
   // Keep scxmlContent ref up to date
   React.useEffect(() => {
@@ -2025,6 +2030,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
 
     let isMounted = true; // Cleanup flag to prevent state updates after unmount
+    const myGeneration = ++parseGenerationRef.current;
 
     async function parseAndConvert() {
       try {
@@ -2044,6 +2050,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           // Pass original SCXML content for potential write-back
           const { nodes, edges, initializedSCXML } =
             await converter.convertToReactFlow(parseResult.data, scxmlContent);
+
+          // A newer run has since started (content changed again while this
+          // one was awaiting ELK layout) — applying this run's results now,
+          // in particular the write-back below, would silently overwrite
+          // whatever that newer content already is. Drop it.
+          if (parseGenerationRef.current !== myGeneration) {
+            return;
+          }
 
           // If SCXML was initialized (viz:xywh added), update with history
           if (initializedSCXML && onSCXMLChange) {

@@ -32,6 +32,23 @@ describe('editor-store setContent normalization', () => {
     useEditorStore.getState().setContent(XML_TWO_INITIAL_GROUPS, { immediate: false });
     expect(useEditorStore.getState().content).toBe(XML_TWO_INITIAL_GROUPS);
   });
+
+  it('leaves an already-wrapped 2+-group document byte-identical on a subsequent setContent call', () => {
+    // Regression test: re-setting the already-normalized (already-wrapped)
+    // content used to re-serialize the whole document every time, because
+    // normalizeParallelGroups' change-detection was order-sensitive and
+    // spuriously reported a change for any already-wrapped container (see
+    // parallel-group-normalization.test.ts). In the real editor this meant
+    // every edit to a document with an auto-<parallel> group replaced the
+    // entire Monaco buffer and moved the cursor, even for edits nothing to
+    // do with the parallel structure (e.g. pressing Enter elsewhere).
+    useEditorStore.getState().setContent(XML_TWO_INITIAL_GROUPS);
+    const wrapped = useEditorStore.getState().content;
+    expect(wrapped).toContain('viz:auto-parallel="true"');
+
+    useEditorStore.getState().setContent(wrapped, { immediate: true });
+    expect(useEditorStore.getState().content).toBe(wrapped);
+  });
 });
 
 describe('editor-store setFileInfo normalization', () => {
