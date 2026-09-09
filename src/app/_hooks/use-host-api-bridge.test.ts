@@ -138,7 +138,8 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
 
     renderHook(() => useHostAPIBridge());
 
-    const { hostErrors } = useHostAPIStore.getState();
+    const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
     expect(hostErrors).toHaveLength(0);
+    expect(requestedValidationTab).toBeNull();
   });
 });

@@ -80,4 +80,15 @@ describe('host-api-store executeCommand error handling', () => {
     expect(feedbackQueue[0].message).toBe(longMessage);
     expect(hostErrors).toHaveLength(0);
   });
+
+  it('clearHostErrors also cancels a pending Host Alerts tab request, not just the error list', () => {
+    useHostAPIStore.getState().showErrors([{ message: 'boom', level: 'error' }]);
+    expect(useHostAPIStore.getState().requestedValidationTab).toBe('host-alerts');
+
+    useHostAPIStore.getState().clearHostErrors();
+
+    const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(0);
+    expect(requestedValidationTab).toBeNull();
+  });
 });

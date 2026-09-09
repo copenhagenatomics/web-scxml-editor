@@ -156,7 +156,7 @@ export const useHostAPIStore = create<HostAPIState & HostAPIActions>((set, get) 
     }));
   },
 
-  clearHostErrors: () => set({ hostErrors: [] }),
+  clearHostErrors: () => set({ hostErrors: [], requestedValidationTab: null }),
 
   setRequestedValidationTab: (tab) => set({ requestedValidationTab: tab }),
 }));

@@ -133,7 +133,7 @@ Accepted.
 The LoopControl host calls `window.ScxmlEditorAPI.showFeedback(message, 'error')` to report operational failures (observed case: an "Apply"/"Generate Program" action failing, with `message` being the raw exception text — anything from a multi-KB C# compiler dump with embedded generated-code snippets down to a single-sentence .NET `Process.Start` exception). The transient toast (`feedbackQueue`, auto-dismisses after 4s, `max-w-lg`) is unsuitable for this content regardless of its length — a user reported it rendering as an oversized, unreadable wall of text.
 
 ### Decision
-`src/app/_hooks/use-host-api-bridge.ts` wraps the host-facing `showFeedback` in a `hostShowFeedback` function (used for both the live `realApi.showFeedback` assignment and the pre-ready `_q.feedback` queue drain). Any call with `level === 'error'` is unconditionally split: the full, unmodified message is pushed into the persistent Host Alerts panel via `showErrors` (`useHostAPIStore.hostErrors`), and the toast itself is replaced with a fixed string, `"Failed generating program. See Error Panel for details."` — regardless of the original message's length or wording. `useHostAPIStore`'s own `showFeedback` action stays an unconditional passthrough; this repo's ~20 other `showFeedback('error', ...)` call sites (GitHub push/pull, state-actions-panel, transition-panel, config/events panels, `executeCommand`'s own catch block) all call the store directly and are unaffected.
+`src/app/_hooks/use-host-api-bridge.ts` wraps the host-facing `showFeedback` in a `hostShowFeedback` function (used for both the live `realApi.showFeedback` assignment and the pre-ready `_q.ops` queue replay — see decision #7 below for the queue's ordered-replay mechanism). Any call with `level === 'error'` is unconditionally split: the full, unmodified message is pushed into the persistent Host Alerts panel via `showErrors` (`useHostAPIStore.hostErrors`), and the toast itself is replaced with a fixed string, `"Failed generating program. See Error Panel for details."` — regardless of the original message's length or wording. `useHostAPIStore`'s own `showFeedback` action stays an unconditional passthrough; this repo's ~20 other `showFeedback('error', ...)` call sites (GitHub push/pull, state-actions-panel, transition-panel, config/events panels, `executeCommand`'s own catch block) all call the store directly and are unaffected.
 
 ### Reason
 Two more targeted approaches were tried first and both failed on real examples from this app, which is why the fix ended up at this specific boundary with no length condition:
@@ -141,7 +141,7 @@ Two more targeted approaches were tried first and both failed on real examples f
 2. **A message-length threshold inside the shared `useHostAPIStore.showFeedback`** (redirect to Host Alerts only above N characters). Failed because no threshold can separate "detailed exception dump" from "legitimate long message" — a genuine 228-character host exception message needed redirecting, while this repo already has a legitimate, curated 156-character error toast (`use-github-connect.ts`'s GitHub-not-configured message) that must **not** be redirected. Content length doesn't correlate with whether a message belongs in a toast; origin does — every one of this repo's own toasts is short by construction because a developer wrote it, and only the host's messages are raw, unbounded exception text.
 
 ### Constraints
-- `hostShowFeedback` (not the store's `showFeedback`) must remain the assignment target for both `realApi.showFeedback` and the `_q.feedback` queue drain in `use-host-api-bridge.ts` — reverting either to call the store's `showFeedback` directly reopens this bug.
+- `hostShowFeedback` (not the store's `showFeedback`) must remain the assignment target for both `realApi.showFeedback` and the `_q.ops` queue replay in `use-host-api-bridge.ts` — reverting either to call the store's `showFeedback` directly reopens this bug.
 - Do not reintroduce a length- or content-pattern-based heuristic for deciding whether to redirect a toast — see the two failed alternatives above.
 - If the host is ever given a second reason to call `showFeedback('error', ...)` for something *other* than program generation, the fixed toast string ("Failed generating program...") would be misleading for that case — this decision assumes program generation is the sole use of host-originated error feedback, which was true at the time this was written but is not structurally enforced anywhere.
 - `executeCommand`'s own `catch` block (`src/stores/host-api-store.ts`) independently does the same redirect-to-Host-Alerts pattern for a command that *throws*, using `` `${command.label} failed. See Error Panel for details.` `` instead of the fixed host-boundary string — kept as a defensive fallback for a command that violates the "catch your own errors" pattern the host currently follows, and to keep `executeCommand` failures out of the toast regardless of which layer eventually calls `showFeedback`.
@@ -151,6 +151,34 @@ See "Reason" above — both rejected alternatives are described there with the c
 
 ### Evidence
 `src/app/_hooks/use-host-api-bridge.ts` (`hostShowFeedback`), `src/app/_hooks/use-host-api-bridge.test.ts`, `src/stores/host-api-store.ts` (`executeCommand`'s catch), `src/stores/host-api-store.test.ts`. Triggering conversation: a user screenshot of a multi-KB CS8510 compiler-error toast, followed by a second screenshot (after the first fix) of a 228-character `.NET` `Process.Start` exception toast that a length threshold had missed.
+
+### Status
+Accepted.
+
+---
+
+## 7. The pre-ready `_q` host-API queue replays calls as a single ordered list, not per-method buckets — and `clearHostErrors()` resets the pending Host Alerts tab request together with the error list
+
+### Context
+The `_q` pre-ready queue (see `host-api-embedding.md`) originally stored `showFeedback`/`showErrors`/`clearErrors` calls in separate buckets (`feedback: [...]`, `hostErrors: [...]`, `clearErrors: boolean`) and replayed them in a fixed hardcoded order once React mounted, rather than the host's actual call order. A host that reports an error and then calls `clearErrors()` before React mounts (or the reverse) would have that interleaving silently discarded.
+
+Fixing that surfaced a second, previously-latent bug in `useHostAPIStore.clearHostErrors()`: `showErrors()` sets both `hostErrors` and `requestedValidationTab: 'host-alerts'` (see decision #6 above), but `clearHostErrors()` only cleared `hostErrors`. Once queued calls could genuinely be replayed in the host's original order (`showErrors` then `clearErrors`), the leftover `requestedValidationTab: 'host-alerts'` would still force-open the Host Alerts tab on mount even though the error list was already empty.
+
+### Decision
+`window.ScxmlEditorAPI._q` (`src/app/layout.tsx`'s inline pre-mount stub) has a single `ops: QueuedOp[]` field instead of separate `feedback`/`hostErrors`/`clearErrors` fields; each queued `showFeedback`/`showErrors`/`clearErrors` call pushes one typed op (`{type:'feedback',...}` / `{type:'showErrors',...}` / `{type:'clearErrors'}`). `use-host-api-bridge.ts`'s stub-upgrade code replays `queue.ops` in original array order, dispatching each op to the same store actions the live API would call. Separately, `useHostAPIStore.clearHostErrors()` now resets `requestedValidationTab` to `null` alongside `hostErrors`, so a `showErrors()` immediately followed by `clearHostErrors()` — live or replayed from the pre-ready queue — leaves no pending tab-switch request behind.
+
+### Reason
+No rationale beyond direct correctness: the previous bucketed queue and the `hostErrors`-only clear were both bugs once call ordering actually mattered — previously masked because a pre-ready `clearErrors`/`showErrors` interleaving was untested and unlikely with a single reported error. The `requestedValidationTab` leak was confirmed via a GitHub Copilot automated PR-review comment on the ops-queue change, then verified against source and fixed.
+
+### Constraints
+- Any new `window.ScxmlEditorAPI` method callable before React mounts must push its own `QueuedOp` variant onto `_q.ops` (`layout.tsx`) and be handled in `use-host-api-bridge.ts`'s `queue.ops.forEach` — do not add a parallel bucket field; that is exactly the pattern this decision replaced.
+- Any store action that sets `requestedValidationTab` as a side effect (currently only `showErrors`) must be paired with the action that clears the corresponding state (`clearHostErrors`) also resetting it — do not let the two fields drift independently again.
+
+### Alternatives
+The previous per-method-bucket queue (`feedback`/`hostErrors`/`clearErrors` as separate arrays/flag, replayed in a fixed hardcoded order) is the rejected prior implementation, replaced because it structurally cannot preserve call order across different methods.
+
+### Evidence
+`src/app/layout.tsx` (inline `_q` stub), `src/app/_hooks/use-host-api-bridge.ts` (`QueuedOp`, `queue.ops.forEach`), `src/app/_hooks/use-host-api-bridge.test.ts` (ordering tests), `src/stores/host-api-store.ts` (`clearHostErrors`), `src/stores/host-api-store.test.ts`. Triggering: a GitHub Copilot automated PR review comment flagging the `requestedValidationTab` leak in the `clearErrors`-after-`showErrors` case.
 
 ### Status
 Accepted.
