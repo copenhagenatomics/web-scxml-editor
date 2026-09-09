@@ -1,11 +1,13 @@
 ---
 name: knowledge-maintenance
-description: Keep the .claude/ knowledge base (project/, features/, decisions/, workflows/, skills/, index.md) accurate after a change, or when explicitly asked to document/update project knowledge. Use as the closing step of any task that meaningfully changed behavior, or standalone for "update the docs" / "record this decision" requests. Prevents the knowledge base from drifting the way DEVELOPER_GUIDE.md and .claude/context/CLAUDE.md already have.
+description: Keep the .claude/ knowledge base (onboarding/, project/, features/, decisions/, workflows/, skills/, index.md) accurate after a change, or when explicitly asked to document/update project knowledge. Use as the closing step of any task that meaningfully changed behavior, or standalone for "update the docs" / "record this decision" requests. Prevents the knowledge base from drifting the way DEVELOPER_GUIDE.md and .claude/context/CLAUDE.md already have.
 ---
 
 # Knowledge Maintenance
 
-The detailed, mechanical process this skill wraps lives in **`.claude/workflows/knowledge-maintenance.md`** — read that file in full before doing this work; it is the authoritative reference (the materiality test, the 10 trigger questions, per-category update guidance, the practical step-by-step procedure, and the decision-record template). This skill file only covers the parts specific to invoking it as a skill.
+The detailed, mechanical process this skill wraps lives in **`.claude/workflows/knowledge-maintenance.md`** — read that file in full before doing this work; it is the authoritative reference (the materiality test, the 11 trigger questions, per-category update guidance, how to detect/resolve doc-vs-code conflicts, how to avoid duplicating knowledge, the practical step-by-step procedure, and the decision-record template). This skill file only covers the parts specific to invoking it as a skill.
+
+This is the mechanism that keeps `.claude/` synchronized with the actual implementation, project-wide — it is not scoped to any one feature or subsystem, and it runs as an automatic closing phase of every meaningful task (`.claude/workflows/development.md` steps 17–20), not something the developer needs to ask for separately.
 
 ## When to use
 
@@ -13,7 +15,7 @@ At the end of any task that meaningfully changed behavior. Also standalone, when
 
 ## Required investigation steps
 
-Run the 10 trigger questions in `.claude/workflows/knowledge-maintenance.md` against the change. For any "yes," follow that same document's category-by-category guidance and the practical workflow section to identify and make the specific edit.
+Run the 11 trigger questions in `.claude/workflows/knowledge-maintenance.md` against the change (this now includes an onboarding-impact question — check `.claude/onboarding/README.md` when it fires). For any "yes," follow that same document's category-by-category guidance and the practical workflow section to identify and make the specific edit. Then review the documentation diff itself and verify it's consistent with the final code — these are the two dedicated checks in `development.md` steps 19–20, not implicit parts of "make the edit."
 
 ## Relevant knowledge files
 

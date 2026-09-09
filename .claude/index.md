@@ -4,7 +4,7 @@
 
 This knowledge base documents the **SCXML Visual Editor** (industrial statechart authoring tool for Copenhagen Atomics' "LoopControl" platform) as it actually exists in code today — not as aspirationally described in `DEVELOPER_GUIDE.md` or `.claude/context/CLAUDE.md`, both of which are stale. See `PROJECT_ANALYSIS.md` at the repo root for the exhaustive, file:line-referenced research this knowledge base was distilled from.
 
-**Start here if you're new to this repo**: `project/overview.md` → `project/architecture.md` → `project/terminology.md`.
+**Start here if you're new to this repo**: [`onboarding/README.md`](onboarding/README.md) → `project/overview.md` → `project/architecture.md` → `project/terminology.md`.
 
 **`.claude/` is the single source of truth for all SCXML-Editor-specific AI development knowledge.** Architecture, features, decisions, project rules, workflows, skills, and terminology all live here, and nowhere else in the repository. There is no separate plugin, no separate MCP server, and no second knowledge base to keep in sync — a prior iteration of this system packaged the skills as an installable Claude Code Plugin with a companion MCP server; both were removed as unnecessary indirection once it was clear every capability they added was either (a) already available through Claude Code's native Read/Grep/Glob/Bash tools, or (b) better served by this `.claude/` tree directly. See `decisions/architecture.md` if that removal's reasoning is ever relevant again.
 
@@ -12,12 +12,13 @@ This knowledge base documents the **SCXML Visual Editor** (industrial statechart
 
 ```
 Project
+ ├── Onboarding     → onboarding/README.md         (start here — first-day mental model, links out to everything else)
  ├── Architecture   → project/architecture.md, project/scxml-rules.md, project/ui-rules.md, project/coding-rules.md
  ├── Rules          → project/project-rules.md   (the 23-section constitution)
- ├── Features       → features/*.md               (37 docs, one per feature, equal depth)
+ ├── Features       → features/*.md               (38 docs, one per feature, equal depth)
  ├── Decisions      → decisions/*.md               (14 topical files, ~80 numbered records)
  ├── Skills         → skills/*/SKILL.md            (10 skills — how to approach a kind of task)
- └── Workflows      → workflows/*.md               (step-by-step processes the skills specialize)
+ └── Workflows      → workflows/*.md               (step-by-step processes the skills specialize, incl. how knowledge sync itself works)
 ```
 
 ### How Claude finds the right context without being told
@@ -30,9 +31,13 @@ A developer should never need to say "use the debugging skill" or "read the tran
 
 Because the 10 skills are organized by **activity shape** (what kind of work is this) rather than by **feature** (which part of the app), a task about a genuinely new area the knowledge base doesn't yet cover still routes correctly — it matches `feature-development` or `codebase-exploration`, which instruct searching this index and the codebase directly rather than assuming a pre-existing doc exists.
 
-This same routing also runs in reverse after the work is done: `.claude/skills/knowledge-maintenance/SKILL.md` and `.claude/workflows/knowledge-maintenance.md` define exactly when a completed change requires a `.claude/*.md` update (and, just as importantly, when it doesn't) — see `workflows/development.md` steps 17–18 for where this fits in the overall task sequence, and `workflows/knowledge-maintenance.md` for the full decision procedure.
+This same routing also runs in reverse after the work is done: `.claude/skills/knowledge-maintenance/SKILL.md` and `.claude/workflows/knowledge-maintenance.md` define exactly when a completed change requires a `.claude/*.md` update (and, just as importantly, when it doesn't) — see `workflows/development.md` steps 17–20 for where this fits in the overall task sequence (impact analysis → update → review the doc diff → verify it matches the final code), and `workflows/knowledge-maintenance.md` for the full decision procedure. This closing phase runs automatically as part of finishing any task — a developer should never need to separately ask "update the documentation."
 
-All 37 feature documents in `features/` follow the identical template and are treated at equal depth — no feature was prioritized over another: **Purpose, User behavior, UI behavior, Architecture, Relevant components, State/store relationships, Data flow, SCXML behavior, Validation, Related features, Related files, Tests, Edge cases, Known limitations, Important invariants, Design decisions, Things that must not be broken** (the two earlier research passes used a slightly different section order/naming for the same content — treat section names as equivalent, e.g. "Internal architecture" ≈ "Architecture", "Relevant utilities" folds into "Data flow").
+All 38 feature documents in `features/` follow the identical template and are treated at equal depth — no feature was prioritized over another: **Purpose, User behavior, UI behavior, Architecture, Relevant components, State/store relationships, Data flow, SCXML behavior, Validation, Related features, Related files, Tests, Edge cases, Known limitations, Important invariants, Design decisions, Things that must not be broken** (the two earlier research passes used a slightly different section order/naming for the same content — treat section names as equivalent, e.g. "Internal architecture" ≈ "Architecture", "Relevant utilities" folds into "Data flow").
+
+## `onboarding/` — read this first if you're new
+
+[`README.md`](onboarding/README.md) is the single, deliberately short first-day file — what the product is, the one rule that matters most (`.claude/` over stale docs, source over docs when they disagree), local setup commands, how the development/knowledge-sync workflow operates, and the handful of things that trip up a new developer immediately (the `__tests__/` exclusion bug, Claude never self-verifying UI in a browser, the Command-pattern-only mutation rule). It exists specifically to reduce onboarding time and human knowledge-transfer — this project's stated reason for having `.claude/` at all — and stays short by linking into the rest of this tree rather than restating it.
 
 ## `project/` — always-relevant reference (read these first, every session)
 
@@ -48,7 +53,7 @@ All 37 feature documents in `features/` follow the identical template and are tr
 
 ## `skills/` — how to approach a recurring kind of task (10 skills)
 
-Skills encode **how** to work; everything else in `.claude/` encodes **what** the project contains. Each skill specializes `workflows/development.md`'s 19-step process for one recurring task shape, and points into the knowledge base rather than restating it. See [skills/README.md](skills/README.md) for the full design rationale, including which categories (code review, performance, per-feature skills) were deliberately *not* given a dedicated skill and why.
+Skills encode **how** to work; everything else in `.claude/` encodes **what** the project contains. Each skill specializes `workflows/development.md`'s 21-step process for one recurring task shape, and points into the knowledge base rather than restating it. See [skills/README.md](skills/README.md) for the full design rationale, including which categories (code review, performance, per-feature skills) were deliberately *not* given a dedicated skill and why.
 
 | Skill | Use for |
 |---|---|
@@ -88,6 +93,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | compound state, parallel state, final state, simple state, dashed border, state icon | [state-node-types.md](features/state-node-types.md) |
 | initial state, Initial badge, "can't mark this initial" | [state-node-types.md](features/state-node-types.md), [initial-state-groups.md](features/initial-state-groups.md) |
 | multiple initial states, disconnected sub-machines, Initial State group conflict | [initial-state-groups.md](features/initial-state-groups.md) |
+| parallel state auto-wrap, "Parallel State" divider line, region, `viz:auto-parallel`, `viz:auto-region`, group drag, region-crossing transition blocked | [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) |
 | history state, shallow/deep history | [state-node-types.md](features/state-node-types.md) |
 | "work tree", state tree, parent/child registry, ancestor chain | [state-hierarchy-tree.md](features/state-hierarchy-tree.md) *("work tree" is not a real term in this codebase — see this doc's verification note* |
 | connection point, handle, dragging a new transition, `onConnect`, anchor point, `viz:anchors`, shift-click add anchor | [state-connections-handles.md](features/state-connections-handles.md) |
@@ -143,6 +149,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 | [labels.md](features/labels.md) | State id/rename (double-click), edge label display, note text editing |
 | [monaco-code-editor.md](features/monaco-code-editor.md) | XML syntax highlighting, hover docs, autocomplete, paste normalization |
 | [node-positioning.md](features/node-positioning.md) | Manual placement, `viz:xywh` storage, the auto-layout priority rule |
+| [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) | Live auto-wrap of 2+ Initial-State work trees into a real `<parallel>` element, its invisible wrapper node and region divider overlay |
 | [scxml-parsing.md](features/scxml-parsing.md) | Hand-rolled syntax checker + fast-xml-parser, distinct from validation |
 | [scxml-serialization.md](features/scxml-serialization.md) | The two independent object-tree/DOM → XML string serializers |
 | [scxml-validation.md](features/scxml-validation.md) | The 16-pass validator pipeline, error surfacing, known gaps |
@@ -164,7 +171,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 ### Grouped by theme (alternative view)
 
 - **Core editing loop / data pipeline**: two-way-sync, scxml-parsing, scxml-serialization, scxml-validation, undo-redo-history, file-import-export, error-handling-and-resilience.
-- **States**: state-node-types, state-editing, state-hierarchy-tree, initial-state-groups, labels.
+- **States**: state-node-types, state-editing, state-hierarchy-tree, initial-state-groups, parallel-state-auto-grouping, labels.
 - **Transitions & connections**: transitions-editing, state-connections-handles, conditions-and-expressions, time-transition-syntax, events-and-executable-actions.
 - **Canvas mechanics**: diagram-interaction, selection, zoom-pan-controls, node-positioning, auto-layout-elk, sticky-notes, drag-and-drop, context-menus (verified absence).
 - **Behavioral editing**: state-actions-panel, events-and-executable-actions.
@@ -190,8 +197,8 @@ Each file contains multiple numbered decision records, each following the same t
 |---|---|
 | [architecture.md](decisions/architecture.md) | Static export deployment; the two SCXML-mutation strategies; independent validation/rendering pipelines; thin `page.tsx` + extracted hooks; whole-document re-parse per command; the `SCXMLToXStateConverter` naming residue; why `.claude/` is the sole knowledge layer (no plugin, no MCP server) |
 | [state-management.md](decisions/state-management.md) | Seven independent Zustand stores; linear full-snapshot history (not a command stack); debounced history tracking; `queueMicrotask`-deferred panel updates; GitHub store's selective persistence |
-| [scxml.md](decisions/scxml.md) | The `viz:` namespace; the cross-hierarchy transition rule; multiple Initial-State groups; `<initial>` element vs. attribute; transition slots; the `after X` ms-conversion; the SCXML type model; the `.executable[]` shape mismatch (Inferred) |
-| [visual-diagram.md](decisions/visual-diagram.md) | Drill-down vs. nested rendering; single `SCXMLStateNode` component; history-state wrapper node; per-level ELK; the edge-bundling-reverted-for-centroid-nudge history; non-native selection model; edge path priority chain; sticky-note behavior; the Windows zoom fix, amber transition color, and no-animation decisions (all traced to specific user-feedback commits) |
+| [scxml.md](decisions/scxml.md) | The `viz:` namespace; the cross-hierarchy transition rule; multiple Initial-State groups; the live auto-wrap of 2+ such groups into a real `<parallel>` element; `<initial>` element vs. attribute; transition slots; the `after X` ms-conversion; the SCXML type model; the `.executable[]` shape mismatch (Inferred) |
+| [visual-diagram.md](decisions/visual-diagram.md) | Drill-down vs. nested rendering; single `SCXMLStateNode` component; history-state wrapper node; per-level ELK; the edge-bundling-reverted-for-centroid-nudge history; non-native selection model; edge path priority chain; sticky-note behavior; the Windows zoom fix, amber transition color, and no-animation decisions (all traced to specific user-feedback commits); the invisible Parallel State wrapper + live-recomputed divider lines; the `isUpdatingPositionRef` resync-gate retry pattern |
 | [editing.md](decisions/editing.md) | The Command pattern; the two undo strategies; the `ChangeStateTypeCommand` undo defect (Inferred); rename cascades; waypoint invalidation; the reverted "inferred event/condition mode" → explicit switch; transition-merge-on-load; the State Actions panel's narrower-than-spec action model (Inferred) |
 | [validation.md](decisions/validation.md) | The 16-pass ordered pipeline; parser/validator separation; validation rules motivated by the downstream C# generator postmortem; shared-utility enforcement for slot/group rules; Levenshtein suggestions; the unused `ValidationError.code` field (Inferred) |
 | [error-handling.md](decisions/error-handling.md) | The single app-wide `ErrorBoundary` and its real (narrow) coverage; dual XML syntax checking; the clean-export fallback chain and its risky final tier; Commands' return-value-not-throw contract; the GitHub 409 conflict message |
@@ -225,6 +232,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...only one event/timer/cond transition is allowed per target | [scxml.md](decisions/scxml.md) #5 |
 | ...`after 2s` gets stored with a `* 1000` in the expression | [scxml.md](decisions/scxml.md) #6 |
 | ...onentry/onexit unknown-attribute checks don't fire on real files | [scxml.md](decisions/scxml.md) #8 (Inferred) |
+| ...2+ Initial-State groups get restructured into a real `<parallel>` element in the document itself | [scxml.md](decisions/scxml.md) #10 |
 | ...compound states don't render nested inside their parent | [visual-diagram.md](decisions/visual-diagram.md) #1 |
 | ...there's no separate node component per state type | [visual-diagram.md](decisions/visual-diagram.md) #2 |
 | ...history states look like an oversized dashed box | [visual-diagram.md](decisions/visual-diagram.md) #3 |
@@ -237,6 +245,8 @@ Each file contains multiple numbered decision records, each following the same t
 | ...pinch-zoom feels different / was tuned | [visual-diagram.md](decisions/visual-diagram.md) #10 |
 | ...conditional transitions are amber, not red | [visual-diagram.md](decisions/visual-diagram.md) #11 (Superseded: red) |
 | ...transitions don't animate | [visual-diagram.md](decisions/visual-diagram.md) #12 (Superseded: animated) |
+| ...a Parallel State group shows no labeled box, just a divider line | [visual-diagram.md](decisions/visual-diagram.md) #13 |
+| ...a Parallel State divider line (or a dragged node) doesn't update until you click elsewhere on the canvas | [visual-diagram.md](decisions/visual-diagram.md) #13, #14 |
 | ...every Command re-parses the whole document | [editing.md](decisions/editing.md) #1, [architecture.md](decisions/architecture.md) #5 |
 | ...delete's undo works differently from rename's undo | [editing.md](decisions/editing.md) #2 |
 | ...undoing a state→final conversion doesn't restore its children | [editing.md](decisions/editing.md) #3 (Inferred defect) |
@@ -289,8 +299,8 @@ Each file contains multiple numbered decision records, each following the same t
 
 | File | Use when you need to... |
 |---|---|
-| [knowledge-maintenance.md](workflows/knowledge-maintenance.md) | **The detailed, mechanical process for deciding whether and how to update `.claude/` after a change** — the materiality test, 10 trigger questions, per-category (overview/architecture/features/rules/decisions/workflows/skills/terminology) update guidance, a step-by-step procedure, and the copy-paste decision-record template. Run this at the close of any non-trivial task; invoked by the `knowledge-maintenance` skill. |
-| [development.md](workflows/development.md) | **The standard process for any task in this repo** — bug fix, feature, UI change, refactor, perf, SCXML/state-machine change, validation change, test change, config change, integration change, or doc change. The 19-step workflow (understand → investigate → plan → implement → verify → update knowledge → summarize), with a task-type adaptation table and a quick-reference checklist. Start here for anything non-trivial. |
+| [knowledge-maintenance.md](workflows/knowledge-maintenance.md) | **The detailed, mechanical process for deciding whether and how to update `.claude/` after a change** — the materiality test, 11 trigger questions (incl. onboarding), per-category (overview/architecture/features/rules/decisions/workflows/skills/terminology/onboarding) update guidance, how to detect and resolve doc-vs-code conflicts, how to avoid duplicating knowledge across files, a step-by-step procedure, and the copy-paste decision-record template. Run this at the close of any non-trivial task; invoked by the `knowledge-maintenance` skill. |
+| [development.md](workflows/development.md) | **The standard process for any task in this repo** — bug fix, feature, UI change, refactor, perf, SCXML/state-machine change, validation change, test change, config change, integration change, or doc change. The 21-step workflow (understand → investigate → plan → implement → verify → **knowledge impact analysis → update knowledge → review the doc diff → verify docs match final code** → summarize), with a phase overview, a task-type adaptation table, and a quick-reference checklist. Start here for anything non-trivial. |
 | [adding-a-command.md](workflows/adding-a-command.md) | Add a new undoable SCXML mutation |
 | [adding-a-validation-rule.md](workflows/adding-a-validation-rule.md) | Add or extend a validator check |
 | [adding-a-side-panel.md](workflows/adding-a-side-panel.md) | Add a new panel to the single-panel-slot system |
@@ -314,5 +324,6 @@ Confirmed, specific defects (not style opinions) found during source analysis. F
 - Viewport position (zoom/pan) does not appear to persist across reloads despite a `ViewStateMetadata` type existing for it ([zoom-pan-controls.md](features/zoom-pan-controls.md)).
 - `src/components/file-operations/visual-metadata-export.tsx` is dead code duplicating the real download logic in `use-download.ts` ([file-import-export.md](features/file-import-export.md)).
 - The Monaco code editor hardcodes `'vs-dark'` regardless of the app-wide light/dark theme setting ([theme-and-appearance.md](features/theme-and-appearance.md), [monaco-code-editor.md](features/monaco-code-editor.md)).
+- A transition crossing from one region of a `<parallel>` into a sibling region is only blocked live, at the connect gesture — there is no static validator counterpart, so a hand-edited/pasted `.scxml` file with such a transition is not flagged ([parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md)).
 - The app's single `ErrorBoundary` cannot catch errors thrown from event handlers (e.g. a Command execution failure) — only render-phase errors — meaning most runtime errors in this app's actual mutation code path are **not** covered by it ([error-handling-and-resilience.md](features/error-handling-and-resilience.md)).
 - The host-embedding pre-init stub script in `layout.tsx` only pre-declares a subset of the full `ScxmlEditorAPI` surface; calling an unstubbed method before React mounts throws rather than queuing ([host-api-embedding.md](features/host-api-embedding.md)).

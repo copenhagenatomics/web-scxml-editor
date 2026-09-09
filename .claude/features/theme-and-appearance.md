@@ -25,7 +25,7 @@ Let the app match the user's system preference or explicit choice for light vs. 
 
 ## Relevant components
 
-`src/components/ui/theme-toggle.tsx`, `src/app/layout.tsx` (the blocking script).
+`src/components/ui/theme-toggle.tsx`, `src/app/layout.tsx` (the blocking script). `src/components/diagram/visual-diagram.tsx` calls `useIsDark()` once (`canvasDark`, computed at the top of the component) and threads it through each edge's `data.canvasDark` in `displayFilteredEdges`; `src/components/diagram/edges/scxml-transition-edge.tsx` reads `data?.canvasDark` (not its own `useIsDark()` call) to pick the light-vs-dark selection-shadow color for a selected transition's edge/label — this keeps a single shared `MutationObserver` regardless of how many edges are rendered (see `.claude/features/selection.md`).
 
 ## Relevant state/store
 
@@ -59,7 +59,7 @@ No dedicated test file for theme logic was found in this pass — `localStorage`
 
 - **Confirmed inconsistency**: the Monaco code editor (`xml-editor.tsx`) hardcodes `'vs-dark'` regardless of this app-wide theme setting (see `.claude/features/monaco-code-editor.md`) — a user in light mode still sees a dark code editor, a real, verified UI inconsistency.
 - No "follow system" option once a user has made an explicit choice — there's no way to return to "always match OS setting" short of manually clearing the `theme` key from `localStorage`.
-- Two independent DOM-class observers (`ThemeToggle`'s local state and `useIsDark()`'s `MutationObserver`) rather than one shared reactive source — functionally fine (both react to the same underlying class correctly) but a small amount of duplicated "watch the DOM" logic that a shared store could have consolidated.
+- Two independent DOM-class observers (`ThemeToggle`'s local state and `useIsDark()`'s `MutationObserver`) rather than one shared reactive source — functionally fine (both react to the same underlying class correctly) but a small amount of duplicated "watch the DOM" logic that a shared store could have consolidated. `scxml-transition-edge.tsx` compounds this further: since every rendered edge is its own `useIsDark()` instance, a diagram with hundreds of transitions means hundreds of independent `MutationObserver`s watching the same `<html>` class attribute — not observed to be a real performance problem yet, but worth revisiting (e.g. lifting the dark-mode read up to `visual-diagram.tsx`'s existing `canvasDark` and passing it down) if it ever becomes one.
 
 ## Important edge cases
 

@@ -19,6 +19,8 @@ export interface CommandOptions {
   tooltip?: string;
   icon?: string;
   order: number;
+  /** Where to render the command. 'toolbar' (default) renders it as its own toolbar button; 'menu' renders it inside the "More options" (⋮) dropdown, alongside Upload/Clean SCXML/Download. */
+  placement?: 'toolbar' | 'menu';
   run: () => void | Promise<void>;
 }
 

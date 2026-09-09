@@ -47,9 +47,12 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
     () => useHostAPIStore.getState().requestedTab ?? "code"
   );
   const {
-    commands, feedbackQueue, executeCommand, dismissFeedback, requestedTab, setRequestedTab,
+    commands: allCommands, feedbackQueue, executeCommand, dismissFeedback, requestedTab, setRequestedTab,
     hostErrors, dismissHostError, clearHostErrors,
   } = useHostAPIStore();
+  // Commands with placement: 'menu' render inside the ⋮ "More options" dropdown
+  // (see page.tsx's renderActions) instead of here.
+  const commands = allCommands.filter((cmd) => cmd.placement !== 'menu');
   const { hierarchyState, navigateToRoot, navigateUp, initialChildByParent, errors, setFocusTarget } = useEditorStore();
   const { activePanel } = usePanelStore();
   const currentPath = hierarchyState.currentPath;

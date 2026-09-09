@@ -23,6 +23,20 @@ export interface Rect {
 export type HandleSide = 'top' | 'bottom' | 'left' | 'right';
 
 /**
+ * Whether a node should ever be treated as a routing obstacle for other
+ * edges. A "Parallel State" wrapper node
+ * (src/components/diagram/nodes/parallel-group-wrapper-node.tsx) is purely
+ * decorative and deliberately overlaps every one of its own member nodes —
+ * treating it as an obstacle would make its own members' bounding box
+ * "block" routing between them (an edge between two states both inside the
+ * wrapper would see the wrapper's rect surrounding both endpoints and
+ * detour around the whole thing), so it must always be excluded.
+ */
+export function isRoutingObstacleNode(node: { data?: unknown }): boolean {
+  return !(node.data as { isParallelGroupWrapper?: boolean } | undefined)?.isParallelGroupWrapper;
+}
+
+/**
  * Anchor point of a handle: a state's side can carry more than one handle
  * (see the anchors feature) — `index`/`count` locate this handle among its
  * `count` siblings on that side, evenly spaced at fraction (index+1)/(count+1).

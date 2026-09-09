@@ -68,6 +68,9 @@ import { SCXMLTransitionEdge } from './edges/scxml-transition-edge';
 import { HistoryWrapperNode } from './nodes/history-wrapper-node';
 import { SCXMLStateNode } from './nodes/scxml-state-node';
 import { StickyNoteNode } from './nodes/sticky-note-node';
+import { ParallelGroupWrapperNode } from './nodes/parallel-group-wrapper-node';
+import { ParallelRegionDividerOverlay } from './parallel/parallel-region-divider-overlay';
+import { computeLiveParallelDividerXs } from '@/lib/layout/parallel-group-bbox';
 import { StateActionsPanel } from '@/components/ui/state-actions-panel';
 import { TransitionPanel, type TransitionApplyArgs, type TransitionApplyResult } from './transition-panel';
 import { InitialGroupConflictBanner } from './initial-group-conflict-banner';
@@ -81,6 +84,10 @@ import {
   isMarkedInitial,
   wouldConflictIfMarkedInitial,
 } from '@/lib/utils/initial-group-utils';
+import { wouldCrossParallelRegions } from '@/lib/utils/parallel-region-connection-validation';
+import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
+import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
+import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
 
 // ==================== TYPES & INTERFACES ====================
 interface VisualDiagramProps {
@@ -101,6 +108,7 @@ const nodeTypes: NodeTypes = {
   scxmlState: SCXMLStateNode,
   scxmlHistory: HistoryWrapperNode,
   scxmlNote: StickyNoteNode,
+  scxmlParallelGroupWrapper: ParallelGroupWrapperNode,
 };
 
 // Custom edge types for SCXML transitions
@@ -303,11 +311,34 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     Map<string, { x: number; y: number }>
   >(new Map());
   const isDraggingRef = React.useRef<Set<string>>(new Set()); // Track nodes being dragged
+  // Tracks currentParentId across renders so the hierarchy-navigation
+  // position-preserving effect (below) can tell "the user just drilled
+  // in/out of a state" apart from "content re-parsed for an unrelated
+  // reason" — see that effect's comment.
+  const previousParentIdForResyncRef = React.useRef<string | null | undefined>(undefined);
 
   // Handler refs for callbacks
   const handleNodeDeleteRef = React.useRef<((nodeId: string) => void) | null>(
     null
   );
+
+  // Set below, once applyLatestEnhancedNodes is defined (it closes over
+  // enhancedNodes/hierarchyFilteredEdges, which aren't computed until later
+  // in this component). Callbacks defined earlier in the file (onConnect,
+  // the drag-stop position commit) call this indirectly through the ref so
+  // they always reach the CURRENT version rather than one captured at
+  // mount. See its definition for why this exists: those callbacks hold
+  // isUpdatingPositionRef true for a short window around their own
+  // onSCXMLChange call to stop the main resync effect below from re-parsing
+  // out from under an in-flight gesture — but if the async SCXML re-parse
+  // this triggers happens to land inside that same window, the resync
+  // effect's dependency-driven re-run finds the gate still shut, skips
+  // applying the fresh result, and (being edge-triggered, not polled)
+  // never gets another chance to — the canvas is left showing stale
+  // positions/parallel-divider lines until an unrelated event happens to
+  // change nodes/edges again (e.g. clicking empty canvas to deselect).
+  // Calling this once the gate reopens closes that race.
+  const applyLatestEnhancedNodesRef = React.useRef<() => void>(() => {});
 
   // Hover delay ref
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -317,6 +348,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const metadataManagerRef = React.useRef<VisualMetadataManager | null>(null);
   const scxmlDocRef = React.useRef<SCXMLDocument | null>(null);
   const scxmlContentRef = React.useRef<string>('');
+  // Bumped every time the parse/layout effect below (re-)starts, so a run
+  // whose async ELK layout resolves after a newer run has already started
+  // can recognize it's stale and drop its results instead of applying them
+  // out of order (see the parseAndConvert effect's generation check).
+  const parseGenerationRef = React.useRef(0);
 
   // Keep scxmlContent ref up to date
   React.useEffect(() => {
@@ -991,6 +1027,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             return;
           }
 
+          const regionCheck = wouldCrossParallelRegions(preCheck.data, params.source, params.target);
+          if (regionCheck.blocked) {
+            setConnectionBlockedMessage(
+              regionCheck.reason || 'Cannot connect states that belong to different regions of the same parallel state.'
+            );
+            return;
+          }
+
           const slotCheck = checkNewConnectionSlotConflict(preCheck.data, params.source, params.target);
           if (slotCheck.blocked) {
             setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
@@ -1096,6 +1140,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 onSCXMLChange(finalSCXML, 'structure');
                 setTimeout(() => {
                   isUpdatingPositionRef.current = false;
+                  // Retry in case the async re-parse this onSCXMLChange
+                  // triggered already landed while the gate above was shut
+                  // — otherwise its fresher node positions (and any
+                  // parallel-divider change) sit unapplied until an
+                  // unrelated event resyncs nodes/edges.
+                  applyLatestEnhancedNodesRef.current();
                 }, 100);
               }
             }
@@ -1141,6 +1191,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // fires live while dragging (on hover) and again on drop.
         setConnectionBlockedMessage(
           reason || 'Cannot connect states that belong to different Initial State groups.'
+        );
+        return false;
+      }
+
+      const regionCheck = wouldCrossParallelRegions(
+        parseResult.data,
+        connection.source,
+        connection.target
+      );
+      if (regionCheck.blocked) {
+        setConnectionBlockedMessage(
+          regionCheck.reason || 'Cannot connect states that belong to different regions of the same parallel state.'
         );
         return false;
       }
@@ -1415,9 +1477,24 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
 
       // Filter out selection changes - they don't affect SCXML structure
-      const structuralChanges = changes.filter(
+      const nonSelectChanges = changes.filter(
         (change) => change.type !== 'select'
       );
+
+      // A position change on a Parallel State wrapper node has no real
+      // React Flow parent-child relationship to its members (this app never
+      // uses native nesting), so dragging the box wouldn't otherwise move
+      // its member states — expand it into an equivalent translated
+      // position change for each member, so the rest of this pipeline
+      // (visual update + drag-stop persistence) handles them exactly like
+      // an ordinary drag.
+      const structuralChanges = [
+        ...nonSelectChanges.filter((c) => c.type !== 'position'),
+        ...expandWrapperPositionChanges(
+          nonSelectChanges.filter((c) => c.type === 'position') as any,
+          nodes
+        ),
+      ];
 
       const removeChanges = structuralChanges.filter(
         (change) => change.type === 'remove'
@@ -1610,6 +1687,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         } finally {
           setTimeout(() => {
             isUpdatingPositionRef.current = false;
+            // Retry in case the async re-parse triggered above already
+            // landed while the gate was shut — see applyLatestEnhancedNodesRef.
+            applyLatestEnhancedNodesRef.current();
           }, 200);
         }
       }, 150);
@@ -1950,6 +2030,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
 
     let isMounted = true; // Cleanup flag to prevent state updates after unmount
+    const myGeneration = ++parseGenerationRef.current;
 
     async function parseAndConvert() {
       try {
@@ -1969,6 +2050,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           // Pass original SCXML content for potential write-back
           const { nodes, edges, initializedSCXML } =
             await converter.convertToReactFlow(parseResult.data, scxmlContent);
+
+          // A newer run has since started (content changed again while this
+          // one was awaiting ELK layout) — applying this run's results now,
+          // in particular the write-back below, would silently overwrite
+          // whatever that newer content already is. Drop it.
+          if (parseGenerationRef.current !== myGeneration) {
+            return;
+          }
 
           // If SCXML was initialized (viz:xywh added), update with history
           if (initializedSCXML && onSCXMLChange) {
@@ -1994,12 +2083,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             const visualMetadata = metadataManager.getVisualMetadata(node.id);
             const nodeUpdate: any = { ...node };
 
-            if (visualMetadata?.layout) {
-              nodeUpdate.position = {
-                x: visualMetadata.layout.x ?? node.position.x,
-                y: visualMetadata.layout.y ?? node.position.y,
-              };
-            }
+            nodeUpdate.position = resolveEnhancedNodePosition(node, visualMetadata?.layout);
 
             // Always set node dimensions with priority: viz:xywh > existing dimensions
             // React Flow needs width/height at the top level of node object for NodeResizer
@@ -2469,11 +2553,16 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        // Check if this will be the initial state (parent has no children)
+        // Check if this will be the initial state (parent has no children).
+        // hasAnyChildren also counts members hidden inside an auto-wrapped
+        // <parallel> — a plain `!parentState.state` check alone would
+        // otherwise treat an already-wrapped (non-empty) container as
+        // empty, since its own `.state` only ever holds unassigned
+        // siblings, and would spuriously mark this new sibling Initial too.
         let isInitial = false;
         if (parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
-          if (parentState && !parentState.state) {
+          if (parentState && !hasAnyChildren(parentState)) {
             isInitial = true;
           }
         }
@@ -2633,7 +2722,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const handleNodeDragStart = useCallback(
     (_event: React.MouseEvent, node: Node, draggedNodes: Node[]) => {
-      draggingNodeIdsRef.current = (draggedNodes.length > 0 ? draggedNodes : [node]).map((n) => n.id);
+      // Dragging a Parallel State wrapper moves its member states as a
+      // group (see expandWrapperPositionChanges) — track those member ids
+      // instead of the wrapper's own synthetic id, so drop-target/reparent
+      // detection below (which drag-to-nests INTO another state) is either
+      // skipped entirely (the wrapper itself is never a valid drop target,
+      // per handleNodeDrag below) or, if it ever runs, reasons about the
+      // real states being moved rather than a node with no SCXML element of
+      // its own to reparent.
+      const memberIds = (node.data as any)?.memberIds as string[] | undefined;
+      draggingNodeIdsRef.current = memberIds
+        ? memberIds
+        : (draggedNodes.length > 0 ? draggedNodes : [node]).map((n) => n.id);
     },
     []
   );
@@ -2679,6 +2779,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const handleNodeDrag = useCallback(
     (_event: React.MouseEvent, node: Node) => {
+      // Dragging a Parallel State wrapper moves its group of member states —
+      // it's never itself a valid drag-to-nest source (it has no SCXML
+      // element of its own to reparent), so skip drop-target detection
+      // entirely rather than have the wrapper's own (huge) bounding box
+      // spuriously match whatever member node it happens to overlap.
+      if ((node.data as any)?.isParallelGroupWrapper) return;
       computeDropTarget({
         x: node.position.x,
         y: node.position.y,
@@ -2836,6 +2942,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const displayFilteredEdges = React.useMemo(() => {
     const applySelectionStyles = (edge: Edge) => {
       const isSelected = selectedTransitions.has(edge.id);
+      // Threaded through edge data so SCXMLTransitionEdge can derive its own
+      // theme-aware selection shadow without each edge instance running its
+      // own useIsDark()/MutationObserver.
+      const data = { ...edge.data, canvasDark };
       if (isSelected) {
         const existingMarker = (edge.markerEnd as any) || {
           type: MarkerType.ArrowClosed,
@@ -2844,14 +2954,20 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
         // Determine selection color based on edge type
         const selectionColor = getTransitionColor(edge.data?.condition, edge.data?.event);
+        // Dark canvas needs a lighter/brighter glow to read as a shadow;
+        // light canvas needs a darker one — matches the edge label's shadow.
+        const selectionShadowColor = canvasDark
+          ? 'rgba(255, 255, 255, 0.45)'
+          : 'rgba(0, 0, 0, 0.55)';
         return {
           ...edge,
+          data,
           selected: true, // CRITICAL: This prop enables waypoint handles to show
           style: {
             ...edge.style,
             stroke: selectionColor,
             strokeWidth: 3,
-            filter: 'drop-shadow(0 0 3px rgba(0, 0, 0, 0.3))',
+            filter: `drop-shadow(0 0 4px ${selectionShadowColor})`,
           },
           animated: false,
           // markerEnd: {
@@ -2866,6 +2982,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
       return {
         ...edge,
+        data,
         selected: false,
         selectable: true,
         focusable: true,
@@ -2875,7 +2992,39 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     return hierarchyFilteredEdges
       .filter((edge) => true)
       .map((edge) => applySelectionStyles(edge));
-  }, [hierarchyFilteredEdges, activeStates, selectedTransitions]);
+  }, [hierarchyFilteredEdges, activeStates, selectedTransitions, canvasDark]);
+
+  // Pooled across every currently-visible Parallel State wrapper node —
+  // ParallelRegionDividerOverlay draws one full-height line per gap,
+  // independent of any single group's own bounding box. Recomputed from the
+  // live `nodes` array (not read off a wrapper's stale data.dividerLines)
+  // so a divider tracks a member drag in real time instead of lagging until
+  // some unrelated event (e.g. deselecting) happens to resync nodes from a
+  // fresh SCXML re-parse — see computeLiveParallelDividerXs.
+  const parallelDividerXs = React.useMemo(() => computeLiveParallelDividerXs(nodes), [nodes]);
+
+  // Applies the latest parsed SCXML (enhancedNodes/hierarchyFilteredEdges)
+  // to the live `nodes`/`edges` state — the same application the main
+  // resync effect below performs, extracted so it can also be invoked as a
+  // one-shot retry once isUpdatingPositionRef reopens (see
+  // applyLatestEnhancedNodesRef's declaration for why that retry exists).
+  // Safe to call redundantly: if nothing changed since the last apply,
+  // React bails the resulting state updates out as no-ops.
+  const applyLatestEnhancedNodes = React.useCallback(() => {
+    if (draggingNodeIdsRef.current.length > 0) return;
+    if (enhancedNodes.length === 0) return;
+
+    setNodes(enhancedNodes);
+    const selectableEdges = hierarchyFilteredEdges.map((edge) => ({
+      ...edge,
+      selectable: true,
+      focusable: true,
+    }));
+    setEdges(selectableEdges);
+    pendingNodeInternalsUpdateRef.current = true;
+  }, [enhancedNodes, hierarchyFilteredEdges, setNodes, setEdges]);
+
+  applyLatestEnhancedNodesRef.current = applyLatestEnhancedNodes;
 
   // ==================== EFFECTS ====================
   // Set node delete handler ref
@@ -2989,8 +3138,25 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // This effect preserves node positions during hierarchy navigation,
   // but should NOT run when updating from history (undo/redo)
   React.useEffect(() => {
+    const didNavigate = currentParentId !== previousParentIdForResyncRef.current;
+    previousParentIdForResyncRef.current = currentParentId;
+
     // Skip this effect when updating from history - let the previous effect handle it
     if (isUpdatingFromHistory) {
+      return;
+    }
+
+    // This effect exists to stop drilling into/out of a state from resetting
+    // everyone's on-screen position back to enhancedNodes' freshly-computed
+    // layout — only relevant when currentParentId itself just changed. It
+    // also re-runs on every ordinary content edit, though, since enhancedNodes
+    // is a dependency (a new array reference on every reparse); when that's
+    // why it fired, skip entirely and let the effect above's setNodes
+    // (enhancedNodes) stand — otherwise a layout pass that legitimately moves
+    // an EXISTING node (e.g. separateParallelRegions pulling a Parallel
+    // State's regions apart) gets its new position silently overwritten back
+    // to the node's last on-screen spot here.
+    if (!didNavigate) {
       return;
     }
 
@@ -3279,6 +3445,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               className='bg-white/90 border border-slate-200 rounded-lg shadow-sm'
             />
           </ReactFlow>
+          <ParallelRegionDividerOverlay dividerXs={parallelDividerXs} />
           <InitialGroupConflictBanner
             message={connectionBlockedMessage}
             onDismiss={() => setConnectionBlockedMessage(null)}

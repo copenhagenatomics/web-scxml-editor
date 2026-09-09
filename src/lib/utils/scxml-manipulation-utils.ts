@@ -9,7 +9,10 @@ import type {
 } from '@/types/scxml';
 
 /**
- * Find a state element by its ID in the SCXML document
+ * Find a state element by its ID in the SCXML document. Also searches
+ * inside <parallel> elements and their region <state> children, at any
+ * nesting depth, so ids that only exist inside a parallel's regions are
+ * still found by every mutation helper that resolves ids through this.
  */
 export function findStateById(
   scxmlDoc: SCXMLDocument,
@@ -27,16 +30,31 @@ export function findStateById(
         return state;
       }
 
-      // Search in nested states
-      const found = searchInStates(state.state);
+      // Search in nested states and parallels
+      const found = searchInStates(state.state) ?? searchInParallels(state.parallel);
       if (found) return found;
     }
 
     return null;
   }
 
-  // Search in root states
-  return searchInStates(scxmlDoc.scxml.state);
+  function searchInParallels(
+    parallels: ParallelElement | ParallelElement[] | undefined
+  ): StateElement | null {
+    if (!parallels) return null;
+
+    const parallelArray = Array.isArray(parallels) ? parallels : [parallels];
+
+    for (const parallel of parallelArray) {
+      const found = searchInStates(parallel.state) ?? searchInParallels(parallel.parallel);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  // Search in root states and parallels
+  return searchInStates(scxmlDoc.scxml.state) ?? searchInParallels(scxmlDoc.scxml.parallel);
 }
 
 /**

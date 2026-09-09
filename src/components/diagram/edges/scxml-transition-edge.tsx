@@ -24,16 +24,23 @@ import {
   buildRoundedOrthogonalPath,
   buildSelfLoopPath,
   buildSmoothBezierPath,
+  getOrthogonalPathMidpoint,
 } from '@/lib/layout/path-builders';
 import {
   approximateOrthogonalRoute,
   routeIntersectsAnyRect,
   simplifyOrthogonalGridPath,
+  isRoutingObstacleNode,
   type HandleSide,
   type Rect,
 } from '@/lib/layout/edge-obstacle-utils';
 import { getTransitionColor } from '@/lib/consts/transition-colors';
 import { isNoteId } from '@/types/visual-metadata';
+
+// Extra room around the label's foreignObject so the selection box-shadow
+// isn't clipped by the foreignObject's own overflow:hidden — without this,
+// the pill's fit-content width leaves no horizontal margin for the shadow.
+const LABEL_SHADOW_MARGIN = 6;
 
 export interface SCXMLTransitionEdgeData {
   event?: string;
@@ -46,6 +53,7 @@ export interface SCXMLTransitionEdgeData {
   fullLabel?: string; // Full label text for tooltip
   displayEvent?: string; // "after 2s" / "after 714ms" / "after (expr) s" for _t_ time-transition edges
   waypoints?: Waypoint[]; // Waypoint control points for edge routing
+  canvasDark?: boolean; // Dark-mode flag computed once by the canvas (see visual-diagram.tsx) — avoids one MutationObserver per rendered edge
 
   // Handlers for waypoint editing
   onWaypointDrag?: (
@@ -78,9 +86,6 @@ const generateOrthogonalPath: PathFindingFunction = (grid, start, end) => {
   return { fullPath: result.fullPath, smoothedPath: simplified };
 };
 
-// Draw the grid walk in smoothstep style: orthogonal segments, rounded corners
-const drawSmoothStepPath: SVGDrawFunction = (source, target, path) =>
-  buildRoundedOrthogonalPath(source, target, path, 8);
 
 /**
  * Calculate an offset smoothstep path for parallel edges
@@ -224,6 +229,15 @@ export const SCXMLTransitionEdge: React.FC<
   markerEnd,
   style,
 }) => {
+  // Dark canvas needs a lighter/brighter glow to read as a shadow; light
+  // canvas needs a darker one — a flat black shadow disappears on dark bg.
+  // canvasDark is computed once for the whole canvas (visual-diagram.tsx)
+  // and threaded through edge data instead of each edge instance running
+  // its own useIsDark()/MutationObserver.
+  const selectionShadowColor = data?.canvasDark
+    ? 'rgba(255, 255, 255, 0.60)'
+    : 'rgba(0, 0, 0, 0.55)';
+
   // Safely extract data properties FIRST
   const event = data?.event;
   const condition = data?.condition;
@@ -275,12 +289,16 @@ export const SCXMLTransitionEdge: React.FC<
     // Only nodes at the edge's own hierarchy level count as obstacles —
     // including an enclosing container would wall off routing inside it.
     // Notes are annotations, not diagram structure, so edges must ignore
-    // them entirely rather than routing around them.
+    // them entirely rather than routing around them. A Parallel State
+    // wrapper node deliberately overlaps its own member nodes, so it must
+    // be excluded too — otherwise it "blocks" routing between the very
+    // states it visually surrounds.
     const siblings = nodes.filter(
       (n) =>
         n.parentNode === sourceNode.parentNode &&
         !n.hidden &&
-        !isNoteId(n.id)
+        !isNoteId(n.id) &&
+        isRoutingObstacleNode(n)
     );
 
     const nodeRect = (n: Node): Rect | null => {
@@ -306,7 +324,34 @@ export const SCXMLTransitionEdge: React.FC<
     if (!routeIntersectsAnyRect(directRoute, obstacles)) return null;
 
     try {
-      return getSmartEdge({
+      // The library's own edgeCenterX/edgeCenterY (used below as a fallback)
+      // is computed from its raw, unsimplified A* grid walk — a different
+      // point list than the one actually drawn — so it can land far off the
+      // rendered line. Capture the real midpoint from the exact same points
+      // drawEdge renders through instead.
+      const renderedMidpointBox: Array<{ x: number; y: number }> = [];
+      const drawSmoothStepPathCapturingMidpoint: SVGDrawFunction = (
+        pathSource,
+        pathTarget,
+        path
+      ) => {
+        const targetSide = targetPosition as unknown as HandleSide;
+        renderedMidpointBox[0] = getOrthogonalPathMidpoint(
+          pathSource,
+          pathTarget,
+          path,
+          targetSide
+        );
+        return buildRoundedOrthogonalPath(
+          pathSource,
+          pathTarget,
+          path,
+          8,
+          targetSide
+        );
+      };
+
+      const result = getSmartEdge({
         sourceX,
         sourceY,
         targetX,
@@ -319,9 +364,14 @@ export const SCXMLTransitionEdge: React.FC<
           // smoothstep style of the other edges — the defaults produce
           // diagonal smoothed curves.
           generatePath: generateOrthogonalPath,
-          drawEdge: drawSmoothStepPath,
+          drawEdge: drawSmoothStepPathCapturingMidpoint,
         },
       });
+      if (!result) return null;
+      const midpoint = renderedMidpointBox[0];
+      return midpoint
+        ? { ...result, edgeCenterX: midpoint.x, edgeCenterY: midpoint.y }
+        : result;
     } catch {
       return null;
     }
@@ -406,10 +456,13 @@ export const SCXMLTransitionEdge: React.FC<
     return parts.join(' ');
   };
 
-  const lineLength = Math.sqrt((targetX - sourceX) ** 2 + (targetY - sourceY) ** 2);
-  const maxLabelWidth = Math.max(lineLength * 0.7, 60);
-
   const labelContent = getLabelContent();
+
+  // Size the label box to the text itself, not the edge's on-screen length —
+  // tying it to line length (the previous approach) clipped labels to a tiny
+  // floor width on short edges regardless of how long the condition text was.
+  const estimatedLabelWidth = labelContent.length * 6 + 16; // ~6px/char at the 10px semibold label font, plus horizontal padding
+  const maxLabelWidth = Math.min(Math.max(estimatedLabelWidth, 60), 260);
 
   // Update marker color to match edge color
   const updatedMarkerEnd =
@@ -486,10 +539,10 @@ export const SCXMLTransitionEdge: React.FC<
       {labelContent && (
         <g style={{ pointerEvents: 'none', zIndex: 10000 }}>
           <foreignObject
-            width={maxLabelWidth}
-            height={26}
-            x={labelX - maxLabelWidth / 2 + labelOffset.x + labelOffsetX}
-            y={labelY - 13 + labelOffset.y + labelOffsetY}
+            width={maxLabelWidth + LABEL_SHADOW_MARGIN * 2}
+            height={26 + LABEL_SHADOW_MARGIN * 2}
+            x={labelX - maxLabelWidth / 2 - LABEL_SHADOW_MARGIN + labelOffset.x + labelOffsetX}
+            y={labelY - 13 - LABEL_SHADOW_MARGIN + labelOffset.y + labelOffsetY}
             style={{
               overflow: 'hidden',
               zIndex: 10000,
@@ -521,6 +574,9 @@ export const SCXMLTransitionEdge: React.FC<
                   color: '#fff',
                   opacity: 0.95,
                   cursor: 'pointer',
+                  boxShadow: selected
+                    ? `0 0 4px 1px ${selectionShadowColor}`
+                    : 'none',
                 pointerEvents: 'auto', // Re-enable pointer events only on the label itself
                 userSelect: 'none', // Prevent text selection
                 WebkitUserSelect: 'none', // Safari/Chrome

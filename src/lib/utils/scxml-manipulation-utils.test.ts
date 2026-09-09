@@ -8,7 +8,36 @@ import {
   detachStateFromParent,
   cloneStateSubtreeWithFreshIds,
   rewriteOrDropTransitions,
+  findStateById,
 } from './scxml-manipulation-utils';
+
+describe('findStateById', () => {
+  it('finds a state nested directly inside a <parallel> element', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'P',
+          state: [{ '@_id': 'RegionA' }, { '@_id': 'RegionB' }],
+        },
+      } as any,
+    };
+    expect(findStateById(d, 'RegionA')?.['@_id']).toBe('RegionA');
+  });
+
+  it('finds a state nested inside a <state> child of a <parallel> element', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'P',
+          state: [
+            { '@_id': 'RegionA', state: [{ '@_id': 'Deep' }] },
+          ],
+        },
+      } as any,
+    };
+    expect(findStateById(d, 'Deep')?.['@_id']).toBe('Deep');
+  });
+});
 
 describe('updateTransitionTargets', () => {
   it('updates a single-value root initial (existing behavior)', () => {

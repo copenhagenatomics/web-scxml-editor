@@ -6,7 +6,7 @@ This document records the analysis behind which recurring development activities
 
 **Skills encode HOW Claude should work. The knowledge base (`.claude/project/`, `.claude/features/`, `.claude/decisions/`) encodes WHAT the project contains.** A skill is a thin process wrapper: when to use it, what to investigate before touching code, which knowledge files/rules/decisions are relevant, what "done" looks like, and what mistakes are known to happen in this exact codebase. A skill should never restate feature or decision content at length — if a skill file starts copying paragraphs out of a `.claude/features/*.md` doc, that's a sign it should be a pointer instead.
 
-Every skill here is a **specialization of the general workflow** in `.claude/workflows/development.md`, not a replacement for it. `development.md`'s 19 steps still apply; each skill below adds activity-specific emphasis, extra investigation steps, and known gotchas at the relevant points in that same sequence.
+Every skill here is a **specialization of the general workflow** in `.claude/workflows/development.md`, not a replacement for it. `development.md`'s 21 steps still apply — including its knowledge-synchronization phase (steps 17–20), which is not optional; each skill below adds activity-specific emphasis, extra investigation steps, and known gotchas at the relevant points in that same sequence.
 
 ## Skills created (10)
 
@@ -29,14 +29,16 @@ Every skill here is a **specialization of the general workflow** in `.claude/wor
 
 - **Performance improvements.** This repo's performance behavior is dominated by a small number of already-identified, deliberate tradeoffs (`.claude/decisions/performance.md`: debouncing, full re-parse per change, per-level ELK layout, the traffic-aware handle-assignment cost model) rather than an open-ended optimization practice with its own investigation shape. It's handled as a task-type row in `.claude/workflows/development.md` directly; there isn't enough repo-specific *process* (as opposed to *facts already documented*) to justify a dedicated skill.
 
-- **One skill per feature.** None of the 37 documented features (`.claude/features/*.md`) have development behavior complex or unique enough to warrant their own skill on top of `feature-development` + that feature's own doc. The two areas that came closest — SCXML representation and state-machine semantics — got dedicated skills not because they're "features" but because they're cross-cutting *domains* with their own investigation shape spanning many features at once (a state-machine-semantics change routinely touches a validator, the converter, a Command, and live UI-blocking simultaneously — see `.claude/project/project-rules.md` §10–11).
+- **One skill per feature.** None of the 38 documented features (`.claude/features/*.md`) have development behavior complex or unique enough to warrant their own skill on top of `feature-development` + that feature's own doc. The two areas that came closest — SCXML representation and state-machine semantics — got dedicated skills not because they're "features" but because they're cross-cutting *domains* with their own investigation shape spanning many features at once (a state-machine-semantics change routinely touches a validator, the converter, a Command, and live UI-blocking simultaneously — see `.claude/project/project-rules.md` §10–11).
 
 - **Configuration changes, integration changes, documentation-only changes.** Each of these is a single row in `.claude/workflows/development.md`'s task-type table with a small, fixed set of gotchas (build-time env vars; the Host API stub surface; doc staleness). That table-row treatment is proportionate — none of them have enough distinct *investigation steps* to earn a full skill of their own.
 
 ## Relationship to the rest of `.claude/`
 
 ```
-.claude/workflows/development.md   ← the 19-step process every skill specializes
+.claude/onboarding/README.md       ← start here — first-day mental model
+.claude/workflows/development.md   ← the 21-step process every skill specializes (incl. the knowledge-sync phase)
+.claude/workflows/knowledge-maintenance.md ← the detailed knowledge-sync procedure development.md's phase invokes
 .claude/project/*.md               ← architecture + the rules constitution (project-rules.md)
 .claude/features/*.md              ← what each feature does today
 .claude/decisions/*.md             ← why it does that, and what was tried and abandoned
