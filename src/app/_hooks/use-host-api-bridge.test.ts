@@ -142,4 +142,45 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
     expect(hostErrors).toHaveLength(0);
     expect(requestedValidationTab).toBeNull();
   });
+
+  it('preserves showErrors() -> clearErrors() ordering queued before React mounted', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).ScxmlEditorAPI = {
+      _q: {
+        ready: [],
+        commands: [],
+        ops: [
+          { type: 'showErrors', errors: [{ message: 'boom via showErrors', level: 'error' }] },
+          { type: 'clearErrors' },
+        ],
+      },
+    };
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(0);
+    expect(requestedValidationTab).toBeNull();
+  });
+
+  it('preserves clearErrors() -> showErrors() ordering queued before React mounted', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).ScxmlEditorAPI = {
+      _q: {
+        ready: [],
+        commands: [],
+        ops: [
+          { type: 'clearErrors' },
+          { type: 'showErrors', errors: [{ message: 'boom via showErrors', level: 'error' }] },
+        ],
+      },
+    };
+
+    renderHook(() => useHostAPIBridge());
+
+    const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
+    expect(hostErrors).toHaveLength(1);
+    expect(hostErrors[0].message).toBe('boom via showErrors');
+    expect(requestedValidationTab).toBe('host-alerts');
+  });
 });
