@@ -271,7 +271,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...the pre-ready host-API queue (`_q`) replays `showFeedback`/`showErrors`/`clearErrors` in the host's original call order, and clearing host errors also cancels a pending Host Alerts tab switch | [error-handling.md](decisions/error-handling.md) #7 |
 | ...the host-reported error toast says "Host reported an error" rather than naming a specific operation like "generating program" | [error-handling.md](decisions/error-handling.md) #8 |
 | ...there's no Playwright/Cypress in this repo | [testing.md](decisions/testing.md) #1 |
-| ...only 10 components have `@testing-library/react` tests | [testing.md](decisions/testing.md) #2 |
+| ...only 10 test files (7 components + 3 hooks) use `@testing-library/react` | [testing.md](decisions/testing.md) #2 |
 | ...`npm test` passes but a layout test still seems untested | [testing.md](decisions/testing.md) #3 (Inferred bug) |
 | ...Claude doesn't start `npm run dev` / doesn't claim a UI change is "verified" | [testing.md](decisions/testing.md) #5 |
 | ...older `.scxml` files still open fine after a namespace change | [backward-compatibility.md](decisions/backward-compatibility.md) #1 |
