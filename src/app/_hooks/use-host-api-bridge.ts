@@ -7,13 +7,27 @@ import { EVENT_FALLBACK_VALUE } from '@/lib/utils/common-utils';
 import { useEditorStore } from '@/stores/editor-store';
 import { usePanelStore } from '@/stores/panel-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
-import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, ScxmlEditorAPI } from '@/types/host-api';
+import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, FeedbackItem, ScxmlEditorAPI } from '@/types/host-api';
 
 export function useHostAPIBridge() {
   const { setContent, setErrors, navigateToRoot } = useEditorStore();
   const { togglePanel } = usePanelStore();
-  const { markReady, onReady, registerCommand, showFeedback } = useHostAPIStore();
+  const { markReady, onReady, registerCommand, showFeedback, showErrors } = useHostAPIStore();
   const historyManager = useMemo(() => HistoryManager.getInstance(), []);
+
+  // Anything the host reports via showFeedback('error') is operational error detail
+  // (e.g. program-generation/apply failures) meant for a developer to inspect, not toast
+  // copy — the full text goes to the persistent Error Panel, the toast stays short.
+  // This repo's own showFeedback('error') calls (GitHub push/pull, panel saves, etc.) are
+  // already short, curated strings and call the store directly, so they never pass through here.
+  const hostShowFeedback = useCallback((message: string, level?: FeedbackItem['level']) => {
+    if (level === 'error') {
+      showErrors([{ message, level: 'error' }]);
+      showFeedback('Failed generating program. See Error Panel for details.', 'error');
+    } else {
+      showFeedback(message, level);
+    }
+  }, [showFeedback, showErrors]);
 
   const content = useEditorStore(state => state.content);
   const storeChannelMappings = useHostAPIStore(state => state.channelMappings);
@@ -51,7 +65,7 @@ export function useHostAPIBridge() {
       getConfigValues: () => configValuesRef.current,
       setConfigValues: (values: ConfigOverride[]) => useHostAPIStore.getState().setConfigOverrides(values),
       registerCommand,
-      showFeedback,
+      showFeedback: hostShowFeedback,
       setChannels: (channels: ChannelInfo[]) => useHostAPIStore.getState().setChannels(channels),
       toggleConfigPanel: () => togglePanel('config'),
       getChannelMappings: () => {
@@ -89,7 +103,7 @@ export function useHostAPIBridge() {
       delete stub._q;
       queue.ready.forEach(cb => onReady(cb));
       queue.commands.forEach(o => registerCommand(o));
-      queue.feedback.forEach(([m, l]) => showFeedback(m, l));
+      queue.feedback.forEach(([m, l]) => hostShowFeedback(m, l));
       if (queue.channels) useHostAPIStore.getState().setChannels(queue.channels);
       if (queue.channelMappings) useHostAPIStore.getState().setChannelMappings(queue.channelMappings);
       if (queue.events) useHostAPIStore.getState().setEvents(

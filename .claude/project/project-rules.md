@@ -295,6 +295,8 @@ See `decisions/error-handling.md` #5.
 
 **15.4 — The hand-rolled XML syntax checker (`validateXMLSyntax`) must not be removed in favor of relying solely on `fast-xml-parser`'s validator without confirming equivalent error precision and mid-typing tolerance.** [EXPLICIT — see rule 7.2]
 
+**15.5 — A host-originated `showFeedback(message, 'error')` call (via `window.ScxmlEditorAPI`) must never render its raw message in the toast. `use-host-api-bridge.ts`'s `hostShowFeedback` wrapper redirects the full text to the persistent Host Alerts panel (`showErrors`) and shows a fixed short toast instead — unconditionally, not gated by message length (a length threshold was tried and failed on real examples; see the decision record for why).** [EXPLICIT — see `decisions/error-handling.md` #6]
+
 ---
 
 ## 16. Performance

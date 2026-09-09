@@ -78,7 +78,7 @@ export const useHostAPIStore = create<HostAPIState & HostAPIActions>((set, get) 
   },
 
   executeCommand: async (id: string) => {
-    const { commands, showFeedback } = get();
+    const { commands, showFeedback, showErrors } = get();
     const command = commands.find(c => c.id === id);
     if (!command) return;
 
@@ -92,7 +92,8 @@ export const useHostAPIStore = create<HostAPIState & HostAPIActions>((set, get) 
       await command.run();
     } catch (error) {
       console.error(`Command "${id}" failed:`, error);
-      showFeedback(`Command failed: ${(error as Error).message}`, 'error');
+      showErrors([{ message: (error as Error).message, level: 'error' }]);
+      showFeedback(`${command.label} failed. See Error Panel for details.`, 'error');
     } finally {
       set(state => ({
         commands: state.commands.map(c =>

@@ -9,7 +9,7 @@ Give the user real-time, line/column-precise feedback on both XML syntax and SCX
 - Errors/warnings appear automatically ~500ms after the user stops typing or editing.
 - The toolbar status dot shows red (errors present) / yellow (warnings only) / green (clean); clicking it opens the Validation Panel.
 - Clicking an error jumps to it: if it has a line/column, the code editor scrolls/highlights that location; if it has a `stateId` (from a diagram-relevant check), the diagram instead navigates to and highlights that state (drilling through hierarchy levels as needed).
-- A separate "Host Alerts" tab in the same panel shows persistent, host-pushed messages (from the embedding LoopControl host) — entirely independent of this editor's own SCXML validation; only shown as a tab when at least one host alert exists.
+- A separate "Host Alerts" tab in the same panel shows persistent, host-pushed messages (from the embedding LoopControl host) — entirely independent of this editor's own SCXML validation; only shown as a tab when at least one host alert exists. As of `decisions/error-handling.md` #6, this tab can also receive entries the user didn't explicitly push via `showErrors()`: any host `showFeedback(msg, 'error')` call (e.g. a failed "Apply"/"Generate Program" action) is auto-mirrored here too — see `host-api-embedding.md`.
 
 ## UI behavior
 
