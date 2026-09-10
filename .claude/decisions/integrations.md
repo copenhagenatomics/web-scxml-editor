@@ -73,7 +73,7 @@ The inline stub only pre-declares a **subset** of the full API surface (`onReady
 None found evidenced (e.g. requiring the host to always wait for `onReady` before calling anything was not the chosen approach — the whole point of the stub is to make *some* calls safe even before that).
 
 ### Evidence
-`src/app/layout.tsx` (inline stub script), `src/app/_hooks/use-host-api-bridge.ts` (`Object.assign(stub, realApi)`).
+`src/lib/host-api/pre-ready-stub.ts` (stub script, embedded by `src/app/layout.tsx`), `src/app/_hooks/use-host-api-bridge.ts` (`Object.assign(stub, realApi)`).
 
 ### Status
 Accepted (with the confirmed partial-stub-surface gap as a known limitation, not a deliberate scoping choice — no comment explains why those specific methods were excluded from the stub).
