@@ -15,7 +15,7 @@ Any request to add test coverage; any task where `development.md` step 10/13 app
 
 1. **Before writing anything, know this rule: never place a new test file under a directory literally named `__tests__/`.** `vitest.config.ts` excludes `**/__tests__/**`, and 5 real, existing test files are already silently never run because of this (`src/lib/layout/__tests__/*`, `src/lib/utils/__tests__/config-overrides.test.ts`). Place new tests as a sibling of the module they test (`foo.ts` + `foo.test.ts` in the same directory) — matching the other 40+ test files in the repo.
 2. Check whether a test file already exists for the module you're changing — read it before modifying behavior; it encodes the currently-expected contract.
-3. Decide unit test vs. `@testing-library/react` test using this repo's actual, consistent convention: pure logic (validators, commands, layout math, utils, converters) → plain Vitest, no rendering. Only genuinely interactive components get RTL tests — currently exactly 7 files do (`events-panel`, `github-panel`, `state-actions-panel`, `multi-select-toolbar`, `transition-panel`, plus the `use-github-connect`/`use-github-pull` hooks). Do not add an RTL test to a purely presentational component "for completeness."
+3. Decide unit test vs. `@testing-library/react` test using this repo's actual, consistent convention: pure logic (validators, commands, layout math, utils, converters) → plain Vitest, no rendering. Only genuinely interactive components get RTL tests — currently exactly 10 files do (`events-panel`, `github-panel`, `state-actions-panel`, `multi-select-toolbar`, `transition-panel`, `parallel-group-wrapper-node`, `parallel-region-divider-overlay`, plus the `use-github-connect`/`use-github-pull`/`use-host-api-bridge` hooks). Do not add an RTL test to a purely presentational component "for completeness."
 4. If you're touching one of the 5 currently-excluded test files (or `config-overrides.ts`, `adaptive-spacing.ts`, `edge-obstacle-utils.ts`, `hub-centroid-nudge.ts`, `node-dimension-calculator.ts`), run it explicitly (`npx vitest run <path>`) — `npm test` will not exercise it, and its current pass/fail status is unknown until you do.
 5. Remember this repo has **no e2e/browser-automation framework** — anything requiring real browser/canvas/interaction verification cannot be covered by an automated test here; say so explicitly rather than writing a test that can't actually verify the behavior, and fall back to documenting the manual verification you performed instead.
 
@@ -36,7 +36,7 @@ Any request to add test coverage; any task where `development.md` step 10/13 app
 - Sibling file placement, always.
 - Use `globals: true` conventions already configured (`describe`/`it`/`expect` available without import, per `vitest.config.ts`).
 - For a pure function, test inputs/outputs directly — don't render a component just to exercise logic that's actually implemented in a plain utility it calls.
-- For an RTL test, follow the existing pattern in one of the 7 current examples (store reset in `afterEach`, `render`/`screen`/`fireEvent`).
+- For an RTL test, follow the existing pattern in one of the 10 current examples (store reset in `afterEach`, `render`/`screen`/`fireEvent`).
 
 ## Testing expectations
 

@@ -33,7 +33,7 @@ Accepted.
 The app has many React components, but most are presentational.
 
 ### Decision
-Only 7 test files use `@testing-library/react`: `events-panel`, `github-panel`, `state-actions-panel`, `multi-select-toolbar`, `transition-panel` (components), plus `use-github-connect`/`use-github-pull` (hooks) — all components with real branching interactive logic. Purely presentational components have no RTL tests.
+Only 10 test files use `@testing-library/react`: `events-panel`, `github-panel`, `state-actions-panel`, `multi-select-toolbar`, `transition-panel`, `parallel-group-wrapper-node`, `parallel-region-divider-overlay` (components), plus `use-github-connect`/`use-github-pull`/`use-host-api-bridge` (hooks) — all components with real branching interactive logic. Purely presentational components have no RTL tests.
 
 ### Reason
 Not documented in a dedicated note, but the pattern is consistent enough across the whole test suite to represent a deliberate convention: test business logic directly where it's pure, and reserve the heavier RTL setup for components where behavior genuinely depends on simulated user interaction and cannot be tested as a plain function.

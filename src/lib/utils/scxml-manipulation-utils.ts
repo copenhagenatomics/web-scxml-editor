@@ -743,6 +743,16 @@ export function cloneStateSubtreeWithFreshIds(
   const rootClone: StateElement = JSON.parse(JSON.stringify(state));
 
   function freshId(oldId: string): string {
+    // If the original id is no longer taken (e.g. a cut removed it from the
+    // document before this paste), reuse it as-is rather than manufacturing
+    // a "_copy" suffix — that suffix only makes sense when the source state
+    // still exists elsewhere and a paste needs a distinct id to avoid a
+    // collision with it.
+    if (!existingIds.has(oldId)) {
+      existingIds.add(oldId);
+      return oldId;
+    }
+
     let candidate = `${oldId}_copy`;
     let n = 2;
     while (existingIds.has(candidate)) {
@@ -779,6 +789,22 @@ export function cloneStateSubtreeWithFreshIds(
       const tokens = clone['@_initial'].split(/\s+/).filter(Boolean);
       clone['@_initial'] = tokens.map((t) => idMap.get(t) || t).join(' ');
     }
+    // Legacy <initial><transition target="X"/></initial> child-element form
+    // (see decisions/scxml.md #4) isn't normalized away until the user
+    // explicitly toggles that state's Initial flag — a document can still
+    // carry it, and a clone must remap its target the same way @_initial is
+    // remapped above, or the pasted copy's initial marking dangles, pointing
+    // at an id that only exists in the original (un-copied) subtree.
+    if (clone.initial) {
+      const transitions = Array.isArray(clone.initial.transition)
+        ? clone.initial.transition
+        : [clone.initial.transition];
+      transitions.forEach((t) => {
+        if (t['@_target'] && idMap.has(t['@_target'])) {
+          t['@_target'] = idMap.get(t['@_target'])!;
+        }
+      });
+    }
     if (clone.state) {
       const children = Array.isArray(clone.state) ? clone.state : [clone.state];
       children.forEach(rewriteInitial);
@@ -789,6 +815,53 @@ export function cloneStateSubtreeWithFreshIds(
   rewriteInitial(rootClone);
 
   return { clone: rootClone, idMap };
+}
+
+/**
+ * "Initial" is a property of the *parent* container's own attribute, not of
+ * the state element being copied (see initial-group-utils.ts's
+ * isMarkedInitial) — so cloneStateSubtreeWithFreshIds, which only sees the
+ * state being copied, has no way to carry it over on its own. This decides
+ * whether a paste should apply it to the new parent: only when that parent
+ * had no Initial marking of its own before the paste, mirroring the same
+ * "an empty container adopts its first dropped member as Initial for free"
+ * convention drag-to-reparent already uses (visual-diagram.tsx's
+ * handleReparent) — pasting into a parent that already designates an
+ * Initial state must not silently override or merge into it.
+ *
+ * Every formerly-Initial copied id is carried over, not just the first —
+ * copying/cutting 2+ members of a Parallel State (each one is Initial in its
+ * own region/work tree; that's exactly what made them a Parallel State in
+ * the first place, see parallel-group-normalization.ts) needs all of them
+ * reproduced as a multi-value `@_initial` on the new parent so the very same
+ * "2+ distinct Initial work trees" auto-wrap normalization that originally
+ * created the `<parallel>` element re-triggers on the pasted copy too —
+ * carrying over only one would leave the rest as ordinary flat siblings,
+ * silently dropping the parallel structure on paste.
+ *
+ * @param copied the original (pre-paste) clipboard states, each still
+ *   carrying its old id
+ * @param copiedInitialIds which of those old ids were Initial in their
+ *   source parent at copy time
+ * @param combinedIdMap old id -> new id, as produced by
+ *   cloneStateSubtreeWithFreshIds for every top-level pasted state
+ * @param targetHadNoInitial whether the paste's target container had zero
+ *   Initial ids of its own, checked *before* the paste's clones were added
+ * @returns the new ids that should become the target container's `@_initial`
+ *   (space-separated when writing them onto the attribute), or an empty
+ *   array if nothing should be carried over
+ */
+export function resolveCarriedOverInitialIds(
+  copied: StateElement[],
+  copiedInitialIds: Set<string>,
+  combinedIdMap: Map<string, string>,
+  targetHadNoInitial: boolean
+): string[] {
+  if (!targetHadNoInitial) return [];
+  return copied
+    .filter((state) => copiedInitialIds.has(state['@_id']))
+    .map((state) => combinedIdMap.get(state['@_id']))
+    .filter((id): id is string => Boolean(id));
 }
 
 /**

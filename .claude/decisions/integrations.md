@@ -61,7 +61,7 @@ Accepted.
 A host embedding this editor as an iframe might run its own initialization script before this app's React tree has mounted, and needs to call `window.ScxmlEditorAPI` methods immediately without race conditions.
 
 ### Decision
-`window.ScxmlEditorAPI` is pre-declared by an inline stub script in `src/app/layout.tsx` (running before hydration), which queues any calls made before the real API is ready (`_q: {ready, commands, feedback, channels, hostErrors}`). Once React mounts and the real API is constructed, `use-host-api-bridge.ts` upgrades the stub object **in place** (`Object.assign`) and flushes the queue, rather than replacing `window.ScxmlEditorAPI` with a new object.
+`window.ScxmlEditorAPI` is pre-declared by an inline stub script (source of truth: `src/lib/host-api/pre-ready-stub.ts`, embedded into `src/app/layout.tsx` via `dangerouslySetInnerHTML` so it runs before hydration), which queues any calls made before the real API is ready (`_q: {ready, commands, ops, channels}`). `showFeedback`/`showErrors`/`clearErrors` calls each push one typed entry onto the single `ops` array — not separate per-method buckets — specifically so they replay in the host's actual original call order; see `error-handling.md` #7 for the bug this fixed and why per-method buckets can't preserve ordering across methods. Once React mounts and the real API is constructed, `use-host-api-bridge.ts` upgrades the stub object **in place** (`Object.assign`) and replays `queue.ops` in array order, rather than replacing `window.ScxmlEditorAPI` with a new object.
 
 ### Reason
 Not documented in one dedicated note, but the in-place upgrade (rather than reassignment) is clearly deliberate: it means any reference the host already captured early (e.g. `var api = iframe.contentWindow.ScxmlEditorAPI` grabbed immediately on iframe load) automatically gains the real methods without the host needing to re-read the property later.
@@ -73,7 +73,7 @@ The inline stub only pre-declares a **subset** of the full API surface (`onReady
 None found evidenced (e.g. requiring the host to always wait for `onReady` before calling anything was not the chosen approach — the whole point of the stub is to make *some* calls safe even before that).
 
 ### Evidence
-`src/app/layout.tsx` (inline stub script), `src/app/_hooks/use-host-api-bridge.ts` (`Object.assign(stub, realApi)`).
+`src/lib/host-api/pre-ready-stub.ts` (stub script, embedded by `src/app/layout.tsx`), `src/app/_hooks/use-host-api-bridge.ts` (`Object.assign(stub, realApi)`).
 
 ### Status
 Accepted (with the confirmed partial-stub-surface gap as a known limitation, not a deliberate scoping choice — no comment explains why those specific methods were excluded from the stub).

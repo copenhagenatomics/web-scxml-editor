@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import type { SCXMLDocument } from '@/types/scxml';
 import { normalizeParallelGroups, collectAutoParallelGroups, hasAnyChildren } from './parallel-group-normalization';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
+import {
+  addStateToDocument,
+  cloneStateSubtreeWithFreshIds,
+  resolveCarriedOverInitialIds,
+} from './scxml-manipulation-utils';
 
 function ids(states: any): string[] {
   if (!states) return [];
@@ -407,5 +412,56 @@ describe('hasAnyChildren', () => {
     expect(
       hasAnyChildren({ parallel: { '@_id': 'Manual', state: [{ '@_id': 'A' }] } } as any)
     ).toBe(true);
+  });
+});
+
+describe('copy/cut + paste of a Parallel State (end-to-end with the paste pipeline)', () => {
+  it('re-wraps pasted region members into a real <parallel> at the new location', () => {
+    // Root has an auto-wrapped Parallel State (regions A and B) alongside an
+    // ordinary, unrelated sibling ("Target") we'll paste the copy into.
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Target' }],
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    expect(ids(d.scxml.state)).toEqual(['Target']);
+    const rootParallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
+    expect((rootParallel as any)['@_viz:auto-parallel']).toBe('true');
+
+    // Simulate selecting and copying both region members: each is Initial
+    // in its own work tree, exactly what copyActiveStatesToClipboard records
+    // via isMarkedInitial before the source states are cloned.
+    const regionStates = (Array.isArray(rootParallel.state) ? rootParallel.state : [rootParallel.state]) as any[];
+    const copied = regionStates.map((r) => JSON.parse(JSON.stringify(r)));
+    const copiedInitialIds = new Set(copied.map((s) => s['@_id'])); // both A and B
+
+    // Paste under "Target", currently empty — mirrors handlePasteClipboard.
+    const existingIds = new Set(['Target', ...copied.map((s) => s['@_id'])]);
+    const combinedIdMap = new Map<string, string>();
+    const clones = copied.map((state) => {
+      const { clone, idMap } = cloneStateSubtreeWithFreshIds(state, existingIds, 0, 0);
+      idMap.forEach((newId, oldId) => combinedIdMap.set(oldId, newId));
+      return clone;
+    });
+    const target = d.scxml.state as any;
+    clones.forEach((clone) => addStateToDocument(d, clone, target['@_id']));
+
+    const carriedIds = resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, true);
+    expect(carriedIds).toHaveLength(2);
+    target['@_initial'] = carriedIds.join(' ');
+
+    // The normalization pass every diagram mutation runs through should now
+    // re-wrap the pasted copies into their own real <parallel>, exactly as
+    // it did for the original — not leave them as flat ordinary siblings.
+    const result = normalizeParallelGroups(d);
+    expect(result.changed).toBe(true);
+    expect((target as any).parallel).toBeDefined();
+    const pastedParallel = Array.isArray((target as any).parallel)
+      ? (target as any).parallel[0]
+      : (target as any).parallel;
+    expect(pastedParallel['@_viz:auto-parallel']).toBe('true');
+    expect(ids(pastedParallel.state).sort()).toEqual(clones.map((c) => c['@_id']).sort());
   });
 });

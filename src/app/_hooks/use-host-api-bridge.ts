@@ -7,13 +7,28 @@ import { EVENT_FALLBACK_VALUE } from '@/lib/utils/common-utils';
 import { useEditorStore } from '@/stores/editor-store';
 import { usePanelStore } from '@/stores/panel-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
-import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, ScxmlEditorAPI } from '@/types/host-api';
+import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, FeedbackItem, ScxmlEditorAPI } from '@/types/host-api';
 
 export function useHostAPIBridge() {
   const { setContent, setErrors, navigateToRoot } = useEditorStore();
   const { togglePanel } = usePanelStore();
-  const { markReady, onReady, registerCommand, showFeedback } = useHostAPIStore();
+  const { markReady, onReady, registerCommand, showFeedback, showErrors } = useHostAPIStore();
   const historyManager = useMemo(() => HistoryManager.getInstance(), []);
+
+  // Anything the host reports via showFeedback('error') is operational error detail
+  // (program generation, channel/event/config load, or any other host-side failure)
+  // meant for a developer to inspect, not toast copy — the full text goes to the
+  // persistent Error Panel, the toast stays short and doesn't assume which operation failed.
+  // This repo's own showFeedback('error') calls (GitHub push/pull, panel saves, etc.) are
+  // already short, curated strings and call the store directly, so they never pass through here.
+  const hostShowFeedback = useCallback((message: string, level?: FeedbackItem['level']) => {
+    if (level === 'error') {
+      showErrors([{ message, level: 'error' }]);
+      showFeedback('Host reported an error. See Error Panel for details.', 'error');
+    } else {
+      showFeedback(message, level);
+    }
+  }, [showFeedback, showErrors]);
 
   const content = useEditorStore(state => state.content);
   const storeChannelMappings = useHostAPIStore(state => state.channelMappings);
@@ -51,7 +66,7 @@ export function useHostAPIBridge() {
       getConfigValues: () => configValuesRef.current,
       setConfigValues: (values: ConfigOverride[]) => useHostAPIStore.getState().setConfigOverrides(values),
       registerCommand,
-      showFeedback,
+      showFeedback: hostShowFeedback,
       setChannels: (channels: ChannelInfo[]) => useHostAPIStore.getState().setChannels(channels),
       toggleConfigPanel: () => togglePanel('config'),
       getChannelMappings: () => {
@@ -75,30 +90,37 @@ export function useHostAPIBridge() {
       // Upgrade the stub object in place so any host reference already captured
       // (e.g. `var api = iframe.contentWindow.ScxmlEditorAPI` in a load handler)
       // automatically gets the real methods without needing to re-read the property.
+      type QueuedOp =
+        | { type: 'feedback'; message: string; level?: FeedbackItem['level'] }
+        | { type: 'showErrors'; errors: Array<{ message: string; level?: string }> }
+        | { type: 'clearErrors' };
       const queue = stub._q as {
         ready: (() => void)[];
         commands: any[];
-        feedback: [string, any][];
+        ops: QueuedOp[];
         channels?: ChannelInfo[];
         channelMappings?: ChannelMapping[];
         events?: EventEntry[];
-        hostErrors?: Array<{ message: string; level?: string }>;
-        clearErrors?: boolean;
       };
       Object.assign(stub, realApi);
       delete stub._q;
       queue.ready.forEach(cb => onReady(cb));
       queue.commands.forEach(o => registerCommand(o));
-      queue.feedback.forEach(([m, l]) => showFeedback(m, l));
       if (queue.channels) useHostAPIStore.getState().setChannels(queue.channels);
       if (queue.channelMappings) useHostAPIStore.getState().setChannelMappings(queue.channelMappings);
       if (queue.events) useHostAPIStore.getState().setEvents(
         queue.events.map(e => ({ ...e, type: e.type ?? EVENT_FALLBACK_VALUE }))
       );
-      if (queue.clearErrors) useHostAPIStore.getState().clearHostErrors();
-      if (queue.hostErrors?.length) useHostAPIStore.getState().showErrors(
-        queue.hostErrors as Array<{ message: string; level?: 'info' | 'warning' | 'error' }>
-      );
+      // Replayed in original call order so a host's clearErrors() <-> error-feedback
+      // interleaving lands the same way it would have if the host API had been ready
+      // immediately (see use-host-api-bridge.test.ts ordering tests).
+      queue.ops.forEach(op => {
+        if (op.type === 'feedback') hostShowFeedback(op.message, op.level);
+        else if (op.type === 'showErrors') useHostAPIStore.getState().showErrors(
+          op.errors as Array<{ message: string; level?: 'info' | 'warning' | 'error' }>
+        );
+        else if (op.type === 'clearErrors') useHostAPIStore.getState().clearHostErrors();
+      });
     } else {
       window.ScxmlEditorAPI = realApi;
     }

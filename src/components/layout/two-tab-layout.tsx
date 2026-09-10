@@ -191,10 +191,10 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
           key={item.id}
           className={`absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-start space-x-3 px-4 py-3 rounded-lg shadow-lg text-sm max-w-lg w-full ${
             item.level === "info"
-              ? "bg-success/10 border border-success/30 text-success"
+              ? "bg-green-50 dark:bg-green-950/90 border border-green-200 dark:border-green-900 text-green-800 dark:text-green-300"
               : item.level === "warning"
-                ? "bg-warning/10 border border-warning/30 text-warning"
-                : "bg-error/10 border border-error/30 text-error"
+                ? "bg-yellow-50 dark:bg-yellow-950/90 border border-yellow-200 dark:border-yellow-900 text-yellow-800 dark:text-yellow-300"
+                : "bg-red-50 dark:bg-red-950/90 border border-red-200 dark:border-red-900 text-red-800 dark:text-red-300"
           }`}
         >
           <span className='flex-1 whitespace-pre-wrap'>{item.message}</span>
