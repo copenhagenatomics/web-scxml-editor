@@ -15,6 +15,7 @@ import {
   removeTransitionByEdgeId,
   cloneStateSubtreeWithFreshIds,
   rewriteOrDropTransitions,
+  resolveCarriedOverInitialIds,
   detachStateFromParent,
   isDescendantOf,
 } from '@/lib/utils/scxml-manipulation-utils';
@@ -32,6 +33,7 @@ import {
 import { ActionType } from '@/types/history';
 import type { SCXMLDocument, StateElement, TransitionElement } from '@/types/scxml';
 import { useStateClipboardStore } from '@/stores/state-clipboard-store';
+import { useHostAPIStore } from '@/stores/host-api-store';
 import { MultiSelectToolbar } from './multi-select-toolbar';
 import {
   SmartBezierEdge,
@@ -83,6 +85,7 @@ import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
   wouldConflictIfMarkedInitial,
+  getInitialIds,
 } from '@/lib/utils/initial-group-utils';
 import { wouldCrossParallelRegions } from '@/lib/utils/parallel-region-connection-validation';
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
@@ -205,6 +208,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const [activeStates, setActiveStates] = React.useState<Set<string>>(
     new Set()
   );
+  const showFeedback = useHostAPIStore((s) => s.showFeedback);
   const [selectedTransitions, setSelectedTransitions] = React.useState<
     Set<string>
   >(new Set());
@@ -631,12 +635,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         if (content !== scxmlContent) {
           onSCXMLChange(content, 'structure');
           setActiveStates(new Set());
+
+          if (stateIds.length > 0 && noteIds.length > 0) {
+            const total = stateIds.length + noteIds.length;
+            showFeedback(`${total} items deleted.`, 'info');
+          } else if (noteIds.length > 0) {
+            showFeedback(noteIds.length === 1 ? 'Note deleted.' : `${noteIds.length} notes deleted.`, 'info');
+          } else {
+            showFeedback(stateIds.length === 1 ? 'State deleted.' : `${stateIds.length} states deleted.`, 'info');
+          }
         }
       } catch (error) {
         console.error('Failed to delete node:', error);
       }
     },
-    [scxmlContent, onSCXMLChange]
+    [scxmlContent, onSCXMLChange, showFeedback]
   );
 
   // ==================== NOTE HANDLERS ====================
@@ -1716,6 +1729,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     parsedDataRef.current = parsedData;
   }, [parsedData]);
 
+  // Set once the first parse attempt (success or failure) has completed.
+  // The resync effect below needs to tell "haven't parsed yet" (skip, so we
+  // don't briefly flash an empty canvas before the first parse lands) apart
+  // from "parsed, and this hierarchy level now legitimately has zero nodes"
+  // (e.g. every state at this level was just deleted) — enhancedNodes.length
+  // alone can't distinguish those two cases.
+  const hasParsedOnceRef = React.useRef(false);
+
   // ==================== WAYPOINT HANDLERS ====================
   const handleWaypointDrag = React.useCallback(
     (edgeId: string, index: number, x: number, y: number) => {
@@ -2026,6 +2047,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         parser: null,
         metadataManager: null,
       });
+      hasParsedOnceRef.current = true;
       return;
     }
 
@@ -2353,6 +2375,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               parser,
               metadataManager,
             });
+            hasParsedOnceRef.current = true;
           }
         } else {
           console.warn('SCXML parsing failed:', parseResult.errors);
@@ -2363,6 +2386,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               parser: null,
               metadataManager: null,
             });
+            hasParsedOnceRef.current = true;
           }
         }
       } catch (error) {
@@ -2374,6 +2398,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             parser: null,
             metadataManager: null,
           });
+          hasParsedOnceRef.current = true;
         }
       }
     }
@@ -2621,23 +2646,48 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   const lastPastedClipboardRef = React.useRef<StateElement[] | null>(null);
   const pasteOffsetMultiplierRef = React.useRef(1);
 
-  const handleCopySelection = useCallback(() => {
-    if (!scxmlContent || activeStates.size === 0) return;
+  // Shared by Copy and Cut — copies the current selection into the state
+  // clipboard without itself toasting, so Cut (which copies internally, then
+  // deletes) can show a single "cut" toast instead of stacking a "copied"
+  // toast on top of it. Returns how many states were copied.
+  const copyActiveStatesToClipboard = useCallback(() => {
+    if (!scxmlContent || activeStates.size === 0) return 0;
     const parseResult = parserRef.current?.parse(scxmlContent);
-    if (!parseResult?.success || !parseResult.data) return;
+    if (!parseResult?.success || !parseResult.data) return 0;
 
     const clones: StateElement[] = [];
+    // "Initial" is recorded on the *parent*, not on the state element being
+    // cloned (see isMarkedInitial), so it has to be captured here — before
+    // the source document is left behind — for paste to have any chance of
+    // carrying it over onto the pasted copy.
+    const initialIds = new Set<string>();
     activeStates.forEach((id) => {
       const found = findStateById(parseResult.data as SCXMLDocument, id);
-      if (found) clones.push(JSON.parse(JSON.stringify(found)));
+      if (found) {
+        clones.push(JSON.parse(JSON.stringify(found)));
+        if (isMarkedInitial(parseResult.data as SCXMLDocument, id)) {
+          initialIds.add(id);
+        }
+      }
     });
     if (clones.length > 0) {
-      useStateClipboardStore.getState().copy(clones);
+      useStateClipboardStore.getState().copy(clones, initialIds);
+      // Clear the selection so the Multi-Select Toolbar closes, matching
+      // Cut/Delete's behavior of dismissing it once their action completes.
+      setActiveStates(new Set());
     }
+    return clones.length;
   }, [scxmlContent, activeStates]);
 
+  const handleCopySelection = useCallback(() => {
+    const count = copyActiveStatesToClipboard();
+    if (count > 0) {
+      showFeedback(count === 1 ? 'State copied.' : `${count} states copied.`, 'info');
+    }
+  }, [copyActiveStatesToClipboard, showFeedback]);
+
   const handlePasteClipboard = useCallback(() => {
-    const copied = useStateClipboardStore.getState().copied;
+    const { copied, copiedInitialIds } = useStateClipboardStore.getState();
     if (!copied || copied.length === 0 || !onSCXMLChange || !scxmlContent) return;
 
     if (copied !== lastPastedClipboardRef.current) {
@@ -2651,6 +2701,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     const parseResult = parserRef.current?.parse(scxmlContent);
     if (!parseResult?.success || !parseResult.data) return;
     const scxmlDoc = parseResult.data as SCXMLDocument;
+
+    // "Initial" lives on the parent, not on the state itself (see
+    // isMarkedInitial), so carrying it over from a copied/cut state that was
+    // its old parent's Initial child means re-deriving the *new* parent's own
+    // initial marking here — but only when that new parent has none of its
+    // own yet, mirroring the same "container was empty, gets its first
+    // dropped member for free" convention drag-to-reparent already uses
+    // (see handleReparent below). Read before any clones are added, since
+    // adding them is what would otherwise make this container look non-empty.
+    const targetContainer = currentParentId
+      ? findStateById(scxmlDoc, currentParentId)
+      : scxmlDoc.scxml;
+    const targetHadNoInitial = targetContainer
+      ? getInitialIds(targetContainer).size === 0
+      : false;
 
     const existingIds = new Set(parsedData.nodes.map((n) => n.id));
     const combinedIdMap = new Map<string, string>();
@@ -2667,6 +2732,17 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined);
     });
 
+    const carriedInitialIds = targetContainer
+      ? resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, targetHadNoInitial)
+      : [];
+    if (targetContainer && carriedInitialIds.length > 0) {
+      // A multi-value @_initial here is deliberate, not just the single-id
+      // case handleReparent covers — it's what lets the same "2+ distinct
+      // Initial work trees" normalization pass that originally created a
+      // Parallel State re-wrap it here too (see resolveCarriedOverInitialIds).
+      (targetContainer as { '@_initial'?: string })['@_initial'] = carriedInitialIds.join(' ');
+    }
+
     const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
     onSCXMLChange(updatedSCXML, 'structure');
     setActiveStates(new Set(clones.map((c) => c['@_id'])));
@@ -2674,10 +2750,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const handleCutSelection = useCallback(() => {
     if (activeStates.size === 0) return;
-    handleCopySelection();
     const ids = Array.from(activeStates);
+    const count = copyActiveStatesToClipboard();
     handleNodesChange(ids.map((id) => ({ id, type: 'remove' })));
-  }, [activeStates, handleCopySelection, handleNodesChange]);
+    if (count > 0) {
+      showFeedback(count === 1 ? 'State cut.' : `${count} states cut.`, 'info');
+    }
+  }, [activeStates, copyActiveStatesToClipboard, handleNodesChange, showFeedback]);
 
   // ==================== DRAG-TO-NEST ====================
   const handleReparent = useCallback(
@@ -3012,7 +3091,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // React bails the resulting state updates out as no-ops.
   const applyLatestEnhancedNodes = React.useCallback(() => {
     if (draggingNodeIdsRef.current.length > 0) return;
-    if (enhancedNodes.length === 0) return;
+    if (enhancedNodes.length === 0 && !hasParsedOnceRef.current) return;
 
     setNodes(enhancedNodes);
     const selectableEdges = hierarchyFilteredEdges.map((edge) => ({
@@ -3065,7 +3144,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     if (
       (isUpdatingFromHistory ||
         (!isUpdatingPositionRef.current && draggingNodeIdsRef.current.length === 0)) &&
-      enhancedNodes.length > 0
+      (enhancedNodes.length > 0 || hasParsedOnceRef.current)
     ) {
       if (historyActionType === 'node-resize') {
         setNodes([]);
@@ -3450,7 +3529,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             message={connectionBlockedMessage}
             onDismiss={() => setConnectionBlockedMessage(null)}
           />
-          {activeStates.size >= 2 && (
+          {activeStates.size >= 1 && (
             <MultiSelectToolbar
               count={activeStates.size}
               onCopy={handleCopySelection}

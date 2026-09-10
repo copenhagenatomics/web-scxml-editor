@@ -8,6 +8,7 @@ import {
   detachStateFromParent,
   cloneStateSubtreeWithFreshIds,
   rewriteOrDropTransitions,
+  resolveCarriedOverInitialIds,
   findStateById,
 } from './scxml-manipulation-utils';
 
@@ -302,6 +303,91 @@ describe('cloneStateSubtreeWithFreshIds', () => {
     const original = { '@_id': 'Parent', state: [child], '@_initial': 'Child' } as any;
     const { clone } = cloneStateSubtreeWithFreshIds(original, new Set(['Parent', 'Child']), 0, 0);
     expect(clone['@_initial']).toBe('Child_copy');
+  });
+
+  it('reuses the original id, with no "_copy" suffix, when it is no longer taken (cut then paste)', () => {
+    const original = { '@_id': 'A' };
+    const { clone, idMap } = cloneStateSubtreeWithFreshIds(
+      original as any,
+      new Set(),
+      40,
+      40
+    );
+    expect(clone['@_id']).toBe('A');
+    expect(idMap.get('A')).toBe('A');
+  });
+
+  it('still de-dupes against sibling ids reserved earlier in the same paste', () => {
+    const original = { '@_id': 'A' };
+    const existingIds = new Set(['A']);
+    const { clone } = cloneStateSubtreeWithFreshIds(original as any, existingIds, 40, 40);
+    expect(clone['@_id']).toBe('A_copy');
+    expect(existingIds.has('A_copy')).toBe(true);
+  });
+
+  it('rewrites a legacy <initial> child-element transition target to the new child id', () => {
+    const child = { '@_id': 'Child' };
+    const original = {
+      '@_id': 'Parent',
+      state: [child],
+      initial: { transition: { '@_target': 'Child' } },
+    } as any;
+    const { clone } = cloneStateSubtreeWithFreshIds(
+      original,
+      new Set(['Parent', 'Child']),
+      0,
+      0
+    );
+    expect((clone as any).initial.transition['@_target']).toBe('Child_copy');
+  });
+
+  it('rewrites every target in an array of <initial> transitions', () => {
+    const childA = { '@_id': 'A' };
+    const childB = { '@_id': 'B' };
+    const original = {
+      '@_id': 'Parent',
+      state: [childA, childB],
+      initial: {
+        transition: [{ '@_target': 'A' }, { '@_target': 'B' }],
+      },
+    } as any;
+    const { clone } = cloneStateSubtreeWithFreshIds(
+      original,
+      new Set(['Parent', 'A', 'B']),
+      0,
+      0
+    );
+    expect((clone as any).initial.transition[0]['@_target']).toBe('A_copy');
+    expect((clone as any).initial.transition[1]['@_target']).toBe('B_copy');
+  });
+});
+
+describe('resolveCarriedOverInitialIds', () => {
+  it('carries the id over when the copied state was Initial and the target has none', () => {
+    const copied = [{ '@_id': 'A' }] as any;
+    const idMap = new Map([['A', 'A_copy']]);
+    expect(resolveCarriedOverInitialIds(copied, new Set(['A']), idMap, true)).toEqual(['A_copy']);
+  });
+
+  it('does nothing when the target container already has an Initial state', () => {
+    const copied = [{ '@_id': 'A' }] as any;
+    const idMap = new Map([['A', 'A_copy']]);
+    expect(resolveCarriedOverInitialIds(copied, new Set(['A']), idMap, false)).toEqual([]);
+  });
+
+  it('does nothing when none of the copied states were Initial', () => {
+    const copied = [{ '@_id': 'A' }] as any;
+    const idMap = new Map([['A', 'A_copy']]);
+    expect(resolveCarriedOverInitialIds(copied, new Set(), idMap, true)).toEqual([]);
+  });
+
+  it('carries over every formerly-Initial state, not just the first, so a copied Parallel State (2+ regions, each Initial in its own work tree) re-triggers the auto-<parallel>-wrap normalization on paste', () => {
+    const copied = [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'C' }] as any;
+    const idMap = new Map([['A', 'A_copy'], ['B', 'B_copy'], ['C', 'C_copy']]);
+    expect(resolveCarriedOverInitialIds(copied, new Set(['A', 'C']), idMap, true)).toEqual([
+      'A_copy',
+      'C_copy',
+    ]);
   });
 });
 
