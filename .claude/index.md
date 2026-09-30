@@ -233,6 +233,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...`after 2s` gets stored with a `* 1000` in the expression | [scxml.md](decisions/scxml.md) #6 |
 | ...onentry/onexit unknown-attribute checks don't fire on real files | [scxml.md](decisions/scxml.md) #8 (Inferred) |
 | ...2+ Initial-State groups get restructured into a real `<parallel>` element in the document itself | [scxml.md](decisions/scxml.md) #10 |
+| ...every auto-wrapped `<parallel>` region (even a single-member one) has its own `*_region` wrapper state | [scxml.md](decisions/scxml.md) #11 |
 | ...compound states don't render nested inside their parent | [visual-diagram.md](decisions/visual-diagram.md) #1 |
 | ...there's no separate node component per state type | [visual-diagram.md](decisions/visual-diagram.md) #2 |
 | ...history states look like an oversized dashed box | [visual-diagram.md](decisions/visual-diagram.md) #3 |

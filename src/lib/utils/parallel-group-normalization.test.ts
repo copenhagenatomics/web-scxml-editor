@@ -38,7 +38,7 @@ describe('normalizeParallelGroups', () => {
     expect(d.scxml.parallel).toBeUndefined();
   });
 
-  it('wraps two single-member initial groups under the root into a <parallel> with bare regions', () => {
+  it('wraps two single-member initial groups under the root into a <parallel>, each in its own *_region wrapper', () => {
     const d: SCXMLDocument = {
       scxml: {
         '@_initial': 'A B',
@@ -52,13 +52,79 @@ describe('normalizeParallelGroups', () => {
     expect((parallel as any)['@_viz:auto-parallel']).toBe('true');
     expect(d.scxml['@_initial']).toBe(parallel['@_id']);
     const regionIds = ids(parallel.state);
-    expect(regionIds.sort()).toEqual(['A', 'B']);
-    // Bare single-member regions are the original state elements, not wrapped.
+    expect(regionIds.sort()).toEqual(['A_region', 'B_region']);
+    // Every region, even a single-member one, is a *_region wrapper state
+    // containing the actual member — never the member itself sitting
+    // directly under <parallel>.
     const regions = Array.isArray(parallel.state) ? parallel.state : [parallel.state];
-    regions.forEach((r: any) => expect(r['@_viz:auto-region']).toBeUndefined());
+    regions.forEach((r: any) => {
+      expect(r['@_viz:auto-region']).toBe('true');
+      expect(ids(r.state)).toEqual([r['@_initial']]);
+    });
   });
 
-  it('wraps a multi-member group (connected via a transition) into a synthetic auto-region <state>', () => {
+  it('disambiguates a synthesized region id that would otherwise collide with an unrelated, pre-existing sibling id', () => {
+    // A and C are each their own single-member Initial-marked work tree
+    // (triggering a 2-group wrap), and A_region is a plain, unrelated
+    // sibling — not Initial, not connected to A or C. Naively minting
+    // `${initialId}_region` for A would collide with this pre-existing
+    // state's id, producing a document with two distinct elements sharing
+    // @_id="A_region".
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A C',
+        state: [{ '@_id': 'A' }, { '@_id': 'C' }, { '@_id': 'A_region' }],
+      } as any,
+    };
+    const result = normalizeParallelGroups(d);
+    expect(result.changed).toBe(true);
+
+    const allIds: string[] = [];
+    const collect = (el: any): void => {
+      if (!el) return;
+      const arr = Array.isArray(el) ? el : [el];
+      arr.forEach((e) => {
+        if (e['@_id']) allIds.push(e['@_id']);
+        collect(e.state);
+        collect(e.parallel);
+      });
+    };
+    collect(d.scxml.state);
+    collect(d.scxml.parallel);
+
+    const duplicates = allIds.filter((id, i) => allIds.indexOf(id) !== i);
+    expect(duplicates).toEqual([]);
+
+    // The unrelated sibling keeps its own id, untouched, sitting alongside
+    // the (renamed) synthesized region for A.
+    expect(ids(d.scxml.state)).toContain('A_region');
+    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
+    const regionIds = ids(parallel.state);
+    expect(regionIds).toContain('C_region');
+    expect(regionIds.find((id) => id !== 'C_region')).not.toBe('A_region');
+  });
+
+  it('does not drift a synthesized region id on repeated normalization when no unrelated sibling collides', () => {
+    // Guards against a naive collision-avoidance fix that treats a
+    // container's own previous auto-wrap ids as "taken" and needlessly
+    // re-suffixes them (A_region -> A_region_2 -> A_region_2_2 ...) on every
+    // single normalization pass, since normalizeParallelGroups recomputes
+    // everything fresh every time it runs (e.g. on every keystroke).
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    normalizeParallelGroups(d);
+    const result = normalizeParallelGroups(d);
+    expect(result.changed).toBe(false);
+    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
+    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
+  });
+
+  it('wraps a multi-member group (connected via a transition) into a synthetic auto-region <state>, alongside the other region\'s own *_region wrapper', () => {
     const d: SCXMLDocument = {
       scxml: {
         '@_initial': 'main_region state_2',
@@ -81,9 +147,11 @@ describe('normalizeParallelGroups', () => {
     expect((mainRegionWrapper as any)['@_initial']).toBe('main_region');
     expect(ids(mainRegionWrapper!.state).sort()).toEqual(['main_region', 'state_1']);
 
-    const bareRegion = regions.find((r: any) => r['@_id'] === 'state_2');
-    expect(bareRegion).toBeDefined();
-    expect((bareRegion as any)['@_viz:auto-region']).toBeUndefined();
+    const singleMemberRegion = regions.find((r: any) => r['@_id'] === 'state_2_region');
+    expect(singleMemberRegion).toBeDefined();
+    expect((singleMemberRegion as any)['@_viz:auto-region']).toBe('true');
+    expect((singleMemberRegion as any)['@_initial']).toBe('state_2');
+    expect(ids(singleMemberRegion!.state)).toEqual(['state_2']);
   });
 
   it('is idempotent: running twice produces no further change', () => {
@@ -147,7 +215,7 @@ describe('normalizeParallelGroups', () => {
     normalizeParallelGroups(d);
     expect(ids(d.scxml.state)).toEqual(['Unassigned']);
     const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(ids(parallel.state).sort()).toEqual(['A', 'B']);
+    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
   });
 
   it('unwraps back to flat siblings when only one region remains in an already-wrapped parallel', () => {
@@ -160,11 +228,11 @@ describe('normalizeParallelGroups', () => {
     normalizeParallelGroups(d);
 
     // Simulate some other mutation (e.g. a delete-state command) removing
-    // region B's bare wrapper from the already-wrapped parallel, leaving a
-    // <parallel> with a single region — no longer a valid multi-group wrap.
+    // region B's *_region wrapper from the already-wrapped parallel, leaving
+    // a <parallel> with a single region — no longer a valid multi-group wrap.
     const parallel: any = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
     parallel.state = (Array.isArray(parallel.state) ? parallel.state : [parallel.state]).filter(
-      (r: any) => r['@_id'] !== 'B'
+      (r: any) => r['@_id'] !== 'B_region'
     );
     if (Array.isArray(parallel.state) && parallel.state.length === 1) {
       parallel.state = parallel.state[0];
@@ -177,13 +245,13 @@ describe('normalizeParallelGroups', () => {
     expect(d.scxml['@_initial']).toBe('A');
   });
 
-  it('un-wraps a bare region whose Initial marker was removed from @_initial while the <parallel> structure itself is untouched (reproduces the reported "uncheck does nothing" bug)', () => {
+  it('un-wraps a region whose Initial marker was removed from @_initial while the <parallel> structure itself is untouched (reproduces the reported "uncheck does nothing" bug)', () => {
     // This is exactly the intermediate document shape
     // ToggleInitialStateCommand now produces: it recomputes the real Initial
     // id set and writes it straight onto the container's @_initial, without
     // itself touching the still-wrapped <parallel>/region DOM structure
     // (that restructuring is this function's job, run on the very next
-    // normalization pass). A bare region's continued *physical* presence in
+    // normalization pass). A region's continued *physical* presence in
     // the <parallel> must NOT be treated as proof it's still Initial —
     // @_initial is the authoritative source once it already names real
     // tokens instead of the wrapper's own id.
@@ -198,18 +266,19 @@ describe('normalizeParallelGroups', () => {
     expect(d.scxml['@_initial']).toBe(parallelId);
 
     // Simulate ToggleInitialStateCommand unmarking C: write the real
-    // remaining token list, leaving the <parallel>'s bare regions (still
-    // including C) completely untouched.
+    // remaining token list, leaving the <parallel>'s regions (still
+    // including C's) completely untouched.
     d.scxml['@_initial'] = 'A B';
 
     const result = normalizeParallelGroups(d);
     expect(result.changed).toBe(true);
-    // C must end up outside the wrapper, flat and unassigned — not
-    // re-recognized as its own Initial region just because it's still
-    // physically a bare region at this point.
+    // C must end up outside the wrapper, flat and unassigned (unwrapped back
+    // to its own raw <state>, no *_region wrapper) — not re-recognized as
+    // its own Initial region just because it's still physically wrapped at
+    // this point.
     expect(ids(d.scxml.state)).toEqual(['C']);
     const parallel: any = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(ids(parallel.state).sort()).toEqual(['A', 'B']);
+    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
     expect(d.scxml['@_initial']).toBe(parallelId);
   });
 
@@ -231,7 +300,7 @@ describe('normalizeParallelGroups', () => {
     const parent = (Array.isArray(d.scxml.state) ? d.scxml.state[0] : d.scxml.state)! as any;
     expect(parent.state).toBeUndefined();
     const parallel = Array.isArray(parent.parallel) ? parent.parallel[0] : parent.parallel;
-    expect(ids(parallel.state).sort()).toEqual(['X', 'Y']);
+    expect(ids(parallel.state).sort()).toEqual(['X_region', 'Y_region']);
     expect(parent['@_initial']).toBe(parallel['@_id']);
   });
 
@@ -278,7 +347,7 @@ describe('normalizeParallelGroups', () => {
     expect(result.changed).toBe(true);
     const parallelAfter = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
     expect(parallelAfter['@_id']).toBe(parallelId);
-    expect(ids(parallelAfter.state).sort()).toEqual(['A', 'B', 'C']);
+    expect(ids(parallelAfter.state).sort()).toEqual(['A_region', 'B_region', 'C_region']);
   });
 });
 
@@ -290,7 +359,7 @@ describe('collectAutoParallelGroups', () => {
     expect(collectAutoParallelGroups(d)).toEqual([]);
   });
 
-  it('reports bare single-member regions at the root', () => {
+  it('reports single-member regions at the root', () => {
     const d: SCXMLDocument = {
       scxml: {
         '@_initial': 'A B',
@@ -304,7 +373,7 @@ describe('collectAutoParallelGroups', () => {
     expect(groups[0].regions.map((r) => r.memberIds).sort()).toEqual([['A'], ['B']]);
   });
 
-  it('reports a multi-member auto-region alongside a bare region', () => {
+  it('reports a multi-member auto-region alongside a single-member region', () => {
     const d: SCXMLDocument = {
       scxml: {
         '@_initial': 'main_region state_2',
@@ -432,9 +501,13 @@ describe('copy/cut + paste of a Parallel State (end-to-end with the paste pipeli
 
     // Simulate selecting and copying both region members: each is Initial
     // in its own work tree, exactly what copyActiveStatesToClipboard records
-    // via isMarkedInitial before the source states are cloned.
-    const regionStates = (Array.isArray(rootParallel.state) ? rootParallel.state : [rootParallel.state]) as any[];
-    const copied = regionStates.map((r) => JSON.parse(JSON.stringify(r)));
+    // via isMarkedInitial before the source states are cloned. The diagram
+    // flattens auto-wrapped structure (collectEffectiveStateChildren), so
+    // what a user actually selects/copies is each region's real member
+    // state — one level inside its *_region wrapper — not the wrapper
+    // itself.
+    const regionWrappers = (Array.isArray(rootParallel.state) ? rootParallel.state : [rootParallel.state]) as any[];
+    const copied = regionWrappers.map((r) => JSON.parse(JSON.stringify(r.state)));
     const copiedInitialIds = new Set(copied.map((s) => s['@_id'])); // both A and B
 
     // Paste under "Target", currently empty — mirrors handlePasteClipboard.
@@ -462,6 +535,9 @@ describe('copy/cut + paste of a Parallel State (end-to-end with the paste pipeli
       ? (target as any).parallel[0]
       : (target as any).parallel;
     expect(pastedParallel['@_viz:auto-parallel']).toBe('true');
-    expect(ids(pastedParallel.state).sort()).toEqual(clones.map((c) => c['@_id']).sort());
+    // Each pasted clone gets its own *_region wrapper, not a bare region.
+    expect(ids(pastedParallel.state).sort()).toEqual(
+      clones.map((c) => `${c['@_id']}_region`).sort()
+    );
   });
 });

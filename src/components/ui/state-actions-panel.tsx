@@ -808,7 +808,7 @@ export function StateActionsPanel({
           }}
           placeholder='expression'
           rows={3}
-          className={`${inputClass} resize-y font-mono`}
+          className={`${inputClass} resize-y`}
         />
         {showExprSuggestions && (
           <ExpressionSuggestionDropdown
@@ -948,7 +948,7 @@ export function StateActionsPanel({
                           <span className='text-primary text-[10px] font-medium'>{row.event}</span>
                           <span className='text-[9px] px-1 rounded border border-default text-dimmed'>{row.type}</span>
                         </div>
-                        <span className='font-mono text-xs text-default pl-2 break-all'>
+                        <span className='text-xs text-default pl-2 break-all'>
                           <span className='text-default'>{row.location || '…'}</span>
                           <span className='text-default'> = </span>
                           <span className='text-muted'>{row.expr || '…'}</span>
@@ -987,20 +987,20 @@ export function StateActionsPanel({
                       onDelete={() => handleDelete(index)}
                     >
                       {row.type === 'assign' && (
-                        <span className='block font-mono break-all text-default'>
+                        <span className='block break-all text-default'>
                           <span className='text-primary'>{row.location || '…'}</span>
                           <span className='text-dimmed'> = </span>
                           <span className='text-default'>{row.expr || '…'}</span>
                         </span>
                       )}
                       {row.type === 'send' && (
-                        <span className='font-mono text-default flex flex-col min-w-0'>
+                        <span className='text-default flex flex-col min-w-0'>
                           <span className='text-primary break-all'>{row.event || '…'}</span>
                           <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
                         </span>
                       )}
                       {row.type === 'cancel' && (
-                        <span className='block font-mono break-all text-default'>
+                        <span className='block break-all text-default'>
                           <span className='text-dimmed'>cancel: </span>
                           <span className='text-primary'>{row.sendid || '…'}</span>
                         </span>
