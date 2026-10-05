@@ -178,6 +178,25 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(screen.getByText('(new channel)')).toBeInTheDocument();
   });
 
+  it('renders the Location and Expression fields in the normal (non-monospace) font', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByTitle('Add action'));
+
+    expect(screen.getByPlaceholderText('variable or channel')).not.toHaveClass('font-mono');
+    expect(screen.getByPlaceholderText('expression')).not.toHaveClass('font-mono');
+  });
+
+  it('renders saved assign rows in the normal (non-monospace) font', () => {
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    expect(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'a = 1'),
+    ).not.toHaveClass('font-mono');
+  });
+
   it('does not offer a new-channel suggestion when the variable already exists', () => {
     renderPanel({ scxmlContent: scxmlWithData('this_channel') });
 

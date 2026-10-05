@@ -4,7 +4,7 @@ import { wouldCrossParallelRegions } from './parallel-region-connection-validati
 import { normalizeParallelGroups } from './parallel-group-normalization';
 
 describe('wouldCrossParallelRegions', () => {
-  it('blocks a transition between two different bare regions of the same auto-wrapped parallel', () => {
+  it('blocks a transition between two different regions of the same auto-wrapped parallel', () => {
     const d: SCXMLDocument = {
       scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any,
     };
