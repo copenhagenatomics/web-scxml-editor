@@ -63,6 +63,8 @@ export function getExpressionSuggestions(
   // now deciding operator vs. operand" position.
   if (tokenStart === cursorPos && cursorPos > 0 && /\s/.test(text[cursorPos - 1])) {
     const prevToken = findPrevToken(text, cursorPos);
+    // Only whitespace so far — nothing typed yet, so nothing to suggest.
+    if (prevToken === '') return { suggestions: [], tokenStart, tokenEnd };
     if (OPERATOR_SET.has(prevToken)) {
       return { suggestions: allNames.map((n) => ({ label: n, kind: kindOf(n) })), tokenStart, tokenEnd };
     }
@@ -70,6 +72,16 @@ export function getExpressionSuggestions(
   }
 
   const rawToken = text.slice(tokenStart, cursorPos);
+  // Empty token outside the "operand after operator + space" case above —
+  // an empty field, or right after "(" / "!" — would substring-match every
+  // name. Wait for at least one typed character instead.
+  if (rawToken === '') return { suggestions: [], tokenStart, tokenEnd };
+  // Identifiers can't start with a digit, so a token that does is a numeric
+  // literal (2, 0.5, 1e3, 0xFF) — matching it by substring would pop up every
+  // name that merely contains that digit.
+  if (/^[0-9]/.test(rawToken)) {
+    return { suggestions: [], tokenStart, tokenEnd };
+  }
   const filtered = allNames.filter((n) => n.toLowerCase().includes(rawToken.toLowerCase()));
   if (filtered.length === 0 && rawToken.startsWith('this_')) {
     return { suggestions: [{ label: rawToken, kind: 'new-channel' }], tokenStart, tokenEnd };

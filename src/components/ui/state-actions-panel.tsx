@@ -197,15 +197,24 @@ function ExpressionSuggestionDropdown({
 }: ExpressionSuggestionDropdownProps) {
   const caret = textareaEl ? getCaretCoordinates(textareaEl, cursorPos) : null;
 
+  // Caret coordinates are relative to the textarea, but the dropdown is
+  // positioned against the wrapper, which also holds the field's label —
+  // shift by the textarea's own offset so the dropdown sits below the caret
+  // line instead of a label-height above it (covering the text being typed).
+  const offsetTop = textareaEl?.offsetTop ?? 0;
+  const offsetLeft = textareaEl?.offsetLeft ?? 0;
+
   // Assumed dropdown width for clamping, matching the max-w set on the
   // dropdown's own class below — keeps it from overflowing the panel's
   // right edge when the caret is near the end of a long line.
   const DROPDOWN_WIDTH = 200;
   const containerWidth = textareaEl?.clientWidth ?? 0;
-  const clampedLeft = caret ? Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH)) : 0;
+  const clampedLeft = caret
+    ? offsetLeft + Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH))
+    : 0;
 
   const positionStyle: React.CSSProperties = caret
-    ? { top: caret.top + caret.height + 4, left: clampedLeft }
+    ? { top: offsetTop + caret.top + caret.height + 4, left: clampedLeft }
     : {};
   const positionClassName = caret
     ? 'absolute z-50 bg-elevated border border-default rounded shadow-lg max-h-36 w-[200px] overflow-y-auto'

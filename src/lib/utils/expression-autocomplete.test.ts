@@ -94,6 +94,32 @@ describe('getExpressionSuggestions', () => {
     expect(tokenEnd).toBe(text.indexOf('conf_red') + 'conf_red'.length);
   });
 
+  it('offers no suggestions for an empty or whitespace-only expression', () => {
+    for (const text of ['', ' ', '   ']) {
+      const { suggestions } = getExpressionSuggestions(text, text.length, ctx);
+      expect(suggestions).toEqual([]);
+    }
+  });
+
+  it('offers no suggestions for an empty token right after a non-space delimiter such as "("', () => {
+    const { suggestions } = getExpressionSuggestions('(', 1, ctx);
+    expect(suggestions).toEqual([]);
+  });
+
+  it('offers no suggestions while typing a numeric literal, even when names contain that digit', () => {
+    const numCtx = { ...ctx, variables: [...ctx.variables, 'pcs2_state'] };
+    for (const text of ['2', 'this_gcIT_step == 2', '0.5', 'x <= 1e3']) {
+      const { suggestions } = getExpressionSuggestions(text, text.length, numCtx);
+      expect(suggestions).toEqual([]);
+    }
+  });
+
+  it('still suggests names for an identifier token that merely contains a digit', () => {
+    const numCtx = { ...ctx, variables: [...ctx.variables, 'pcs2_state'] };
+    const { suggestions } = getExpressionSuggestions('pcs2', 4, numCtx);
+    expect(suggestions).toEqual([{ label: 'pcs2_state', kind: 'variable' }]);
+  });
+
   it('clamps an out-of-range cursor position instead of scanning off the end of the string', () => {
     // Regression guard: without clamping, reading text[cursorPos] /
     // text[cursorPos - 1] past the string's bounds returns undefined, which
