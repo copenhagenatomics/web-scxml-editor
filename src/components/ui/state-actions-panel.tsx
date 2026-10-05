@@ -305,7 +305,9 @@ export function StateActionsPanel({
   const channelMappings = useHostAPIStore((s) => s.channelMappings);
   const showFeedback = useHostAPIStore((s) => s.showFeedback);
   const copied = useActionClipboardStore((s) => s.copied);
-  const canPaste = copied !== null && copied.kind === (activeTab === 'reactions' ? 'reaction' : 'action');
+  // Any copied row can be pasted into any tab — handlePaste converts between
+  // the action and reaction shapes, so the clipboard's kind doesn't matter here.
+  const canPaste = copied !== null;
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -537,12 +539,20 @@ export function StateActionsPanel({
     showFeedback('Action copied.', 'info');
   };
 
+  // Pasting works across buckets: both row shapes share location + expr, so a
+  // reaction pasted into onentry/onexit becomes an assign (event/type
+  // dropped), and an assign pasted into reactions gets the same event/type
+  // defaults the Add button uses.
   const handlePaste = () => {
     if (!copied) return;
 
     if (activeTab === 'reactions') {
-      if (copied.kind !== 'reaction') return;
-      const newRow: WithRowId<InternalEventActionRow> = { ...copied.row, _rowId: uuidv4() };
+      // A copied assign has no event/type, so fill in the Add-button defaults.
+      const reaction: InternalEventActionRow =
+        copied.kind === 'reaction'
+          ? copied.row
+          : { event: 'vector', location: copied.row.location, expr: copied.row.expr, type: 'internal' };
+      const newRow: WithRowId<InternalEventActionRow> = { ...reaction, _rowId: uuidv4() };
       const updated = [...localReactions, newRow];
       setLocalReactions(updated);
       onApplyReactions(updated);
@@ -550,8 +560,13 @@ export function StateActionsPanel({
       return;
     }
 
-    if (copied.kind !== 'action') return;
-    const newRow: WithRowId<ActionRow> = { ...copied.row, _rowId: uuidv4() };
+    // A copied reaction keeps only location/expr; its event/type have no
+    // equivalent on an onentry/onexit assign and are dropped.
+    const assign: AssignActionRow =
+      copied.kind === 'action'
+        ? copied.row
+        : { type: 'assign', location: copied.row.location, expr: copied.row.expr };
+    const newRow: WithRowId<ActionRow> = { ...assign, _rowId: uuidv4() };
     const updated = [...currentList, newRow];
     if (activeTab === 'onentry') {
       setLocalEntry(updated);

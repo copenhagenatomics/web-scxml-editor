@@ -636,16 +636,33 @@ describe('StateActionsPanel paste action', () => {
     expect(onApply).toHaveBeenLastCalledWith(['assign|copied|42', 'assign|copied|42'], []);
   });
 
-  it('disables Paste on the reactions tab when an assign action (not a reaction) is copied', () => {
+  it('pastes a copied assign action into the reactions tab with default event/type', () => {
+    const onApplyReactions = vi.fn();
     useActionClipboardStore.getState().copy({
       kind: 'action',
       row: { type: 'assign', location: 'copied', expr: '42' },
     });
-    renderPanel();
+    renderPanel({ onApplyReactions });
 
     fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Paste action'));
 
-    expect(screen.getByTitle('Copy an action first')).toBeDisabled();
+    expect(onApplyReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'vector', location: 'copied', expr: '42', type: 'internal' }),
+    ]);
+  });
+
+  it('pastes a copied reaction into onentry as an assign action', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: 'evtA', location: 'x', expr: '1', type: 'external' },
+    });
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|x|1'], []);
   });
 
   it('pastes a copied reaction as a new reaction row and calls onApplyReactions', () => {
