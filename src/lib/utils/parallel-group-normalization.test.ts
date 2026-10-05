@@ -104,6 +104,45 @@ describe('normalizeParallelGroups', () => {
     expect(regionIds.find((id) => id !== 'C_region')).not.toBe('A_region');
   });
 
+  it('does not reuse an id already taken by a root <final>', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
+        final: { '@_id': 'A_region' },
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
+    const regionIds = ids(parallel.state);
+    expect(regionIds).toContain('B_region');
+    expect(regionIds).not.toContain('A_region');
+  });
+
+  it('does not reuse an id already taken by a <history> in a state or directly under a <parallel>', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A B',
+        state: [
+          { '@_id': 'A' },
+          { '@_id': 'B', history: { '@_id': 'B_region' } },
+        ],
+        parallel: {
+          '@_id': 'P',
+          state: { '@_id': 'P1' },
+          history: { '@_id': 'A_region' },
+        },
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    const parallels = Array.isArray(d.scxml.parallel) ? d.scxml.parallel : [d.scxml.parallel!];
+    const auto = parallels.find((p: any) => p['@_viz:auto-parallel'] === 'true')!;
+    const regionIds = ids(auto.state);
+    expect(regionIds).toHaveLength(2);
+    expect(regionIds).not.toContain('A_region');
+    expect(regionIds).not.toContain('B_region');
+  });
+
   it('does not drift a synthesized region id on repeated normalization when no unrelated sibling collides', () => {
     // Guards against a naive collision-avoidance fix that treats a
     // container's own previous auto-wrap ids as "taken" and needlessly

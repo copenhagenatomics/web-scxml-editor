@@ -163,17 +163,29 @@ function autoParallelIdFor(containerId: string | null): string {
  * otherwise a synthetic wrapper id can silently collide with an unrelated,
  * hand-authored sibling elsewhere that happens to share that literal name.
  */
-function collectAllIds(container: Container, ids: Set<string> = new Set()): Set<string> {
+function collectAllIds(
+  container: Container | ParallelElement,
+  ids: Set<string> = new Set(),
+): Set<string> {
   asArray(container.state).forEach((s) => {
     if (s['@_id']) ids.add(s['@_id']);
     collectAllIds(s, ids);
   });
+  // Recurse into the <parallel> itself (not just its <state> children) so its
+  // own <history> children are covered too.
   asArray(container.parallel).forEach((p) => {
     if (p['@_id']) ids.add(p['@_id']);
-    asArray(p.state).forEach((s) => {
-      if (s['@_id']) ids.add(s['@_id']);
-      collectAllIds(s, ids);
-    });
+    collectAllIds(p, ids);
+  });
+  // <final>/<history> are leaf state-like elements whose ids share the same
+  // document-wide namespace — e.g. a root <final id="A_region"> must stop a
+  // synthetic region for Initial state A from reusing that id.
+  const leafChildren = [
+    ...asArray((container as any).final),
+    ...asArray((container as any).history),
+  ] as Array<{ '@_id'?: string }>;
+  leafChildren.forEach((child) => {
+    if (child['@_id']) ids.add(child['@_id']);
   });
   return ids;
 }
