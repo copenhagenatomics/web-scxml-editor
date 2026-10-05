@@ -66,7 +66,8 @@ export class UpdateActionsCommand extends BaseCommand {
         if (action.startsWith('assign|')) {
           const parts = action.split('|');
           const location = parts[1] || '';
-          const expr = parts[2] || '';
+          // Rejoin the tail: expr may itself contain '|' (e.g. `a || b`)
+          const expr = parts.slice(2).join('|');
           const assignElement = doc.createElementNS(scxmlNamespace, 'assign');
           if (location) assignElement.setAttribute('location', location);
           if (expr) assignElement.setAttribute('expr', expr);
@@ -106,7 +107,7 @@ export class UpdateActionsCommand extends BaseCommand {
         if (action.startsWith('assign|')) {
           const parts = action.split('|');
           const location = parts[1] || '';
-          const expr = parts[2] || '';
+          const expr = parts.slice(2).join('|');
           const assignElement = doc.createElementNS(scxmlNamespace, 'assign');
           if (location) assignElement.setAttribute('location', location);
           if (expr) assignElement.setAttribute('expr', expr);

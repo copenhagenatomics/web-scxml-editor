@@ -30,3 +30,19 @@ describe('UpdateActionsCommand waypoint invalidation', () => {
     expect(result.newContent).toContain('viz:waypoints="2,2"');
   });
 });
+
+describe('UpdateActionsCommand assign expressions', () => {
+  // Actions are pipe-delimited (`assign|location|expr`), so a logical-OR in
+  // the expression must not be cut off at the first '|'.
+  it('keeps "||" in onentry and onexit assign expressions', () => {
+    const xml = `${VIZ_HEADER}><state id="A"/></scxml>`;
+    const result = new UpdateActionsCommand(
+      'A',
+      ['assign|x|false || true'],
+      ['assign|y|a || b || c']
+    ).execute(xml);
+    expect(result.success).toBe(true);
+    expect(result.newContent).toContain('expr="false || true"');
+    expect(result.newContent).toContain('expr="a || b || c"');
+  });
+});

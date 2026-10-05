@@ -1338,7 +1338,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
                       if (a.startsWith('assign|')) {
                         const parts = a.split('|');
-                        return [{ type: 'assign', location: parts[1] || '', expr: parts[2] || '' }];
+                        return [{ type: 'assign', location: parts[1] || '', expr: parts.slice(2).join('|') }];
                       }
                       if (a.startsWith('send|')) {
                         const parts = a.split('|');
