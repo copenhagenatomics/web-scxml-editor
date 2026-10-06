@@ -24,7 +24,7 @@ import {
   separateParallelRegions,
   markParallelGroupMembers,
 } from './converter-modules/layout-positioning';
-import { collectAutoParallelGroups } from '@/lib/utils/parallel-group-normalization';
+import { collectParallelGroups } from '@/lib/utils/parallel-group-normalization';
 import {
   getAncestorChain,
   registerAllStates,
@@ -248,7 +248,7 @@ export class SCXMLToXStateConverter {
     // Apply ELK force-directed layout with viz:xywh priority
     await applyDefaultELKLayout(allNodes, edges);
 
-    // Separate auto-wrapped Initial-state group regions into non-overlapping
+    // Separate each <parallel>'s regions into non-overlapping
     // horizontal bands (see separateParallelRegions) as early as possible —
     // right after layout assigns positions, and before anything downstream
     // reads or persists those positions: smart edge-handle selection below,
@@ -259,7 +259,7 @@ export class SCXMLToXStateConverter {
     // therefore the persisted document — holding pre-separation positions,
     // which is what caused the divider to reflect the corrected layout while
     // the real state nodes kept rendering at their stale, unseparated spot.
-    const parallelGroupsForLayout = collectAutoParallelGroups({ scxml: this.rootScxml });
+    const parallelGroupsForLayout = collectParallelGroups({ scxml: this.rootScxml });
     if (parallelGroupsForLayout.length > 0) {
       separateParallelRegions(allNodes, parallelGroupsForLayout);
       // visual-diagram.tsx independently re-reads each node's saved
@@ -513,7 +513,7 @@ export class SCXMLToXStateConverter {
     // Position history states (but allow them to also participate in sibling layout)
     positionHistoryStates(allNodes, this.stateRegistry);
 
-    // Synthesize "Parallel State" wrapper nodes around each auto-wrapped
+    // Synthesize "Parallel State" wrapper nodes around each <parallel>'s
     // group of Initial-state work trees, now that every real member node
     // has its final layout position (regions were already separated into
     // non-overlapping bands right after ELK layout, above — see

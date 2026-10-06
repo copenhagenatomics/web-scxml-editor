@@ -32,95 +32,99 @@ describe('registerAllStates — hand-authored <parallel> (regression guard)', ()
   });
 });
 
-describe('registerAllStates — viz:auto-parallel flattening', () => {
-  it('does not create a registry entry for an auto-parallel wrapper or its members registry-wise as children of it', () => {
-    const root = {
+describe('registerAllStates — root __root_parallel', () => {
+  const root = {
+    '@_initial': '__root_parallel',
+    parallel: {
+      '@_id': '__root_parallel',
       state: [
-        {
-          '@_id': 'Container',
-          parallel: {
-            '@_id': 'Container_parallel',
-            '@_viz:auto-parallel': 'true',
-            state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-          },
-        },
+        { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+        { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
       ],
-    };
+    },
+  };
+
+  it('registers neither __root_parallel nor its regions as nodes', () => {
     const { stateRegistry } = run(root);
-    expect(stateRegistry.has('Container_parallel')).toBe(false);
+    expect(stateRegistry.has('__root_parallel')).toBe(false);
+    expect(stateRegistry.has('A_region')).toBe(false);
+    expect(stateRegistry.has('B_region')).toBe(false);
   });
 
-  it('registers bare single-member regions directly under the original container id', () => {
+  it('registers the contents of the regions at root level', () => {
+    const { stateRegistry } = run(root);
+    expect(stateRegistry.get('A')?.parentPath).toBe('');
+    expect(stateRegistry.get('A2')?.parentPath).toBe('');
+    expect(stateRegistry.get('B')?.parentPath).toBe('');
+  });
+
+  it('registers a <parallel> region of __root_parallel as a parallel node', () => {
+    const { stateRegistry } = run({
+      parallel: {
+        '@_id': '__root_parallel',
+        state: { '@_id': 'S' },
+        parallel: { '@_id': 'Q', state: [{ '@_id': 'Q1' }, { '@_id': 'Q2' }] },
+      },
+    });
+    expect(stateRegistry.get('Q')?.elementType).toBe('parallel');
+    expect(stateRegistry.get('Q')?.parentPath).toBe('');
+  });
+});
+
+describe('registerAllStates — <parallel> regions drawn as columns', () => {
+  it('registers a <parallel> as a drillable node whose children are the contents of its regions', () => {
     const root = {
-      state: [
-        {
-          '@_id': 'Container',
-          parallel: {
-            '@_id': 'Container_parallel',
-            '@_viz:auto-parallel': 'true',
-            state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-          },
-        },
-      ],
+      '@_initial': 'main_region',
+      parallel: {
+        '@_id': 'main_region',
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      },
     };
     const { stateRegistry, parentMap, hierarchyMap } = run(root);
-    expect(parentMap.get('A')).toBe('Container');
-    expect(parentMap.get('B')).toBe('Container');
-    expect(stateRegistry.get('A')?.elementType).toBe('state');
-    expect(hierarchyMap.get('Container')?.sort()).toEqual(['A', 'B']);
+    expect(stateRegistry.get('main_region')?.elementType).toBe('parallel');
+    expect(stateRegistry.has('A_region')).toBe(false);
+    expect(hierarchyMap.get('main_region')?.sort()).toEqual(['A', 'A2', 'B']);
+    expect(parentMap.get('A')).toBe('main_region');
+    expect(parentMap.get('B')).toBe('main_region');
   });
 
-  it('unwraps an auto-region multi-member group, registering its members directly under the original container id', () => {
-    const root = {
+  it('registers an empty region as the node itself', () => {
+    const { stateRegistry, parentMap } = run({
+      parallel: { '@_id': 'P', state: [{ '@_id': 'Empty' }, { '@_id': 'R', state: { '@_id': 'X' } }] },
+    });
+    expect(stateRegistry.has('Empty')).toBe(true);
+    expect(parentMap.get('Empty')).toBe('P');
+    expect(parentMap.get('X')).toBe('P');
+  });
+
+  it('keeps a hand-written <parallel> nested in an ordinary state drillable the same way', () => {
+    const { stateRegistry, parentMap } = run({
       state: [
         {
           '@_id': 'Container',
-          parallel: {
-            '@_id': 'Container_parallel',
-            '@_viz:auto-parallel': 'true',
-            state: [
-              {
-                '@_id': 'main_region_region',
-                '@_initial': 'main_region',
-                '@_viz:auto-region': 'true',
-                state: [
-                  { '@_id': 'main_region', transition: { '@_event': 'event', '@_target': 'state_1' } },
-                  { '@_id': 'state_1' },
-                ],
-              },
-              { '@_id': 'state_2' },
-            ],
-          },
+          parallel: { '@_id': 'Manual', state: [{ '@_id': 'RegionA' }, { '@_id': 'RegionB' }] },
         },
       ],
-    };
-    const { stateRegistry, parentMap, hierarchyMap } = run(root);
-    expect(stateRegistry.has('main_region_region')).toBe(false);
-    expect(parentMap.get('main_region')).toBe('Container');
-    expect(parentMap.get('state_1')).toBe('Container');
-    expect(parentMap.get('state_2')).toBe('Container');
-    expect(hierarchyMap.get('Container')?.sort()).toEqual(['main_region', 'state_1', 'state_2']);
+    });
+    expect(stateRegistry.get('Manual')?.elementType).toBe('parallel');
+    expect(parentMap.get('Manual')).toBe('Container');
+    expect(parentMap.get('RegionA')).toBe('Manual');
   });
+});
 
-  it('recurses correctly into a flattened member that is itself a compound state', () => {
-    const root = {
-      state: [
-        {
-          '@_id': 'Container',
-          parallel: {
-            '@_id': 'Container_parallel',
-            '@_viz:auto-parallel': 'true',
-            state: [
-              { '@_id': 'A', state: [{ '@_id': 'A_child' }] },
-              { '@_id': 'B' },
-            ],
-          },
-        },
-      ],
-    };
-    const { stateRegistry, parentMap } = run(root);
-    expect(parentMap.get('A_child')).toBe('A');
-    expect(stateRegistry.get('A')?.isContainer).toBe(true);
-    expect(stateRegistry.get('A')?.children).toEqual(['A_child']);
+describe('registerAllStates — __root_parallel is only transparent directly under <scxml>', () => {
+  it('registers a nested <parallel> named __root_parallel as an ordinary drillable parallel', () => {
+    const { stateRegistry, parentMap } = run({
+      state: {
+        '@_id': 'Outer',
+        parallel: { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] },
+      },
+    });
+    expect(stateRegistry.get('__root_parallel')?.elementType).toBe('parallel');
+    expect(parentMap.get('__root_parallel')).toBe('Outer');
+    expect(parentMap.get('R1')).toBe('__root_parallel');
   });
 });

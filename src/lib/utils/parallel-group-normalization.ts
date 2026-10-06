@@ -1,68 +1,71 @@
 /**
- * Live wrap/unwrap transform for the "multiple Initial State work trees"
- * feature: whenever a container (the <scxml> root, or any compound <state>)
- * has 2+ distinct Initial-marked work trees among its direct children, its
- * children are restructured into a real, standards-conformant <parallel>
- * element — one region per work tree — so the document itself (not just a
- * display/export view) reflects real SCXML <parallel> semantics.
+ * Live structural transform for the "multiple Initial State work trees"
+ * feature: whenever a compound <state> has 2+ distinct Initial-marked work
+ * trees among its direct children, that state itself becomes a real,
+ * standards-conformant <parallel> — same object, same id, transitions,
+ * onentry/onexit and viz: attributes; only the tag changes — with one region
+ * per work tree. There is never a <state> wrapper left above it.
  *
- * Every work tree, whether it has a single member or 2+ members (connected
- * via sibling transitions), is wrapped in its own synthetic region
- * <state id="{initialId}_region" marked viz:auto-region="true">, so a
- * <parallel>'s direct children are never bare leaf states — each region is
- * always its own wrapper state containing the actual member(s), never the
- * member itself sitting directly under <parallel>.
- *
- * The synthetic <parallel>/region wrapper elements are marked with
- * viz:auto-parallel="true" / viz:auto-region="true" so this module (and the
- * diagram's flattening logic) can tell them apart from a hand-authored
- * <parallel> the user typed or pasted directly — those are never touched.
- * Reading an older document that still has a bare (unwrapped) single-member
- * region from before this rule existed is tolerated (buildLogicalView below
- * recovers its member either way) — it gets wrapped into the current shape
- * the next time normalization runs.
+ * - Each work tree is wrapped in its own region
+ *   <state id="{initialId}_region" initial="{initialId}"> (decision
+ *   scxml.md #11: a <parallel>'s direct children are never bare leaf
+ *   states). Children that aren't part of any work tree (unassigned) get
+ *   one more region of their own, so converting never drops them.
+ * - A state with <final> children is never converted (<parallel> can't hold
+ *   <final>) — initial-group-validator.ts reports it instead.
+ * - Any <parallel> (converted or hand-authored — no marker attributes tell
+ *   them apart) with fewer than 2 regions turns back into a <state>, its
+ *   sole region (if any) becoming its `initial`. Regions are kept as they
+ *   are, not unwrapped.
+ * - The <scxml> root can't become a <parallel>, so 2+ root-level work trees
+ *   go into one inserted `<parallel id="__root_parallel">` instead (see
+ *   parallel-structure.ts) — the only element this feature ever inserts.
  *
  * Pure, operates on the parsed SCXMLDocument object model, recomputes
  * everything fresh on every call (nothing is persisted beyond the document
  * itself) — same style as initial-group-utils.ts, which this module reuses
  * for the underlying connected-component analysis.
  */
-import type {
-  SCXMLDocument,
-  SCXMLElement,
-  StateElement,
-  ParallelElement,
-} from '@/types/scxml';
+import type { SCXMLDocument, SCXMLElement, StateElement, ParallelElement } from '@/types/scxml';
 import { getInitialIds, analyzeGroups } from './initial-group-utils';
-import { AUTO_PARALLEL_MARKER, AUTO_REGION_MARKER } from './parallel-group-markers';
+import {
+  ROOT_PARALLEL_ID,
+  getChildEntries,
+  getRegionDisplayEntries,
+  isRootParallel,
+  type ChildEntry,
+} from './parallel-structure';
 
-export { AUTO_PARALLEL_MARKER, AUTO_REGION_MARKER };
+type Container = SCXMLElement | StateElement | ParallelElement;
 
-const ROOT_PARALLEL_ID = '__root_parallel';
-
-type Container = SCXMLElement | StateElement;
+/** Marker attributes written by older versions of this feature — stripped on sight. */
+const LEGACY_MARKERS = ['@_viz:auto-parallel', '@_viz:auto-region', '@_viz:auto-converted'];
 
 function asArray<T>(v: T | T[] | undefined): T[] {
   if (!v) return [];
   return Array.isArray(v) ? v : [v];
 }
 
-function isAutoParallel(p: ParallelElement): boolean {
-  return (p as any)[AUTO_PARALLEL_MARKER] === 'true';
+/** fast-xml-parser's child shape: absent, a single object, or an array. */
+function setChildren(target: any, key: 'state' | 'parallel', items: any[]): void {
+  if (items.length === 0) delete target[key];
+  else target[key] = items.length === 1 ? items[0] : items;
 }
 
-function isAutoRegion(s: StateElement): boolean {
-  return (s as any)[AUTO_REGION_MARKER] === 'true';
+/** Put entries under `target`, each under its own tag. */
+function assignEntries(target: any, entries: ChildEntry[]): void {
+  setChildren(target, 'state', entries.filter((e) => e.tag === 'state').map((e) => e.el));
+  setChildren(target, 'parallel', entries.filter((e) => e.tag === 'parallel').map((e) => e.el));
 }
 
 /** Undirected sibling transition edges among an explicit list of states. */
-function siblingEdgesFor(members: StateElement[]): [string, string][] {
+function siblingEdgesFor(members: any[]): [string, string][] {
   const memberIds = new Set(members.map((m) => m['@_id']));
   const edges: [string, string][] = [];
   members.forEach((member) => {
-    asArray(member.transition).forEach((t) => {
+    asArray<any>(member.transition).forEach((t) => {
       if (!t['@_target']) return;
-      t['@_target']
+      String(t['@_target'])
         .split(/\s+/)
         .filter(Boolean)
         .forEach((target) => {
@@ -76,349 +79,340 @@ function siblingEdgesFor(members: StateElement[]): [string, string][] {
 }
 
 /**
- * Reconstruct the container's logical flat child list, reversing one level
- * of our own prior auto-wrap if present, plus the set of ids that should be
- * treated as Initial roots for this pass (recovered from the wrapper's own
- * region @_initial / bare-region identity when wrapped, or read directly
- * from the container's own initial marker(s) when not).
+ * Split entries into Initial work trees (keyed by their Initial id, in
+ * first-seen order) and the unassigned rest.
  */
-function buildLogicalView(container: Container): {
-  flat: StateElement[];
-  initialIds: Set<string>;
-  autoParallel: ParallelElement | undefined;
-  otherParallels: ParallelElement[];
-} {
-  const parallels = asArray(container.parallel);
-  const autoParallel = parallels.find(isAutoParallel);
-  const otherParallels = parallels.filter((p) => p !== autoParallel);
-
-  const flat: StateElement[] = [...asArray(container.state)];
-  // getInitialIds is itself auto-wrap-aware (falling back to reading the
-  // wrapper's own structure only when @_initial doesn't already resolve to
-  // real ids) — it is the single source of truth for which flattened
-  // members are still genuinely Initial. In particular, a bare region's
-  // mere physical presence in the <parallel> must NOT be treated as proof
-  // it's still Initial: ToggleInitialStateCommand writes a real,
-  // already-correct token list onto @_initial without itself restructuring
-  // the still-wrapped <parallel> (that's this function's job, on this very
-  // pass) — unconditionally re-adding every bare region's id here would
-  // silently undo that command's effect the moment this pass runs.
-  const initialIds = new Set<string>(getInitialIds(container as any));
-
-  if (autoParallel) {
-    asArray(autoParallel.state).forEach((region) => {
-      if (isAutoRegion(region)) {
-        asArray(region.state).forEach((member) => flat.push(member));
-      } else {
-        flat.push(region);
-      }
-    });
-  }
-
-  return { flat, initialIds, autoParallel, otherParallels };
-}
-
-/**
- * JSON.stringify with object keys sorted recursively (array element order is
- * left alone — only object property order is normalized). Used to compare a
- * container's shape before/after `applyWrapDecision` rebuilds it: the rebuilt
- * region/parallel objects are always constructed in the same fixed key order
- * (id, initial, state, then the marker attribute appended last), which does
- * not match the property order fast-xml-parser produces when the same shape
- * is freshly parsed from XML (attributes and elements interleaved in source
- * order). Plain JSON.stringify is key-order-sensitive, so it reported a
- * "changed" shape on every already-correctly-wrapped container even when
- * nothing about it actually differed — triggering a full document
- * re-serialize (and Monaco cursor jump) on every edit to a document that
- * already had an auto-<parallel> group, not just ones that actually needed
- * re-wrapping.
- */
-function stableStringify(value: unknown): string {
-  return JSON.stringify(value, function replacer(_key, val) {
-    if (val && typeof val === 'object' && !Array.isArray(val)) {
-      return Object.keys(val)
-        .sort()
-        .reduce((sorted: Record<string, unknown>, k) => {
-          sorted[k] = val[k];
-          return sorted;
-        }, {});
+function groupEntries(
+  entries: ChildEntry[],
+  initialIds: Set<string>,
+): { groups: Map<string, ChildEntry[]>; unassigned: ChildEntry[] } {
+  const ids = entries.map((e) => e.el['@_id']);
+  const { groupsByState } = analyzeGroups(ids, initialIds, siblingEdgesFor(entries.map((e) => e.el)));
+  const groups = new Map<string, ChildEntry[]>();
+  const unassigned: ChildEntry[] = [];
+  entries.forEach((entry) => {
+    const root = groupsByState.get(entry.el['@_id']);
+    if (!root) {
+      unassigned.push(entry);
+      return;
     }
-    return val;
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(entry);
   });
-}
-
-function autoRegionId(initialId: string): string {
-  return `${initialId}_region`;
-}
-
-function autoParallelIdFor(containerId: string | null): string {
-  return containerId === null ? ROOT_PARALLEL_ID : `${containerId}_parallel`;
+  return { groups, unassigned };
 }
 
 /**
- * Recursively collect every `@_id` in the document, seeded once per
- * normalizeParallelGroups call and threaded through the recursion so a
- * freshly minted `{id}_region` / `{id}_parallel` can be checked against
- * every other id in the document, not just this container's own children —
- * otherwise a synthetic wrapper id can silently collide with an unrelated,
- * hand-authored sibling elsewhere that happens to share that literal name.
- *
- * Counts occurrences rather than just presence: a document can already hold
- * a duplicate id (e.g. from the older collision-prone wrapping), and
- * releasing a wrapper's own id must not also erase the record of the other
- * element sharing it — see releaseId.
+ * Recursively collect every `@_id` in the document, so a freshly minted
+ * `{id}_region` / `__root_parallel` can be checked against every other id in
+ * the document — otherwise a synthesized id could silently collide with an
+ * unrelated, hand-authored element elsewhere that happens to share it.
  */
-type IdCounts = Map<string, number>;
+type IdSet = Set<string>;
 
-function addId(ids: IdCounts, id: string): void {
-  ids.set(id, (ids.get(id) ?? 0) + 1);
-}
-
-/** Release one occurrence of `id`, keeping it claimed if another element still holds it. */
-function releaseId(ids: IdCounts, id: string): void {
-  const count = ids.get(id) ?? 0;
-  if (count <= 1) ids.delete(id);
-  else ids.set(id, count - 1);
-}
-
-function collectAllIds(
-  container: Container | ParallelElement,
-  ids: IdCounts = new Map(),
-): IdCounts {
-  asArray(container.state).forEach((s) => {
-    if (s['@_id']) addId(ids, s['@_id']);
+function collectAllIds(container: Container, ids: IdSet = new Set()): IdSet {
+  asArray<any>(container.state).forEach((s) => {
+    if (s['@_id']) ids.add(s['@_id']);
     collectAllIds(s, ids);
   });
-  // Recurse into the <parallel> itself (not just its <state> children) so its
-  // own <history> children are covered too.
-  asArray(container.parallel).forEach((p) => {
-    if (p['@_id']) addId(ids, p['@_id']);
+  asArray<any>((container as any).parallel).forEach((p) => {
+    if (p['@_id']) ids.add(p['@_id']);
     collectAllIds(p, ids);
   });
-  // <final>/<history> are leaf state-like elements whose ids share the same
-  // document-wide namespace — e.g. a root <final id="A_region"> must stop a
-  // synthetic region for Initial state A from reusing that id.
-  const leafChildren = [
-    ...asArray((container as any).final),
-    ...asArray((container as any).history),
-  ] as Array<{ '@_id'?: string }>;
-  leafChildren.forEach((child) => {
-    if (child['@_id']) addId(ids, child['@_id']);
-  });
+  // <final>/<history> share the same document-wide id namespace.
+  [...asArray<any>((container as any).final), ...asArray<any>((container as any).history)].forEach(
+    (child) => {
+      if (child['@_id']) ids.add(child['@_id']);
+    },
+  );
   return ids;
 }
 
 /**
- * Return `candidate` if it isn't already claimed, otherwise the same id with
- * the smallest `_2`, `_3`, ... suffix that isn't. Claims whatever id it
- * returns by adding it to `usedIds`.
+ * Return `candidate` if it isn't already taken, otherwise the same id with
+ * the smallest `_2`, `_3`, ... suffix that isn't. Claims the returned id.
  */
-function claimId(candidate: string, usedIds: IdCounts): string {
-  if (!usedIds.has(candidate)) {
-    addId(usedIds, candidate);
-    return candidate;
-  }
+function claimId(candidate: string, usedIds: IdSet): string {
+  let next = candidate;
   let n = 2;
-  let next = `${candidate}_${n}`;
   while (usedIds.has(next)) {
-    n++;
     next = `${candidate}_${n}`;
+    n++;
   }
-  addId(usedIds, next);
+  usedIds.add(next);
   return next;
 }
 
-/**
- * Apply this container's own wrap/unwrap decision (not recursive — callers
- * recurse separately). Returns whether the container's own shape changed.
- */
-function applyWrapDecision(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
-  const { flat, initialIds, autoParallel, otherParallels } = buildLogicalView(container);
-  const flatIds = flat.map((s) => s['@_id']);
-  const edges = siblingEdgesFor(flat);
-  const { groupsByState } = analyzeGroups(flatIds, initialIds, edges);
+/** Wrap each work tree (and the unassigned rest, if any) into its own region <state>. */
+function buildRegions(
+  groups: Map<string, ChildEntry[]>,
+  unassigned: ChildEntry[],
+  usedIds: IdSet,
+): ChildEntry[] {
+  const regions: ChildEntry[] = [];
+  const addRegion = (initialId: string, members: ChildEntry[]) => {
+    const region: any = {
+      '@_id': claimId(`${initialId}_region`, usedIds),
+      '@_initial': initialId,
+    };
+    assignEntries(region, members);
+    regions.push({ el: region, tag: 'state' });
+  };
+  groups.forEach((members, initialId) => addRegion(initialId, members));
+  if (unassigned.length > 0) addRegion(unassigned[0].el['@_id'], unassigned);
+  return regions;
+}
 
-  const groups = new Map<string, StateElement[]>();
-  const unassigned: StateElement[] = [];
-  flat.forEach((member) => {
-    const root = groupsByState.get(member['@_id']);
-    if (!root) {
-      unassigned.push(member);
-      return;
-    }
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root)!.push(member);
-  });
-
-  // Nothing to do: fewer than 2 groups, and not currently auto-wrapped by
-  // this feature — leave the container's shape completely untouched (don't
-  // even canonicalize array-vs-single-object child shape) so hand-authored
-  // content this feature has no opinion about is never rewritten.
-  if (groups.size < 2 && !autoParallel) {
-    return false;
-  }
-
-  // This container's own previous auto-wrap ids (if any) are about to be
-  // regenerated from the same initialIds, so they're not real collisions —
-  // release them first so claimId doesn't mistake a wrapper being replaced
-  // by itself for a clash and needlessly suffix it every single pass. Only
-  // this wrapper's own occurrence is released, so an unrelated element that
-  // already shares the id still counts as a clash and the wrapper migrates.
-  if (autoParallel) {
-    releaseId(usedIds, autoParallel['@_id']);
-    asArray(autoParallel.state).forEach((region) => {
-      if (isAutoRegion(region)) releaseId(usedIds, region['@_id']);
-    });
-  }
-
-  const before = stableStringify({
-    initial: (container as any)['@_initial'],
-    hasInitialEl: !!(container as any).initial,
-    state: container.state,
-    parallel: container.parallel,
-  });
-
-  if (groups.size >= 2) {
-    const parallelId = claimId(autoParallelIdFor(containerId), usedIds);
-    const regions: StateElement[] = [];
-    groups.forEach((members, initialId) => {
-      const region: StateElement = {
-        '@_id': claimId(autoRegionId(initialId), usedIds),
-        '@_initial': initialId,
-        state: members.length === 1 ? members[0] : members,
-      } as StateElement;
-      (region as any)[AUTO_REGION_MARKER] = 'true';
-      regions.push(region);
-    });
-
-    const parallelEl: ParallelElement = {
-      '@_id': parallelId,
-      state: regions.length === 1 ? regions[0] : regions,
-    } as ParallelElement;
-    (parallelEl as any)[AUTO_PARALLEL_MARKER] = 'true';
-
-    container.state = unassigned.length === 0 ? undefined : unassigned.length === 1 ? unassigned[0] : unassigned;
-    const allParallels = [...otherParallels, parallelEl];
-    container.parallel = allParallels.length === 1 ? allParallels[0] : allParallels;
-    (container as any)['@_initial'] = parallelId;
-    delete (container as any).initial;
-  } else {
-    container.state = flat.length === 0 ? undefined : flat.length === 1 ? flat[0] : flat;
-    container.parallel = otherParallels.length === 0 ? undefined : otherParallels.length === 1 ? otherParallels[0] : otherParallels;
-    if (groups.size === 1) {
-      const [soleInitialId] = [...groups.keys()];
-      (container as any)['@_initial'] = soleInitialId;
-    } else {
-      delete (container as any)['@_initial'];
-    }
-    delete (container as any).initial;
-  }
-
-  const after = stableStringify({
-    initial: (container as any)['@_initial'],
-    hasInitialEl: !!(container as any).initial,
-    state: container.state,
-    parallel: container.parallel,
-  });
-
-  return before !== after;
+interface Ctx {
+  usedIds: IdSet;
+  changed: boolean;
 }
 
 /**
- * Recursively normalize a container: its own state-child containers first
- * (bottom-up), then the content of each region under any of its <parallel>
- * children (auto-wrapped or hand-authored — a region can independently grow
- * its own 2+ work trees), then this container's own wrap/unwrap decision.
+ * Convert a compound <state> with 2+ Initial work trees into a <parallel>,
+ * in place. Returns whether it converted (the caller re-files it under its
+ * parent's `.parallel`).
  */
-function normalizeContainer(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
-  let changed = false;
+function convertStateIfNeeded(state: any, ctx: Ctx): boolean {
+  if (asArray(state.final).length > 0) return false;
+  const entries = getChildEntries(state);
+  if (entries.length === 0) return false;
 
-  asArray(container.state).forEach((child) => {
-    if (normalizeContainer(child, child['@_id'], usedIds)) changed = true;
-  });
+  const { groups, unassigned } = groupEntries(entries, getInitialIds(state, 'state'));
+  if (groups.size < 2) return false;
 
-  asArray(container.parallel).forEach((parallel) => {
-    asArray(parallel.state).forEach((region) => {
-      if (normalizeContainer(region, region['@_id'], usedIds)) changed = true;
+  assignEntries(state, buildRegions(groups, unassigned, ctx.usedIds));
+  delete state['@_initial'];
+  delete state.initial;
+  return true;
+}
+
+/**
+ * Turn a <parallel> with fewer than 2 regions back into a <state>, in place.
+ * Returns whether it reverted (the caller re-files it under `.state`).
+ */
+function revertParallelIfNeeded(parallel: any): boolean {
+  const regions = getChildEntries(parallel);
+  if (regions.length >= 2) return false;
+  if (regions.length === 1) parallel['@_initial'] = regions[0].el['@_id'];
+  else delete parallel['@_initial'];
+  return true;
+}
+
+/**
+ * Bottom-up: normalize every child of `el` (its descendants first, then the
+ * child's own state <-> parallel decision), re-filing any child whose tag
+ * changed. The root's `__root_parallel` is transparent — its regions are
+ * normalized as children, but it's never itself converted here.
+ */
+function normalizeChildren(el: any, ctx: Ctx, isRoot = false): void {
+  const holders = [el, ...(isRoot ? asArray<any>(el.parallel).filter(isRootParallel) : [])];
+  holders.forEach((holder) => {
+    const next: ChildEntry[] = [];
+    let retagged = false;
+
+    asArray<any>(holder.state).forEach((child) => {
+      normalizeChildren(child, ctx);
+      const converted = convertStateIfNeeded(child, ctx);
+      if (converted) retagged = true;
+      next.push({ el: child, tag: converted ? 'parallel' : 'state' });
     });
+    asArray<any>(holder.parallel).forEach((child) => {
+      if (isRoot && holder === el && isRootParallel(child)) {
+        next.push({ el: child, tag: 'parallel' });
+        return;
+      }
+      normalizeChildren(child, ctx);
+      const reverted = revertParallelIfNeeded(child);
+      if (reverted) retagged = true;
+      next.push({ el: child, tag: reverted ? 'state' : 'parallel' });
+    });
+
+    if (retagged) {
+      assignEntries(holder, next);
+      ctx.changed = true;
+    }
+  });
+}
+
+/**
+ * The root's equivalent of convertStateIfNeeded/revertParallelIfNeeded: 2+
+ * root-level work trees live as regions of `__root_parallel`. New root-level
+ * work trees join it as new regions; once it's down to fewer than 2 regions
+ * it's removed and its regions move back to the root as they are.
+ */
+function normalizeRoot(scxml: any, ctx: Ctx): void {
+  const parallels = asArray<any>(scxml.parallel);
+  const rootParallel = parallels.find(isRootParallel);
+  const outside: ChildEntry[] = [
+    ...asArray<any>(scxml.state).map((el): ChildEntry => ({ el, tag: 'state' })),
+    ...parallels.filter((p) => p !== rootParallel).map((el): ChildEntry => ({ el, tag: 'parallel' })),
+  ];
+  const existingRegions = rootParallel ? getChildEntries(rootParallel) : [];
+
+  const initialIds = getInitialIds(scxml, 'root');
+  const { groups, unassigned } = groupEntries(outside, initialIds);
+  const total = existingRegions.length + groups.size;
+
+  if (total < 2) {
+    if (!rootParallel) return;
+    // Unwrap: the remaining region(s) go back to the root as they are.
+    assignEntries(scxml, [...outside, ...existingRegions]);
+    if (total === 1) {
+      scxml['@_initial'] = existingRegions[0]?.el['@_id'] ?? [...groups.keys()][0];
+    } else {
+      delete scxml['@_initial'];
+    }
+    delete scxml.initial;
+    ctx.changed = true;
+    return;
+  }
+
+  if (groups.size === 0 && rootParallel) {
+    // Steady state — just make sure the root points at its <parallel>.
+    if (scxml['@_initial'] !== rootParallel['@_id'] || scxml.initial) {
+      scxml['@_initial'] = rootParallel['@_id'];
+      delete scxml.initial;
+      ctx.changed = true;
+    }
+    return;
+  }
+
+  const newRegions = buildRegions(groups, [], ctx.usedIds);
+  const parallel: any = rootParallel ?? { '@_id': claimId(ROOT_PARALLEL_ID, ctx.usedIds) };
+  assignEntries(parallel, [...existingRegions, ...newRegions]);
+
+  // Everything outside a work tree (states and other parallels alike) stays
+  // at the root, beside the <parallel>.
+  assignEntries(scxml, [...unassigned, { el: parallel, tag: 'parallel' }]);
+  scxml['@_initial'] = parallel['@_id'];
+  delete scxml.initial;
+  ctx.changed = true;
+}
+
+/**
+ * Older versions of this feature tagged their structure with viz:auto-*
+ * marker attributes, and nested the <parallel> inside the compound <state>
+ * as `<state id="X" initial="X_parallel"><parallel id="X_parallel" ...>`.
+ * Strip the markers, and collapse that nesting so X itself is the
+ * <parallel> — no <state> wrapper above it.
+ */
+function migrateLegacyStructure(el: any, ctx: Ctx): void {
+  // fast-xml-parser yields a string, not an object, for an empty element.
+  if (!el || typeof el !== 'object') return;
+  LEGACY_MARKERS.forEach((marker) => {
+    if (marker in el) {
+      delete el[marker];
+      ctx.changed = true;
+    }
   });
 
-  // This container's own wrap/unwrap decision (a no-op, including for a
-  // hand-authored <parallel> child with no viz:auto-parallel marker, bails
-  // out immediately inside applyWrapDecision without touching anything).
-  if (applyWrapDecision(container, containerId, usedIds)) changed = true;
+  const next: ChildEntry[] = [];
+  let retagged = false;
+  asArray<any>(el.state).forEach((child) => {
+    const collapse = isLegacyNestedParallelWrapper(child);
+    migrateLegacyStructure(child, ctx);
+    if (collapse) {
+      const inner = child.parallel;
+      delete child.parallel;
+      delete child['@_initial'];
+      delete child.initial;
+      assignEntries(child, getChildEntries(inner));
+      [...asArray<any>(inner.history)].forEach((h) => {
+        child.history = [...asArray<any>(child.history), h];
+      });
+      retagged = true;
+    }
+    next.push({ el: child, tag: collapse ? 'parallel' : 'state' });
+  });
+  asArray<any>(el.parallel).forEach((child) => {
+    migrateLegacyStructure(child, ctx);
+    next.push({ el: child, tag: 'parallel' });
+  });
+  if (retagged) {
+    assignEntries(el, next);
+    ctx.changed = true;
+  }
+}
 
-  return changed;
+/**
+ * `<state id="X" initial="P"><parallel id="P" viz:auto-parallel="true">…</parallel></state>`
+ * with nothing else under X that would stop X itself from being a <parallel>.
+ */
+function isLegacyNestedParallelWrapper(state: any): boolean {
+  if (Array.isArray(state.parallel) || !state.parallel) return false;
+  const inner = state.parallel;
+  if (inner['@_viz:auto-parallel'] !== 'true' || inner['@_viz:auto-converted'] === 'true') return false;
+  if (asArray(state.state).length > 0 || asArray(state.final).length > 0) return false;
+  return state['@_initial'] === inner['@_id'];
 }
 
 export function normalizeParallelGroups(scxmlDoc: SCXMLDocument): { changed: boolean } {
-  // Seeded once from the whole (pre-mutation) document and threaded through
-  // the recursion so every freshly minted wrapper id is checked — and
-  // claimed — against every other id in the document, not just its own
-  // container's children. See collectAllIds / claimId above.
-  const usedIds = collectAllIds(scxmlDoc.scxml);
-  const changed = normalizeContainer(scxmlDoc.scxml, null, usedIds);
-  return { changed };
+  const scxml = scxmlDoc.scxml as any;
+  if (!scxml || typeof scxml !== 'object') return { changed: false };
+  const ctx: Ctx = { usedIds: new Set(), changed: false };
+  migrateLegacyStructure(scxml, ctx);
+  ctx.usedIds = collectAllIds(scxml);
+  normalizeChildren(scxml, ctx, true);
+  normalizeRoot(scxml, ctx);
+  return { changed: ctx.changed };
 }
 
 /**
- * Whether a container already has any children, counting members hidden
- * inside an auto-wrapped <parallel> — plain `!container.state` is NOT
- * enough once wrapping is in play, since a wrapped container's own `.state`
- * only holds unassigned siblings (often none at all), which would otherwise
- * make a fully-populated wrapped container look empty. Used to guard
- * "auto-mark the first child Initial" conveniences so they only ever fire
- * for a genuinely empty container, not one whose existing children are
- * simply hidden inside its <parallel>.
+ * Whether a container already has any children, counting states under a
+ * <parallel> child too — used to guard "auto-mark the first child Initial"
+ * conveniences so they only fire for a genuinely empty container.
  */
 export function hasAnyChildren(container: Container): boolean {
   if (asArray(container.state).length > 0) return true;
-  return asArray(container.parallel).length > 0;
+  return asArray((container as any).parallel).length > 0;
 }
 
-export interface AutoParallelGroupInfo {
-  /** The container the <parallel> is nested under; null for the document root. */
+export interface ParallelGroupInfo {
+  /** The diagram level the regions appear on: the <parallel>'s own id, or null for the root's `__root_parallel`. */
   containerId: string | null;
+  /**
+   * Key for the group's wrapper node — `{id}__parallel_group` (with a `_2`…
+   * suffix if a state already uses that id), or `__root_parallel`'s own id.
+   */
   parallelId: string;
+  /** One per region: the ids of the nodes drawn in its column. */
   regions: { memberIds: string[] }[];
 }
 
 /**
- * Read-only query for the diagram layer: every auto-wrapped
- * (viz:auto-parallel="true") <parallel> currently in the document, at any
- * nesting depth, with each region's flattened member ids. A hand-authored
- * <parallel> (no marker) is never reported — its content is recursed into
- * only in case it contains its own, independently auto-wrapped nested group.
+ * Read-only query for the diagram layer: every <parallel> in the document
+ * (with 2+ regions), at any nesting depth — used for the region divider
+ * lines, region separation and group drag. Regions are drawn
+ * as columns, so a region's members are the nodes shown in its place (see
+ * getRegionDisplayEntries in parallel-structure.ts).
  */
-export function collectAutoParallelGroups(scxmlDoc: SCXMLDocument): AutoParallelGroupInfo[] {
-  const result: AutoParallelGroupInfo[] = [];
+export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInfo[] {
+  const result: ParallelGroupInfo[] = [];
+  // Wrapper keys share the canvas's node-id space with every state, so a
+  // derived `{id}__parallel_group` must be claimed against the document's ids
+  // (and against wrappers already generated) — a state may legitimately be
+  // named that. The root's key is its own id, already unique and never a node.
+  const wrapperIds = collectAllIds(scxmlDoc.scxml as any);
 
-  function walk(container: Container, containerId: string | null): void {
-    asArray(container.state).forEach((child) => walk(child, child['@_id']));
-
-    asArray(container.parallel).forEach((parallel) => {
-      if (isAutoParallel(parallel)) {
-        const regions = asArray(parallel.state).map((region) => ({
-          memberIds: isAutoRegion(region)
-            ? asArray(region.state).map((m) => m['@_id'])
-            : [region['@_id']],
-        }));
-        result.push({ containerId, parallelId: parallel['@_id'], regions });
+  function walk(el: any, isRoot = false): void {
+    asArray<any>(el.state).forEach((child) => walk(child));
+    asArray<any>(el.parallel).forEach((p) => {
+      const regions = getChildEntries(p).map((r) => ({
+        memberIds: getRegionDisplayEntries(r).map((m) => m.el['@_id'] as string),
+      }));
+      if (regions.length >= 2) {
+        const root = isRoot && isRootParallel(p);
+        result.push({
+          containerId: root ? null : p['@_id'],
+          parallelId: root ? p['@_id'] : claimId(`${p['@_id']}__parallel_group`, wrapperIds),
+          regions,
+        });
       }
-      // Recurse into every region regardless of whether this parallel is
-      // auto-wrapped or hand-authored — a region can independently grow its
-      // own nested 2+-group situation and get auto-wrapped one level deeper
-      // (mirrors normalizeContainer's unconditional region recursion during
-      // normalization). Previously this only recursed in the hand-authored
-      // (else) branch, so a nested auto-parallel living inside a region
-      // member of an already-auto-wrapped outer <parallel> was never
-      // reported here, even though normalizeParallelGroups had correctly
-      // wrapped it — leaving the diagram layer's region separation/wrapper
-      // synthesis blind to it.
-      asArray(parallel.state).forEach((region) => walk(region, region['@_id']));
+      walk(p);
     });
   }
 
-  walk(scxmlDoc.scxml, null);
+  walk(scxmlDoc.scxml, true);
   return result;
 }

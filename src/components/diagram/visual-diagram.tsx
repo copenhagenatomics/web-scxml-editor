@@ -16,7 +16,9 @@ import {
   cloneStateSubtreeWithFreshIds,
   rewriteOrDropTransitions,
   resolveCarriedOverInitialIds,
-  detachStateFromParent,
+  detachElementFromParent,
+  findElementById,
+  collectExistingIds,
   isDescendantOf,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
@@ -85,6 +87,7 @@ import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionStri
 import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
+  isParallelRegion,
   wouldConflictIfMarkedInitial,
   getInitialIds,
 } from '@/lib/utils/initial-group-utils';
@@ -302,6 +305,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     stateType: 'simple' | 'compound' | 'parallel' | 'final';
     isInitial: boolean;
     canMarkInitial: boolean;
+    /** A region of a <parallel> is always active — no Initial toggle. */
+    isParallelRegion: boolean;
   } | null>(null);
 
   // Dark mode tracking for canvas theming
@@ -1358,11 +1363,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
                   let isInitialFlag = false;
                   let canMarkFlag = true;
+                  let isRegionFlag = false;
                   if (parserRef.current && scxmlContent) {
                     const parseResult = parserRef.current.parse(scxmlContent);
                     if (parseResult.success && parseResult.data) {
                       isInitialFlag = isMarkedInitial(parseResult.data, stateId);
                       canMarkFlag = !wouldConflictIfMarkedInitial(parseResult.data, stateId).blocked;
+                      isRegionFlag = isParallelRegion(parseResult.data, stateId);
                     }
                   }
 
@@ -1383,6 +1390,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     stateType: node.data.stateType,
                     isInitial: isInitialFlag,
                     canMarkInitial: canMarkFlag,
+                    isParallelRegion: isRegionFlag,
                   });
                 }
               }
@@ -2539,17 +2547,17 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
 
     try {
-      let newStateId = 'state_1';
-      let counter = 1;
-      const existingIds = new Set(parsedData.nodes.map((n) => n.id));
-      while (existingIds.has(newStateId)) {
-        counter++;
-        newStateId = `state_${counter}`;
-      }
-
       const parseResult = parserRef.current?.parse(scxmlContent);
       if (parseResult?.success && parseResult.data) {
         const scxmlDoc = parseResult.data;
+
+        let newStateId = 'state_1';
+        let counter = 1;
+        const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
+        while (existingIds.has(newStateId)) {
+          counter++;
+          newStateId = `state_${counter}`;
+        }
         let parentId: string | undefined = undefined;
 
         // Only set parentId if we're inside a specific parent (hierarchy navigation)
@@ -2600,11 +2608,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
 
         // Check if this will be the initial state (parent has no children).
-        // hasAnyChildren also counts members hidden inside an auto-wrapped
-        // <parallel> — a plain `!parentState.state` check alone would
-        // otherwise treat an already-wrapped (non-empty) container as
-        // empty, since its own `.state` only ever holds unassigned
-        // siblings, and would spuriously mark this new sibling Initial too.
+        // hasAnyChildren also counts <parallel> children — a plain
+        // `!parentState.state` check alone would treat the root as empty
+        // once its children have moved into __root_parallel, and would
+        // spuriously mark this new sibling Initial too.
         let isInitial = false;
         if (parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
@@ -2682,17 +2689,24 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     // the source document is left behind — for paste to have any chance of
     // carrying it over onto the pasted copy.
     const initialIds = new Set<string>();
+    const parallelIds = new Set<string>();
     activeStates.forEach((id) => {
-      const found = findStateById(parseResult.data as SCXMLDocument, id);
+      const found = findElementById(parseResult.data as SCXMLDocument, id);
       if (found) {
-        clones.push(JSON.parse(JSON.stringify(found)));
-        if (isMarkedInitial(parseResult.data as SCXMLDocument, id)) {
+        clones.push(JSON.parse(JSON.stringify(found.element)));
+        if (found.tag === 'parallel') parallelIds.add(id);
+        // A region of a parallel is always active — carry it over as
+        // Initial too, so pasting 2+ regions makes the target a parallel.
+        if (
+          isMarkedInitial(parseResult.data as SCXMLDocument, id) ||
+          isParallelRegion(parseResult.data as SCXMLDocument, id)
+        ) {
           initialIds.add(id);
         }
       }
     });
     if (clones.length > 0) {
-      useStateClipboardStore.getState().copy(clones, initialIds);
+      useStateClipboardStore.getState().copy(clones, initialIds, parallelIds);
       // Clear the selection so the Multi-Select Toolbar closes, matching
       // Cut/Delete's behavior of dismissing it once their action completes.
       setActiveStates(new Set());
@@ -2708,7 +2722,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   }, [copyActiveStatesToClipboard, showFeedback]);
 
   const handlePasteClipboard = useCallback(() => {
-    const { copied, copiedInitialIds } = useStateClipboardStore.getState();
+    const { copied, copiedInitialIds, copiedParallelIds } = useStateClipboardStore.getState();
     if (!copied || copied.length === 0 || !onSCXMLChange || !scxmlContent) return;
 
     if (copied !== lastPastedClipboardRef.current) {
@@ -2731,14 +2745,16 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     // dropped member for free" convention drag-to-reparent already uses
     // (see handleReparent below). Read before any clones are added, since
     // adding them is what would otherwise make this container look non-empty.
-    const targetContainer = currentParentId
-      ? findStateById(scxmlDoc, currentParentId)
-      : scxmlDoc.scxml;
-    const targetHadNoInitial = targetContainer
-      ? getInitialIds(targetContainer).size === 0
-      : false;
+    const targetEntry = currentParentId ? findElementById(scxmlDoc, currentParentId) : null;
+    const targetContainer = currentParentId ? targetEntry?.element ?? null : scxmlDoc.scxml;
+    // A <parallel> takes no `initial` — every child is an always-active region.
+    const targetIsParallel = targetEntry?.tag === 'parallel';
+    const targetHadNoInitial =
+      targetContainer && !targetIsParallel
+        ? getInitialIds(targetContainer, currentParentId ? 'state' : 'root').size === 0
+        : false;
 
-    const existingIds = new Set(parsedData.nodes.map((n) => n.id));
+    const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
     const combinedIdMap = new Map<string, string>();
     const clones: StateElement[] = [];
 
@@ -2748,15 +2764,16 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       clones.push(clone);
     });
 
-    clones.forEach((clone) => {
+    clones.forEach((clone, i) => {
       rewriteOrDropTransitions(clone, combinedIdMap);
-      addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined);
+      const tag = copiedParallelIds.has(copied[i]['@_id']) ? 'parallel' : 'state';
+      addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined, tag);
     });
 
     const carriedInitialIds = targetContainer
       ? resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, targetHadNoInitial)
       : [];
-    if (targetContainer && carriedInitialIds.length > 0) {
+    if (targetContainer && !targetIsParallel && carriedInitialIds.length > 0) {
       // A multi-value @_initial here is deliberate, not just the single-id
       // case handleReparent covers — it's what lets the same "2+ distinct
       // Initial work trees" normalization pass that originally created a
@@ -2791,15 +2808,24 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       stateIds.forEach((id) => {
         if (id === targetParentId) return;
         if (targetParentId && isDescendantOf(scxmlDoc, targetParentId, id)) return;
-        const detached = detachStateFromParent(scxmlDoc, id);
+        const detached = detachElementFromParent(scxmlDoc, id);
         if (!detached) return;
-        addStateToDocument(scxmlDoc, detached, targetParentId);
+        addStateToDocument(scxmlDoc, detached.element, targetParentId, detached.tag);
         changed = true;
 
         if (targetParentId) {
-          const newParent = findStateById(scxmlDoc, targetParentId);
-          if (newParent && !newParent['@_initial'] && newParent.state) {
-            const children = Array.isArray(newParent.state) ? newParent.state : [newParent.state];
+          // A <parallel> takes no `initial` — every child is an always-active region.
+          const newParentEntry = findElementById(scxmlDoc, targetParentId);
+          const newParent = newParentEntry?.tag === 'state' ? newParentEntry.element : null;
+          if (newParent && !newParent['@_initial']) {
+            const children = [
+              ...(Array.isArray(newParent.state) ? newParent.state : newParent.state ? [newParent.state] : []),
+              ...(Array.isArray((newParent as any).parallel)
+                ? (newParent as any).parallel
+                : (newParent as any).parallel
+                  ? [(newParent as any).parallel]
+                  : []),
+            ];
             if (children.length === 1) {
               newParent['@_initial'] = children[0]['@_id'];
             }
@@ -3630,6 +3656,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         stateType={selectedStateForActions?.stateType ?? 'simple'}
         isInitial={selectedStateForActions?.isInitial ?? false}
         canMarkInitial={selectedStateForActions?.canMarkInitial ?? true}
+        isParallelRegion={selectedStateForActions?.isParallelRegion ?? false}
         onToggleInitial={() => {
           if (selectedStateForActions) {
             handleToggleInitialState(selectedStateForActions.id);

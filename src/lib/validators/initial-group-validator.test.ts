@@ -68,4 +68,80 @@ describe('validateInitialStateGroups', () => {
     validateInitialStateGroups(scxml, errors);
     expect(errors.length).toBe(1);
   });
+
+  it('reports a compound state with 2+ Initial States that cannot become a <parallel> because it has <final> children', () => {
+    const scxml: SCXMLElement = {
+      state: {
+        '@_id': 'P',
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
+        final: { '@_id': 'Done' },
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].stateId).toBe('P');
+    expect(errors[0].message).toContain('<final>');
+  });
+
+  it('does not treat the regions of a <parallel> as conflicting Initial State groups', () => {
+    const scxml: SCXMLElement = {
+      parallel: {
+        '@_id': 'P',
+        state: [{ '@_id': 'R1', transition: { '@_target': 'R2' } }, { '@_id': 'R2' }],
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toEqual([]);
+  });
+
+  it('still checks Initial State groups inside a region of a <parallel>', () => {
+    const scxml: SCXMLElement = {
+      parallel: {
+        '@_id': 'P',
+        state: [
+          {
+            '@_id': 'R1',
+            '@_initial': 'X Y',
+            state: [{ '@_id': 'X', transition: { '@_target': 'Y' } }, { '@_id': 'Y' }],
+          },
+          { '@_id': 'R2' },
+        ],
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].stateId).toBe('X');
+  });
+
+  it('does not report a transition between two regions of __root_parallel as merging Initial State groups', () => {
+    const scxml: SCXMLElement = {
+      '@_initial': '__root_parallel',
+      parallel: {
+        '@_id': '__root_parallel',
+        state: [
+          { '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' }, transition: { '@_target': 'R2' } },
+          { '@_id': 'R2', '@_initial': 'Y', state: { '@_id': 'Y' } },
+        ],
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toEqual([]);
+  });
+
+  it('still reports merged Initial State groups among ordinary root siblings next to __root_parallel', () => {
+    const scxml: SCXMLElement = {
+      '@_initial': '__root_parallel C D',
+      state: [{ '@_id': 'C', transition: { '@_target': 'D' } }, { '@_id': 'D' }],
+      parallel: { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toHaveLength(1);
+    expect([errors[0].stateId, errors[0].targetStateId].sort()).toEqual(['C', 'D']);
+  });
 });

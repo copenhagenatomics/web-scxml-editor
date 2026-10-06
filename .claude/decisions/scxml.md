@@ -255,7 +255,7 @@ The moment a container has 2+ distinct Initial-marked work trees, the editor res
 `src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/parallel-group-markers.ts`, `src/stores/editor-store.ts` (`normalizeContent`, the single choke point), `docs/parallel-states-requirement.md`, commits `801145d`/`bf0ab49`.
 
 ### Status
-Accepted (amended by #11 — the "single-member tree used bare" clause no longer holds).
+Accepted, amended twice: by #11 (the "single-member tree used bare" clause no longer holds) and by #12 (superseding the marker-based mechanism — no `viz:auto-*` markers, the compound state itself becomes the `<parallel>`, hand-authored `<parallel>` is no longer exempt, and regions are drawn as columns rather than flattened by marker). The core decision — live restructuring into a real `<parallel>` — still holds.
 
 ---
 
@@ -277,6 +277,35 @@ Explicit user request, stated with a concrete example (`<parallel><state id="sta
 
 ### Evidence
 `src/lib/utils/parallel-group-normalization.ts` (`applyWrapDecision`), `src/lib/utils/parallel-group-normalization.test.ts`, conversation request citing the exact example above.
+
+### Status
+Accepted (the "every region is a `*_region` state" rule still holds, now via `buildRegions`). Its marker-related constraints — `viz:auto-region`, the bare-region read path, and exempting hand-authored `<parallel>` — are superseded by #12.
+
+---
+
+## 12. A compound `<state>` with 2+ Initial work trees becomes the `<parallel>` itself; no marker attributes; the editor only inserts `__root_parallel`
+
+### Context
+Under #10, a compound state with 2+ Initial work trees kept its `<state>` element and got a synthetic `<parallel id="{id}_parallel">` nested inside it, all tagged with `viz:auto-parallel` / `viz:auto-region` markers. With the default new-document template (`src/lib/consts/default_scxml_template.ts`), every document starts with `<state id="main_region">`, so in practice every auto `<parallel>` sat under a `<state>` wrapper. The user asked (1) that there be no state wrapper above the `<parallel>` tag, (2) that the editor never make a `<parallel>` of its own — the user's own state converts — and (3) that all marker attributes be removed.
+
+### Decision
+`normalizeParallelGroups` (`src/lib/utils/parallel-group-normalization.ts`):
+- A compound `<state>` with 2+ Initial work trees becomes a `<parallel>` in place (same object, moved from its parent's `.state` to `.parallel`): it keeps its id, transitions, onentry/onexit and `viz:` attributes, loses `@initial`/`<initial>`, and each work tree goes into its own `<state id="{initialId}_region" initial="{initialId}">` (#11). Children outside every work tree go into **one extra region** of their own (the user chose "convert anyway" over a nested fallback or blocking).
+- **Any** `<parallel>` (converted or hand-written; nothing tells them apart) with fewer than 2 regions turns back into a `<state>`, its sole region (if any) becoming `initial`. Regions are kept as they are, not unwrapped.
+- The `<scxml>` root can't be a `<parallel>`, so 2+ root-level work trees go into one inserted `<parallel id="__root_parallel">` — the only element the editor ever inserts, recognized by its reserved id (`parallel-structure.ts`'s `isRootParallel`, allowing a `_2`… clash suffix). New root-level work trees join it as regions; it's removed once fewer than 2 regions are left.
+- No `viz:auto-*` markers are written. Older documents are migrated on the next pass: markers are stripped, and an old `<state id="X" initial="X_parallel"><parallel id="X_parallel" viz:auto-parallel="true">…` is collapsed so X itself is the `<parallel>`.
+
+### Constraints
+- Regions are drawn as **columns, not nodes**, for every `<parallel>` (`parallel-structure.ts`'s `getDisplayChildEntries` / `getRegionDisplayEntries`, used by `state-registry.ts`): a region's contents show directly inside the parallel, separated by the divider lines, with no region name shown (the user asked for the column labels to be removed). An empty region, or a region that is itself a `<parallel>`, is shown as a node. The rule is positional ("direct child of a `<parallel>`"), not name- or marker-based — chosen by the user over hiding by `*_region` naming or bringing back a region marker. Cost: a region state itself can't be selected in the diagram (e.g. to edit its own actions or transitions; transitions on a region element have no node to start from). `__root_parallel` is invisible; its regions' contents show at root level. Badges: a column member's Initial badge comes from its region's `initial` (`isInitialInRegionOf` in `layout-positioning.ts`).
+- A region of a `<parallel>` is always active, so it has no Initial designation: `ToggleInitialStateCommand` refuses it, `isMarkedInitial` is false, the State Actions panel hides the checkbox (`isParallelRegion`), and it gets no Initial badge. Copying regions carries them over as Initial, so pasting 2+ into an empty state makes it a `<parallel>`.
+- Moving or copying keeps the tag: `scxml-manipulation-utils.ts`'s `findElementById` / `detachElementFromParent` return `{ element, tag }`, `addStateToDocument` takes the tag, the state clipboard records `copiedParallelIds`, and every tree walk there (detach, `isDescendantOf`, clone, `rewriteOrDropTransitions`) visits `.parallel` as well as `.state`. A `<parallel>` drop/paste target never gets an `initial`.
+- A state with `<final>` children is never converted (`<parallel>` can't hold `<final>`); `initial-group-validator.ts` reports it.
+- Because markers are gone, a hand-written `<parallel>` with only one region (e.g. in an opened file) is also turned into a `<state>` — accepted explicitly by the user.
+- Adding a new state inside a `<parallel>` makes it a new, always-active region immediately.
+- Supersedes #10's "never touch hand-authored `<parallel>`" constraint and the marker-based reading described in #10/#11.
+
+### Evidence
+`src/lib/utils/parallel-structure.ts`, `src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/initial-group-utils.ts` (`findParentEntry`, `isParallelRegion`), `parallel-group-normalization.test.ts`, `initial-group-utils.test.ts`, `toggle-initial-state-command.test.ts`, `state-registry.test.ts`, `initial-group-validator.test.ts`.
 
 ### Status
 Accepted.

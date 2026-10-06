@@ -2,8 +2,9 @@ import { BaseCommand, type CommandResult } from './base-command';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
   wouldConflictIfMarkedInitial,
-  findParentContainer,
+  findParentEntry,
   getInitialIds,
+  isParallelRegion,
 } from '@/lib/utils/initial-group-utils';
 import {
   clearWaypointsForTouchingTransitions,
@@ -44,18 +45,13 @@ import {
  * execute() (unlike Rename/UpdateActions/ChangeStateType), so it must
  * explicitly restore the cleared snapshot.
  *
- * "Direct parent" above means the *logical* container, not necessarily the
- * state's real DOM parentElement: once 2+ Initial States get auto-wrapped
- * into a real <parallel> (parallel-group-normalization.ts), a member's real
- * DOM parent is that <parallel> or one of its viz:auto-region wrappers —
- * neither of which ever carries an `initial` attribute — so this command
- * resolves the logical container via findParentContainer (which already
- * sees through auto-wrapping) and reads/writes ITS `initial` attribute,
- * using getInitialIds (also auto-wrap-aware) rather than a raw attribute
- * read to determine the current, real set of Initial ids — the raw
- * attribute on a wrapped container names the synthetic <parallel>'s id, not
- * any real state. The actual document restructuring (moving the toggled
- * state in or out of the <parallel>) is left entirely to
+ * "Direct parent" above means the *logical* container, resolved via
+ * findParentEntry: for a state at the root next to `__root_parallel`
+ * (parallel-group-normalization.ts) that's the <scxml> root, whose raw
+ * `initial` names the <parallel>'s id — getInitialIds expands it to the real
+ * set of Initial ids. A region of a <parallel> is always active, so toggling
+ * it is refused. The actual restructuring (a <state> becoming a <parallel>
+ * once it has 2+ Initial work trees) is left entirely to
  * normalizeParallelGroups, which every mutation path already runs through
  * downstream (useEditorStore.setContent) — this command only ever needs to
  * get the `initial` attribute's real token list right.
@@ -98,13 +94,20 @@ export class ToggleInitialStateCommand extends BaseCommand {
     }
     const scxmlDoc = parseResult.data;
 
-    const logicalContainer = findParentContainer(scxmlDoc, this.stateId);
-    if (!logicalContainer) {
+    const parentEntry = findParentEntry(scxmlDoc, this.stateId);
+    if (!parentEntry) {
       return this.createFailureResult(
         `Could not resolve the container for state: ${this.stateId}`,
         scxmlContent
       );
     }
+    if (isParallelRegion(scxmlDoc, this.stateId)) {
+      return this.createFailureResult(
+        `'${this.stateId}' is a region of a parallel state, so it is always active — the Initial State designation doesn't apply to it.`,
+        scxmlContent
+      );
+    }
+    const logicalContainer = parentEntry.container;
     const containerId = (logicalContainer as any)['@_id'] as string | undefined;
     const parent = containerId ? this.findStateElement(doc, containerId) : doc.documentElement;
     if (!parent) {
@@ -115,7 +118,7 @@ export class ToggleInitialStateCommand extends BaseCommand {
     }
 
     const initialElement = this.findInitialElement(parent);
-    const currentIds = getInitialIds(logicalContainer);
+    const currentIds = getInitialIds(logicalContainer, parentEntry.kind);
 
     this.previousInitialAttr = parent.hasAttribute('initial')
       ? parent.getAttribute('initial')

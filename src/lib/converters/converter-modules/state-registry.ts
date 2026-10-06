@@ -5,6 +5,8 @@
  * Manages the state registry map and hierarchy relationships between states.
  */
 
+import { getDisplayChildEntries, type ContainerKind } from '@/lib/utils/parallel-structure';
+
 export interface StateRegistryEntry {
   state: any;
   parentPath: string;
@@ -15,47 +17,28 @@ export interface StateRegistryEntry {
 }
 
 /**
- * An auto-wrapped <parallel viz:auto-parallel="true"> (created by the
- * "multiple Initial State work trees" feature, src/lib/utils/parallel-group-normalization.ts)
- * is never registered as its own navigable container node — its work-tree
- * members are transparently registered as if they were still flat children
- * of whichever container the parallel itself is nested under, exactly as
- * they were before wrapping. A hand-authored <parallel> (no marker) is
- * completely unaffected and keeps its normal, drillable registry entry.
+ * A <parallel>'s regions are drawn as columns, not nodes (see
+ * getDisplayChildEntries): each region's contents register as the
+ * <parallel>'s own children, and the region itself gets no registry entry —
+ * unless it's empty or is itself a <parallel>, in which case it registers as
+ * the node. The root-level `<parallel id="__root_parallel">` (inserted by
+ * src/lib/utils/parallel-group-normalization.ts) is likewise never a node:
+ * its regions' contents register at root level.
  *
- * Returns the effective flat list of "direct <state> child" elements for a
- * container, folding in any auto-parallel child's content (unwrapping a
- * multi-member viz:auto-region wrapper one level further, since it's a
- * synthetic region container too, not a real user-facing state).
+ * Returns the effective "direct <state> / <parallel> children" of an element.
  */
-function collectEffectiveStateChildren(
+function collectEffectiveChildren(
   parent: any,
-  getAttribute: (element: any, attrName: string) => string | undefined,
-  getElements: (parent: any, elementName: string) => any
-): any[] {
-  const own = getElements(parent, 'state');
-  const result: any[] = own ? (Array.isArray(own) ? [...own] : [own]) : [];
-
-  const parallels = getElements(parent, 'parallel');
-  const parallelArray = parallels ? (Array.isArray(parallels) ? parallels : [parallels]) : [];
-  for (const parallel of parallelArray) {
-    if (getAttribute(parallel, 'viz:auto-parallel') !== 'true') continue;
-
-    const regions = getElements(parallel, 'state');
-    const regionArray = regions ? (Array.isArray(regions) ? regions : [regions]) : [];
-    for (const region of regionArray) {
-      if (getAttribute(region, 'viz:auto-region') === 'true') {
-        const members = getElements(region, 'state');
-        const memberArray = members ? (Array.isArray(members) ? members : [members]) : [];
-        result.push(...memberArray);
-      } else {
-        result.push(region);
-      }
-    }
-  }
-
-  return result;
+  kind: ContainerKind
+): { states: any[]; parallels: any[] } {
+  const states: any[] = [];
+  const parallels: any[] = [];
+  getDisplayChildEntries(parent, kind).forEach((entry) => {
+    (entry.tag === 'state' ? states : parallels).push(entry.el);
+  });
+  return { states, parallels };
 }
+
 
 /**
  * Register all states in the SCXML document with their parent paths and hierarchy
@@ -69,7 +52,9 @@ export function registerAllStates(
   parentMap: Map<string, string>,
   claimedStates: Set<string>,
   getAttribute: (element: any, attrName: string) => string | undefined,
-  getElements: (parent: any, elementName: string) => any
+  getElements: (parent: any, elementName: string) => any,
+  /** What `parent` is — a <parallel>'s regions are shown by their contents. */
+  kind: ContainerKind = parentPath ? 'state' : 'root'
 ): void {
   const parentId =
     parentPath && typeof parentPath === 'string'
@@ -85,9 +70,9 @@ export function registerAllStates(
     hierarchyMap.set(parentId, []);
   }
 
-  // Register regular states (including any flattened out of an
-  // auto-wrapped <parallel> child — see collectEffectiveStateChildren)
-  const states = collectEffectiveStateChildren(parent, getAttribute, getElements);
+  // Register regular states (including the regions of the root's
+  // __root_parallel — see collectEffectiveChildren)
+  const states = collectEffectiveChildren(parent, kind).states;
   {
     const statesArray = states;
     for (const state of statesArray) {
@@ -125,7 +110,8 @@ export function registerAllStates(
           parentMap,
           claimedStates,
           getAttribute,
-          getElements
+          getElements,
+          'state'
         );
 
         // After recursive call, collect children for this state
@@ -135,7 +121,8 @@ export function registerAllStates(
             state,
             claimedStates,
             getAttribute,
-            getElements
+            getElements,
+            'state'
           );
           registryEntry.children = childStates;
           hierarchyMap.set(stateId, childStates);
@@ -147,16 +134,12 @@ export function registerAllStates(
     }
   }
 
-  // Register parallel states — an auto-wrapped one (viz:auto-parallel="true")
-  // is skipped here entirely: its content was already folded into the
-  // "Register regular states" pass above via collectEffectiveStateChildren,
-  // so it never gets its own registry entry / navigable node. A
-  // hand-authored <parallel> registers and recurses normally.
-  const parallels = getElements(parent, 'parallel');
-  if (parallels) {
-    const parallelsArray = Array.isArray(parallels) ? parallels : [parallels];
+  // Register parallel states — the root's __root_parallel is skipped (its
+  // regions were folded into the root level above); every other <parallel>
+  // registers and recurses normally.
+  const parallelsArray = collectEffectiveChildren(parent, kind).parallels;
+  {
     for (const parallel of parallelsArray) {
-      if (getAttribute(parallel, 'viz:auto-parallel') === 'true') continue;
       const parallelId = getAttribute(parallel, 'id');
       if (parallelId) {
         const fullPath = parentPath
@@ -191,7 +174,8 @@ export function registerAllStates(
           parentMap,
           claimedStates,
           getAttribute,
-          getElements
+          getElements,
+          'parallel'
         );
 
         // After recursive call, collect children for this parallel state
@@ -200,7 +184,8 @@ export function registerAllStates(
           parallel,
           claimedStates,
           getAttribute,
-          getElements
+          getElements,
+          'parallel'
         );
         registryEntry.children = childStates;
         hierarchyMap.set(parallelId, childStates);
@@ -265,13 +250,14 @@ export function collectDirectChildIds(
   element: any,
   claimedStates: Set<string>,
   getAttribute: (element: any, attrName: string) => string | undefined,
-  getElements: (parent: any, elementName: string) => any
+  getElements: (parent: any, elementName: string) => any,
+  kind: ContainerKind = 'state'
 ): string[] {
   const childIds: string[] = [];
 
-  // Collect child states - only those not already claimed. Includes any
-  // states flattened out of an auto-wrapped <parallel> child.
-  const states = collectEffectiveStateChildren(element, getAttribute, getElements);
+  // Collect child states - only those not already claimed. Includes the
+  // regions of the root's __root_parallel.
+  const { states, parallels: parallelsArray } = collectEffectiveChildren(element, kind);
   for (const state of states) {
     const stateId = getAttribute(state, 'id');
     if (!stateId) continue;
@@ -282,14 +268,10 @@ export function collectDirectChildIds(
     }
   }
 
-  // Collect child parallel states - only those not already claimed. An
-  // auto-wrapped one is never a "child" in its own right (folded above).
-  const parallels = getElements(element, 'parallel');
-  if (parallels) {
-    const parallelsArray = Array.isArray(parallels) ? parallels : [parallels];
-
+  // Collect child parallel states - only those not already claimed. The
+  // root's __root_parallel is never a "child" in its own right (folded above).
+  {
     for (const parallel of parallelsArray) {
-      if (getAttribute(parallel, 'viz:auto-parallel') === 'true') continue;
       const parallelId = getAttribute(parallel, 'id');
       if (!parallelId) continue;
 

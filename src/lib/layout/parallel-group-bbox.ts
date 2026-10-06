@@ -2,12 +2,12 @@
  * Pure bounding-box math for the "Parallel State" visual overlay: given the
  * already-laid-out positions/sizes of a container's flattened member nodes
  * (see collectEffectiveStateChildren in state-registry.ts) and the group
- * structure reported by collectAutoParallelGroups, computes the outer
+ * structure reported by collectParallelGroups, computes the outer
  * wrapper box plus one sub-box per region (for the divider lines between
  * regions). No React/ReactFlow dependency, so this is independently
  * testable and reusable by both the wrapper node and the divider overlay.
  */
-import type { AutoParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
+import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
 
 export interface NodeRect {
   id: string;
@@ -76,7 +76,7 @@ function unionRect(rects: Box[], padding: number): Box {
  * cleanly separated is left untouched.
  */
 export function computeRegionSeparationTranslations(
-  groups: AutoParallelGroupInfo[],
+  groups: ParallelGroupInfo[],
   nodeRects: Map<string, NodeRect>,
   gap: number = 80
 ): Map<string, number> {
@@ -117,7 +117,7 @@ export function computeRegionSeparationTranslations(
 }
 
 export function computeParallelGroupBBoxes(
-  groups: AutoParallelGroupInfo[],
+  groups: ParallelGroupInfo[],
   nodeRects: Map<string, NodeRect>,
   padding: number = 24
 ): ParallelGroupBBox[] {

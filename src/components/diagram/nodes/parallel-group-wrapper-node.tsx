@@ -19,17 +19,13 @@ export interface ParallelGroupWrapperNodeProps
   > {}
 
 /**
- * Invisible positioning anchor + drag zone for 2+ auto-detected
- * Initial-state work trees (see
- * src/lib/utils/parallel-group-normalization.ts and
- * computeParallelGroupWrapperNodes). Unlike HistoryWrapperNode, this never
- * represents a real drillable/selectable state in its own right — the
- * underlying <parallel> element it corresponds to is deliberately never
- * shown as a separate state, per the feature's own requirement, so this
- * component has no click/navigate handler and no visible content at all —
- * no border, no background, no label. The only visual cue for the group is
- * the full-height vertical divider lines rendered separately by
- * ParallelRegionDividerOverlay (a viewport-synced overlay spanning the
+ * Positioning anchor + drag zone for the regions of a <parallel> (see
+ * computeParallelGroupWrapperNodes), drawn on the level you see when you're
+ * inside that <parallel>. Regions are drawn as columns rather than nodes;
+ * this node has no visible content at all — no border, no background, no
+ * label, no click/navigate handler. The column
+ * separators are the full-height vertical divider lines rendered separately
+ * by ParallelRegionDividerOverlay (a viewport-synced overlay spanning the
  * whole visible canvas, not just this node's own bounds).
  *
  * The whole root carries the `.parallel-group-drag-handle` class — the

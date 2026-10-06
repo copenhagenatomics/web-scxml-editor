@@ -3,7 +3,7 @@ import { useStateClipboardStore } from './state-clipboard-store';
 
 describe('useStateClipboardStore', () => {
   beforeEach(() => {
-    useStateClipboardStore.setState({ copied: null, copiedInitialIds: new Set() });
+    useStateClipboardStore.setState({ copied: null, copiedInitialIds: new Set(), copiedParallelIds: new Set() });
   });
 
   it('starts with an empty clipboard', () => {
@@ -34,5 +34,12 @@ describe('useStateClipboardStore', () => {
     useStateClipboardStore.getState().copy(states, new Set(['A']));
     expect(useStateClipboardStore.getState().copiedInitialIds.has('A')).toBe(true);
     expect(useStateClipboardStore.getState().copiedInitialIds.has('B')).toBe(false);
+  });
+
+  it('stores which copied elements are <parallel> (defaulting to none)', () => {
+    useStateClipboardStore.getState().copy([{ '@_id': 'A' }] as any);
+    expect(useStateClipboardStore.getState().copiedParallelIds.size).toBe(0);
+    useStateClipboardStore.getState().copy([{ '@_id': 'P' }] as any, new Set(), new Set(['P']));
+    expect(useStateClipboardStore.getState().copiedParallelIds.has('P')).toBe(true);
   });
 });

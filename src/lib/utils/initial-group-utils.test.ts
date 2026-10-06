@@ -9,6 +9,8 @@ import {
   wouldMergeDistinctGroups,
   wouldConflictIfMarkedInitial,
   isMarkedInitial,
+  isParallelRegion,
+  findParentEntry,
 } from './initial-group-utils';
 
 function doc(scxml: SCXMLDocument['scxml']): SCXMLDocument {
@@ -30,73 +32,49 @@ describe('getDirectChildStates', () => {
     expect(getDirectChildStates({ state: children } as any)).toEqual(children);
   });
 
-  it('flattens bare-region members of an auto-wrapped <parallel> child in as direct children', () => {
-    const container = {
-      parallel: {
+  it('counts the regions of the root __root_parallel as children of the root', () => {
+    const container = { parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      },
-    };
-    expect(getDirectChildStates(container as any).map((c) => c['@_id']).sort()).toEqual(['A', 'B']);
-  });
-
-  it('flattens the members of a multi-member auto-region two levels in as direct children', () => {
-    const container = {
-      parallel: {
-        '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
         state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [{ '@_id': 'main_region' }, { '@_id': 'state_1' }],
-          },
-          { '@_id': 'state_2' },
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
         ],
-      },
-    };
-    expect(getDirectChildStates(container as any).map((c) => c['@_id']).sort()).toEqual([
-      'main_region',
-      'state_1',
-      'state_2',
-    ]);
+      } };
+    expect(getDirectChildStates(container as any, 'root').map((c) => c['@_id']).sort()).toEqual(['A_region', 'B_region']);
   });
 
-  it('does not flatten a hand-authored <parallel> child (no viz:auto-parallel marker)', () => {
+  it('does not see through a <parallel> named __root_parallel unless the container is the root', () => {
+    const container = { parallel: { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] } };
+    expect(getDirectChildStates(container as any).map((c) => c['@_id'])).toEqual(['__root_parallel']);
+  });
+
+  it('counts any other <parallel> child as one child state', () => {
     const container = {
-      parallel: { '@_id': 'Manual', state: [{ '@_id': 'RegionA' }, { '@_id': 'RegionB' }] },
+      state: { '@_id': 'S' },
+      parallel: { '@_id': 'P', state: [{ '@_id': 'RegionA' }, { '@_id': 'RegionB' }] },
     };
-    expect(getDirectChildStates(container as any)).toEqual([]);
+    expect(getDirectChildStates(container as any).map((c) => c['@_id']).sort()).toEqual(['P', 'S']);
   });
 
-  it('never mutates the container\'s own .state array when flattening an auto-wrapped parallel (repeated calls must not accumulate duplicates)', () => {
-    // Reproduces a real bug: since JS arrays are passed by reference, pushing
-    // the flattened parallel members directly onto container.state (instead
-    // of a copy) permanently corrupts the document — every subsequent call
-    // (this function is called many times per single connection check, via
-    // findParentContainer's recursive search, getInitialIds, and
-    // getSiblingEdges all calling it again on the same container) re-adds
-    // the same members again, producing duplicate ids in the result and,
-    // downstream, a state showing up as "conflicting with itself" in
-    // wouldMergeDistinctGroups.
+  it('never mutates the container own .state array (repeated calls must not accumulate duplicates)', () => {
+    // Reproduces a real bug: pushing children directly onto container.state
+    // (instead of a copy) permanently corrupted the document a little more
+    // on every call — this function is called many times per single check.
     const ownArray = [{ '@_id': 'flat_sibling' }];
-    const container = {
-      state: ownArray,
-      parallel: {
+    const container = { state: ownArray, parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      },
-    };
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      } };
 
-    getDirectChildStates(container as any);
-    getDirectChildStates(container as any);
-    const thirdCall = getDirectChildStates(container as any);
+    getDirectChildStates(container as any, 'root');
+    getDirectChildStates(container as any, 'root');
+    const thirdCall = getDirectChildStates(container as any, 'root');
 
     expect(ownArray).toEqual([{ '@_id': 'flat_sibling' }]);
-    expect(thirdCall.map((c) => c['@_id']).sort()).toEqual(['A', 'B', 'flat_sibling']);
+    expect(thirdCall.map((c) => c['@_id']).sort()).toEqual(['A_region', 'B_region', 'flat_sibling']);
   });
 });
 
@@ -120,42 +98,22 @@ describe('findParentContainer', () => {
     expect(findParentContainer(d, 'Nope')).toBeNull();
   });
 
-  it('resolves the logical (pre-wrap) container for a bare-region member of an auto-wrapped root <parallel>', () => {
-    // Reproduces the reported bug: after two Initial States get auto-wrapped,
-    // findParentContainer must still resolve to the root scxml element for a
-    // bare-region member, not fail to find it because it's now nested inside
-    // <parallel> rather than a direct <state> child.
-    const scxml = {
-      '@_initial': '__root_parallel',
-      parallel: {
+  it('resolves the <scxml> root for a region of __root_parallel', () => {
+    const d = doc({ '@_initial': '__root_parallel', parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      },
-    };
-    const d = doc(scxml as any);
-    expect(findParentContainer(d, 'B')).toBe(d.scxml);
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      } } as any);
+    expect(findParentContainer(d, 'B_region')).toBe(d.scxml);
   });
 
-  it('resolves the logical container for a member nested inside a multi-member auto-region', () => {
-    const scxml = {
-      '@_initial': '__root_parallel',
-      parallel: {
-        '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [{ '@_id': 'main_region' }, { '@_id': 'state_1' }],
-          },
-          { '@_id': 'state_2' },
-        ],
-      },
-    };
-    const d = doc(scxml as any);
-    expect(findParentContainer(d, 'state_1')).toBe(d.scxml);
+  it('resolves the region for a state inside a region, and the <parallel> for a region', () => {
+    const p = { '@_id': 'P', state: [{ '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' } }, { '@_id': 'R2' }] };
+    const d = doc({ parallel: p } as any);
+    expect(findParentContainer(d, 'X')).toBe((p.state as any[])[0]);
+    expect(findParentEntry(d, 'R2')).toEqual({ container: p, kind: 'parallel' });
   });
 });
 
@@ -192,42 +150,20 @@ describe('getInitialIds', () => {
     expect(getInitialIds(container as any)).toEqual(new Set(['A', 'B']));
   });
 
-  it('does not re-add a bare region that @_initial no longer names, even though it is still physically present in the <parallel> (reproduces the "uncheck does nothing" bug)', () => {
-    // This is the intermediate shape ToggleInitialStateCommand now produces
-    // when unmarking a wrapped state: it writes the real remaining token
-    // list straight onto @_initial, without itself restructuring the still-
-    // wrapped <parallel> (that's normalizeParallelGroups's job, on the next
-    // pass). A bare region's mere physical presence must not override an
-    // @_initial that already resolves to real tokens.
-    const container = {
-      '@_initial': 'A B',
-      parallel: {
+  it('expands the __root_parallel id in the root initial to all of its regions', () => {
+    const container = { '@_initial': '__root_parallel C', state: { '@_id': 'C' }, parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'C' }],
-      },
-    };
-    expect(getInitialIds(container as any)).toEqual(new Set(['A', 'B']));
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      } };
+    expect(getInitialIds(container as any, 'root')).toEqual(new Set(['A_region', 'B_region', 'C']));
   });
 
-  it('recovers the real Initial ids from an auto-wrapped <parallel> child, once @_initial itself only names the parallel', () => {
-    const container = {
-      '@_initial': '__root_parallel',
-      parallel: {
-        '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [{ '@_id': 'main_region' }, { '@_id': 'state_1' }],
-          },
-          { '@_id': 'state_2' },
-        ],
-      },
-    };
-    expect(getInitialIds(container as any)).toEqual(new Set(['main_region', 'state_2']));
+  it('treats every child of a <parallel> as Initial (regions are always active)', () => {
+    const container = { '@_id': 'P', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] };
+    expect(getInitialIds(container as any, 'parallel')).toEqual(new Set(['R1', 'R2']));
   });
 });
 
@@ -251,26 +187,14 @@ describe('getSiblingEdges', () => {
     expect(getSiblingEdges(container as any)).toEqual([['A', 'B'], ['A', 'C']]);
   });
 
-  it('sees an edge between two members flattened out of a multi-member auto-region', () => {
+  it('sees an edge between two regions of __root_parallel', () => {
     const container = {
       parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [
-              { '@_id': 'main_region', transition: { '@_target': 'state_1' } },
-              { '@_id': 'state_1' },
-            ],
-          },
-          { '@_id': 'state_2' },
-        ],
+        state: [{ '@_id': 'R1', transition: { '@_target': 'R2' } }, { '@_id': 'R2' }],
       },
     };
-    expect(getSiblingEdges(container as any)).toEqual([['main_region', 'state_1']]);
+    expect(getSiblingEdges(container as any, 'root')).toEqual([['R1', 'R2']]);
   });
 });
 
@@ -365,25 +289,52 @@ describe('wouldMergeDistinctGroups', () => {
     expect(wouldMergeDistinctGroups(doc(scxml as any), 'A', 'B').blocked).toBe(false);
   });
 
-  it('allows connecting a bare-region member of an auto-wrapped <parallel> to an unassigned flat sibling outside it (reproduces the "conflicts with itself" bug)', () => {
-    // Before the array-mutation fix, getDirectChildStates corrupted
-    // container.state on every call (this function alone triggers several,
-    // via findParentContainer's recursive search, getInitialIds and
-    // getSiblingEdges), duplicating state_1's id in childIds — which made
-    // analyzeGroups see two "different" Initial roots that were actually
-    // the same id ("rooted at 'state_1' and 'state_1'"), incorrectly
-    // blocking a perfectly legal island-joins-a-group connection.
+  it('allows an unassigned root sibling to connect to another, next to __root_parallel (reproduces the "conflicts with itself" bug)', () => {
     const scxml = {
       '@_initial': '__root_parallel',
       parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'main_region' }, { '@_id': 'state_2' }, { '@_id': 'state_1' }],
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
       },
       state: [{ '@_id': 'state_3' }, { '@_id': 'state_4' }],
     };
-    const result = wouldMergeDistinctGroups(doc(scxml as any), 'state_1', 'state_3');
-    expect(result.blocked).toBe(false);
+    expect(wouldMergeDistinctGroups(doc(scxml as any), 'state_3', 'state_4').blocked).toBe(false);
+  });
+
+  it('leaves a transition between two regions of __root_parallel to the cross-region check', () => {
+    const d = doc({
+      '@_initial': '__root_parallel',
+      parallel: {
+        '@_id': '__root_parallel',
+        state: [
+          { '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' }, transition: { '@_target': 'R2' } },
+          { '@_id': 'R2', '@_initial': 'Y', state: { '@_id': 'Y' } },
+        ],
+      },
+    } as any);
+    expect(wouldMergeDistinctGroups(d, 'R2', 'R1').blocked).toBe(false);
+  });
+
+  it('allows marking an ordinary root sibling Initial next to __root_parallel', () => {
+    const d = doc({ ...{
+      '@_initial': '__root_parallel',
+      parallel: {
+        '@_id': '__root_parallel',
+        state: [
+          { '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' }, transition: { '@_target': 'R2' } },
+          { '@_id': 'R2', '@_initial': 'Y', state: { '@_id': 'Y' } },
+        ],
+      },
+    }, state: { '@_id': 'C' } } as any);
+    expect(wouldConflictIfMarkedInitial(d, 'C').blocked).toBe(false);
+  });
+
+  it('leaves a transition between two regions of a <parallel> to the cross-region check', () => {
+    const scxml = { parallel: { '@_id': 'P', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] } };
+    expect(wouldMergeDistinctGroups(doc(scxml as any), 'R1', 'R2').blocked).toBe(false);
   });
 });
 
@@ -408,43 +359,29 @@ describe('isMarkedInitial', () => {
     expect(isMarkedInitial(doc(scxml as any), 'on')).toBe(false);
   });
 
-  it('reports a bare-region member of an auto-wrapped <parallel> as marked initial (reproduces the State Actions panel checkbox bug)', () => {
-    // Before the fix, findParentContainer could not see through <parallel>
-    // to find this state's real container, so isMarkedInitial always
-    // returned false for any wrapped member — the "Initial State" checkbox
-    // showed unchecked (and toggling did nothing useful) even though the
-    // diagram's own "Initial" badge was rendered.
-    const scxml = {
-      '@_initial': '__root_parallel',
-      parallel: {
+  it('reports a region of a <parallel> (or of __root_parallel) as not Initial — regions are always active', () => {
+    const d = doc({ '@_initial': '__root_parallel', parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      },
-    };
-    expect(isMarkedInitial(doc(scxml as any), 'A')).toBe(true);
-    expect(isMarkedInitial(doc(scxml as any), 'B')).toBe(true);
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      } } as any);
+    expect(isMarkedInitial(d, 'A_region')).toBe(false);
+    expect(isParallelRegion(d, 'A_region')).toBe(true);
   });
 
-  it('reports the initial member of a multi-member auto-region as marked initial, and the non-initial member as not', () => {
-    const scxml = {
-      '@_initial': '__root_parallel',
-      parallel: {
+  it('reports the initial member inside a region as marked initial, and the other member as not', () => {
+    const d = doc({ '@_initial': '__root_parallel', parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
         state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [{ '@_id': 'main_region' }, { '@_id': 'state_1' }],
-          },
-          { '@_id': 'state_2' },
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
         ],
-      },
-    };
-    expect(isMarkedInitial(doc(scxml as any), 'main_region')).toBe(true);
-    expect(isMarkedInitial(doc(scxml as any), 'state_1')).toBe(false);
+      } } as any);
+    expect(isMarkedInitial(d, 'A')).toBe(true);
+    expect(isMarkedInitial(d, 'A2')).toBe(false);
+    expect(isParallelRegion(d, 'A')).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SCXMLDocument } from '@/types/scxml';
-import { normalizeParallelGroups, collectAutoParallelGroups, hasAnyChildren } from './parallel-group-normalization';
+import { normalizeParallelGroups, collectParallelGroups, hasAnyChildren } from './parallel-group-normalization';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
   addStateToDocument,
@@ -14,515 +14,395 @@ function ids(states: any): string[] {
   return arr.map((s) => s['@_id']);
 }
 
-describe('normalizeParallelGroups', () => {
-  it('reports no change for a document with zero initial-marked states', () => {
-    const d: SCXMLDocument = {
-      scxml: { state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any,
-    };
-    const before = JSON.stringify(d);
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(false);
-    expect(JSON.stringify(d)).toBe(before);
-  });
+function one(v: any): any {
+  return Array.isArray(v) ? v[0] : v;
+}
 
-  it('reports no change for a document with a single initial group (classic single-initial usage)', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(false);
-    expect(d.scxml['@_initial']).toBe('A');
-    expect(d.scxml.parallel).toBeUndefined();
-  });
+const HEADER =
+  '<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0"';
 
-  it('wraps two single-member initial groups under the root into a <parallel>, each in its own *_region wrapper', () => {
+function normalizeXml(xml: string): { changed: boolean; out: string; doc: SCXMLDocument } {
+  const parser = new SCXMLParser();
+  const doc = parser.parse(xml).data!;
+  const { changed } = normalizeParallelGroups(doc);
+  return { changed, out: parser.serialize(doc, true), doc };
+}
+
+describe('normalizeParallelGroups — compound state becomes the <parallel>', () => {
+  it('converts a compound state with 2+ Initial work trees into a <parallel> with the same id, keeping its transitions and actions', () => {
     const d: SCXMLDocument = {
       scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    expect(d.scxml.state).toBeUndefined();
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect((parallel as any)['@_viz:auto-parallel']).toBe('true');
-    expect(d.scxml['@_initial']).toBe(parallel['@_id']);
-    const regionIds = ids(parallel.state);
-    expect(regionIds.sort()).toEqual(['A_region', 'B_region']);
-    // Every region, even a single-member one, is a *_region wrapper state
-    // containing the actual member — never the member itself sitting
-    // directly under <parallel>.
-    const regions = Array.isArray(parallel.state) ? parallel.state : [parallel.state];
-    regions.forEach((r: any) => {
-      expect(r['@_viz:auto-region']).toBe('true');
-      expect(ids(r.state)).toEqual([r['@_initial']]);
-    });
-  });
-
-  it('disambiguates a synthesized region id that would otherwise collide with an unrelated, pre-existing sibling id', () => {
-    // A and C are each their own single-member Initial-marked work tree
-    // (triggering a 2-group wrap), and A_region is a plain, unrelated
-    // sibling — not Initial, not connected to A or C. Naively minting
-    // `${initialId}_region` for A would collide with this pre-existing
-    // state's id, producing a document with two distinct elements sharing
-    // @_id="A_region".
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A C',
-        state: [{ '@_id': 'A' }, { '@_id': 'C' }, { '@_id': 'A_region' }],
-      } as any,
-    };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-
-    const allIds: string[] = [];
-    const collect = (el: any): void => {
-      if (!el) return;
-      const arr = Array.isArray(el) ? el : [el];
-      arr.forEach((e) => {
-        if (e['@_id']) allIds.push(e['@_id']);
-        collect(e.state);
-        collect(e.parallel);
-      });
-    };
-    collect(d.scxml.state);
-    collect(d.scxml.parallel);
-
-    const duplicates = allIds.filter((id, i) => allIds.indexOf(id) !== i);
-    expect(duplicates).toEqual([]);
-
-    // The unrelated sibling keeps its own id, untouched, sitting alongside
-    // the (renamed) synthesized region for A.
-    expect(ids(d.scxml.state)).toContain('A_region');
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    const regionIds = ids(parallel.state);
-    expect(regionIds).toContain('C_region');
-    expect(regionIds.find((id) => id !== 'C_region')).not.toBe('A_region');
-  });
-
-  it('does not reuse an id already taken by a root <final>', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-        final: { '@_id': 'A_region' },
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    const regionIds = ids(parallel.state);
-    expect(regionIds).toContain('B_region');
-    expect(regionIds).not.toContain('A_region');
-  });
-
-  it('does not reuse an id already taken by a <history> in a state or directly under a <parallel>', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
+        '@_initial': 'Parent',
         state: [
-          { '@_id': 'A' },
-          { '@_id': 'B', history: { '@_id': 'B_region' } },
+          {
+            '@_id': 'Parent',
+            '@_initial': 'X Y',
+            '@_viz:xywh': '1,2,3,4',
+            transition: { '@_event': 'done', '@_target': 'Other' },
+            onentry: { log: { '@_expr': "'hi'" } },
+            state: [{ '@_id': 'X' }, { '@_id': 'Y' }],
+          },
+          { '@_id': 'Other' },
         ],
-        parallel: {
+      } as any,
+    };
+    expect(normalizeParallelGroups(d).changed).toBe(true);
+
+    expect(ids(d.scxml.state)).toEqual(['Other']);
+    const parent = one(d.scxml.parallel);
+    expect(parent['@_id']).toBe('Parent');
+    expect(parent['@_initial']).toBeUndefined();
+    expect(parent['@_viz:xywh']).toBe('1,2,3,4');
+    expect(parent.transition['@_target']).toBe('Other');
+    expect(parent.onentry).toBeDefined();
+    expect(ids(parent.state).sort()).toEqual(['X_region', 'Y_region']);
+    expect(d.scxml['@_initial']).toBe('Parent');
+  });
+
+  it('writes no marker attributes and no <state> wrapper above the <parallel>', () => {
+    const { out } = normalizeXml(
+      `${HEADER} initial="main_region"><state id="main_region" initial="A B"><state id="A"/><state id="B"/></state></scxml>`,
+    );
+    expect(out).toMatch(/<parallel id="main_region"/);
+    expect(out).not.toMatch(/<state id="main_region"/);
+    expect(out).not.toMatch(/viz:auto-/);
+  });
+
+  it('is stable when the converted document is re-parsed', () => {
+    const { out } = normalizeXml(
+      `${HEADER} initial="main_region"><state id="main_region" initial="A B"><state id="A"/><state id="B"/></state></scxml>`,
+    );
+    expect(normalizeXml(out).changed).toBe(false);
+  });
+
+  it('wraps each work tree in its own {initial}_region, including a single-member one', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: {
           '@_id': 'P',
-          state: { '@_id': 'P1' },
-          history: { '@_id': 'A_region' },
-        },
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const parallels = Array.isArray(d.scxml.parallel) ? d.scxml.parallel : [d.scxml.parallel!];
-    const auto = parallels.find((p: any) => p['@_viz:auto-parallel'] === 'true')!;
-    const regionIds = ids(auto.state);
-    expect(regionIds).toHaveLength(2);
-    expect(regionIds).not.toContain('A_region');
-    expect(regionIds).not.toContain('B_region');
-  });
-
-  it('does not drift a synthesized region id on repeated normalization when no unrelated sibling collides', () => {
-    // Guards against a naive collision-avoidance fix that treats a
-    // container's own previous auto-wrap ids as "taken" and needlessly
-    // re-suffixes them (A_region -> A_region_2 -> A_region_2_2 ...) on every
-    // single normalization pass, since normalizeParallelGroups recomputes
-    // everything fresh every time it runs (e.g. on every keystroke).
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    normalizeParallelGroups(d);
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(false);
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
-  });
-
-  it('migrates an already-wrapped wrapper off an id it duplicates with an unrelated element, instead of keeping the duplicate', () => {
-    // A document left with a duplicate id by the older collision-prone
-    // wrapping: the auto <parallel> and auto region share ids with
-    // hand-authored states elsewhere. Releasing the wrapper's own ids must
-    // not also forget the hand-authored occurrences.
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': '__root_parallel',
-        state: { '@_id': 'Other', state: [{ '@_id': '__root_parallel' }, { '@_id': 'A_region' }] },
-        parallel: {
-          '@_id': '__root_parallel',
-          '@_viz:auto-parallel': 'true',
+          '@_initial': 'A C',
           state: [
-            { '@_id': 'A_region', '@_initial': 'A', '@_viz:auto-region': 'true', state: { '@_id': 'A' } },
-            { '@_id': 'B_region', '@_initial': 'B', '@_viz:auto-region': 'true', state: { '@_id': 'B' } },
+            { '@_id': 'A', transition: { '@_target': 'B' } },
+            { '@_id': 'B' },
+            { '@_id': 'C' },
           ],
         },
       } as any,
     };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(parallel['@_id']).toBe('__root_parallel_2');
-    expect(ids(parallel.state).sort()).toEqual(['A_region_2', 'B_region']);
-    expect(ids((d.scxml.state as any).state).sort()).toEqual(['A_region', '__root_parallel']);
-
-    // And the migrated ids are then stable on later passes.
-    expect(normalizeParallelGroups(d).changed).toBe(false);
-  });
-
-  it('wraps a multi-member group (connected via a transition) into a synthetic auto-region <state>, alongside the other region\'s own *_region wrapper', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'main_region state_2',
-        state: [
-          { '@_id': 'main_region', transition: { '@_event': 'event', '@_target': 'state_1' } },
-          { '@_id': 'state_1' },
-          { '@_id': 'state_2' },
-        ],
-      } as any,
-    };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    const regions = Array.isArray(parallel.state) ? parallel.state : [parallel.state];
-    expect(regions.length).toBe(2);
-
-    const mainRegionWrapper = regions.find((r: any) => ids(r.state).includes('main_region'));
-    expect(mainRegionWrapper).toBeDefined();
-    expect((mainRegionWrapper as any)['@_viz:auto-region']).toBe('true');
-    expect((mainRegionWrapper as any)['@_initial']).toBe('main_region');
-    expect(ids(mainRegionWrapper!.state).sort()).toEqual(['main_region', 'state_1']);
-
-    const singleMemberRegion = regions.find((r: any) => r['@_id'] === 'state_2_region');
-    expect(singleMemberRegion).toBeDefined();
-    expect((singleMemberRegion as any)['@_viz:auto-region']).toBe('true');
-    expect((singleMemberRegion as any)['@_initial']).toBe('state_2');
-    expect(ids(singleMemberRegion!.state)).toEqual(['state_2']);
-  });
-
-  it('is idempotent: running twice produces no further change', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
     normalizeParallelGroups(d);
-    const after1 = JSON.stringify(d);
-    const result2 = normalizeParallelGroups(d);
-    expect(result2.changed).toBe(false);
-    expect(JSON.stringify(d)).toBe(after1);
+    const regions = one(d.scxml.parallel).state as any[];
+    const aRegion = regions.find((r) => r['@_id'] === 'A_region');
+    expect(aRegion['@_initial']).toBe('A');
+    expect(ids(aRegion.state).sort()).toEqual(['A', 'B']);
+    const cRegion = regions.find((r) => r['@_id'] === 'C_region');
+    expect(cRegion['@_initial']).toBe('C');
+    expect(ids(cRegion.state)).toEqual(['C']);
   });
 
-  it('reports no change for an already-wrapped document freshly parsed from XML (not just an in-memory rebuild)', () => {
-    // Regression test: the previous test above only re-runs normalization on
-    // the SAME in-memory object normalizeParallelGroups itself just rebuilt,
-    // so both "before" and "after" snapshots share the exact same property
-    // insertion order and the comparison can never catch an order mismatch.
-    // Real editing always re-parses fresh XML text on every keystroke
-    // (editor-store.ts's normalizeContent), and fast-xml-parser produces a
-    // different property order (attributes/elements interleaved in source
-    // order) than applyWrapDecision's rebuilt objects (id, initial, state,
-    // then the marker attribute appended last) — even when the document is
-    // already in the exact correct wrapped shape. That order mismatch used
-    // to make plain JSON.stringify comparison report `changed: true` on
-    // every single edit to an already-wrapped document, forcing a full
-    // re-serialize (and, in the editor, a Monaco cursor jump) even when
-    // nothing structural had changed at all.
-    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0" initial="__root_parallel">
-      <parallel id="__root_parallel" viz:auto-parallel="true">
-        <state id="main_region_region" initial="main_region" viz:auto-region="true">
-          <state id="state_1"/>
-          <state id="main_region">
-            <transition target="state_1"/>
-          </state>
-        </state>
-        <state id="state_2_region" initial="state_2" viz:auto-region="true">
-          <state id="state_3"/>
-          <state id="state_2">
-            <transition target="state_3"/>
-          </state>
-        </state>
-      </parallel>
-    </scxml>`;
-    const parseResult = new SCXMLParser().parse(xml);
-    expect(parseResult.success).toBe(true);
-    const result = normalizeParallelGroups(parseResult.data!);
-    expect(result.changed).toBe(false);
-  });
-
-  it('leaves a non-Initial-marked, disconnected sibling outside the wrapper', () => {
+  it('puts children outside any work tree into one more region of their own instead of dropping them', () => {
     const d: SCXMLDocument = {
       scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Unassigned' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    expect(ids(d.scxml.state)).toEqual(['Unassigned']);
-    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
-  });
-
-  it('unwraps back to flat siblings when only one region remains in an already-wrapped parallel', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-
-    // Simulate some other mutation (e.g. a delete-state command) removing
-    // region B's *_region wrapper from the already-wrapped parallel, leaving
-    // a <parallel> with a single region — no longer a valid multi-group wrap.
-    const parallel: any = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    parallel.state = (Array.isArray(parallel.state) ? parallel.state : [parallel.state]).filter(
-      (r: any) => r['@_id'] !== 'B_region'
-    );
-    if (Array.isArray(parallel.state) && parallel.state.length === 1) {
-      parallel.state = parallel.state[0];
-    }
-
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    expect(d.scxml.parallel).toBeUndefined();
-    expect(ids(d.scxml.state)).toEqual(['A']);
-    expect(d.scxml['@_initial']).toBe('A');
-  });
-
-  it('un-wraps a region whose Initial marker was removed from @_initial while the <parallel> structure itself is untouched (reproduces the reported "uncheck does nothing" bug)', () => {
-    // This is exactly the intermediate document shape
-    // ToggleInitialStateCommand now produces: it recomputes the real Initial
-    // id set and writes it straight onto the container's @_initial, without
-    // itself touching the still-wrapped <parallel>/region DOM structure
-    // (that restructuring is this function's job, run on the very next
-    // normalization pass). A region's continued *physical* presence in
-    // the <parallel> must NOT be treated as proof it's still Initial —
-    // @_initial is the authoritative source once it already names real
-    // tokens instead of the wrapper's own id.
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B C',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'C' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const parallelId = (Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!)['@_id'];
-    expect(d.scxml['@_initial']).toBe(parallelId);
-
-    // Simulate ToggleInitialStateCommand unmarking C: write the real
-    // remaining token list, leaving the <parallel>'s regions (still
-    // including C's) completely untouched.
-    d.scxml['@_initial'] = 'A B';
-
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    // C must end up outside the wrapper, flat and unassigned (unwrapped back
-    // to its own raw <state>, no *_region wrapper) — not re-recognized as
-    // its own Initial region just because it's still physically wrapped at
-    // this point.
-    expect(ids(d.scxml.state)).toEqual(['C']);
-    const parallel: any = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
-    expect(d.scxml['@_initial']).toBe(parallelId);
-  });
-
-  it('wraps nested groups under a compound state, independently of the root', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'Parent',
-        state: [
-          {
-            '@_id': 'Parent',
-            '@_initial': 'X Y',
-            state: [{ '@_id': 'X' }, { '@_id': 'Y' }],
-          },
-        ],
-      } as any,
-    };
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    const parent = (Array.isArray(d.scxml.state) ? d.scxml.state[0] : d.scxml.state)! as any;
-    expect(parent.state).toBeUndefined();
-    const parallel = Array.isArray(parent.parallel) ? parent.parallel[0] : parent.parallel;
-    expect(ids(parallel.state).sort()).toEqual(['X_region', 'Y_region']);
-    expect(parent['@_initial']).toBe(parallel['@_id']);
-  });
-
-  it('leaves a hand-authored <parallel> (no viz:auto-parallel marker) completely untouched', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        parallel: {
-          '@_id': 'Manual',
-          state: [{ '@_id': 'RegionA', '@_initial': 'A1', state: [{ '@_id': 'A1' }] }, { '@_id': 'RegionB', '@_initial': 'B1', state: [{ '@_id': 'B1' }] }],
+        state: {
+          '@_id': 'P',
+          '@_initial': 'A B',
+          state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Loose' }],
         },
       } as any,
     };
+    normalizeParallelGroups(d);
+    const regions = one(d.scxml.parallel).state as any[];
+    expect(ids(regions).sort()).toEqual(['A_region', 'B_region', 'Loose_region']);
+    expect(ids(regions.find((r) => r['@_id'] === 'Loose_region').state)).toEqual(['Loose']);
+  });
+
+  it('wraps a <parallel> child that belongs to a work tree under the region\'s <parallel> children', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: {
+          '@_id': 'P',
+          '@_initial': 'Q B',
+          state: { '@_id': 'B' },
+          parallel: { '@_id': 'Q', state: [{ '@_id': 'Q1' }, { '@_id': 'Q2' }] },
+        },
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    const regions = one(d.scxml.parallel).state as any[];
+    const qRegion = regions.find((r) => r['@_id'] === 'Q_region');
+    expect(qRegion.state).toBeUndefined();
+    expect(one(qRegion.parallel)['@_id']).toBe('Q');
+  });
+
+  it('does not convert a state with <final> children (the validator reports it instead)', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: {
+          '@_id': 'P',
+          '@_initial': 'A B',
+          state: [{ '@_id': 'A' }, { '@_id': 'B' }],
+          final: { '@_id': 'Done' },
+        },
+      } as any,
+    };
+    expect(normalizeParallelGroups(d).changed).toBe(false);
+    expect(one(d.scxml.state)['@_id']).toBe('P');
+    expect(d.scxml.parallel).toBeUndefined();
+  });
+
+  it('leaves a compound state with a single work tree alone', () => {
+    const d: SCXMLDocument = {
+      scxml: { state: { '@_id': 'P', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } } as any,
+    };
     const before = JSON.stringify(d);
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(false);
+    expect(normalizeParallelGroups(d).changed).toBe(false);
     expect(JSON.stringify(d)).toBe(before);
   });
 
-  it('keeps parallel and region ids stable when a 3rd group joins an already-wrapped root', () => {
+  it('converts a compound state nested inside a region (bottom-up)', () => {
     const d: SCXMLDocument = {
       scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const parallelBefore = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    const parallelId = parallelBefore['@_id'];
-
-    // A third work tree, C, joins alongside A and B under the same root — as
-    // if the user added a new state and marked it Initial. Since the
-    // container is already wrapped, the new member must be reachable as a
-    // flat root-level sibling for normalization to fold it in, mirroring
-    // what addStateToDocument + ToggleInitialStateCommand would produce —
-    // including writing the *full* real token list (A, B, and now C) onto
-    // @_initial, not just the newly-added one: @_initial resolving to real
-    // ids is authoritative once it does (see getInitialIds), exactly so a
-    // command can correctly *remove* a token too (the "uncheck" case) — a
-    // partial write here wouldn't match how the real command behaves.
-    d.scxml.state = [{ '@_id': 'C' }];
-    d.scxml['@_initial'] = 'A B C';
-
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    const parallelAfter = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect(parallelAfter['@_id']).toBe(parallelId);
-    expect(ids(parallelAfter.state).sort()).toEqual(['A_region', 'B_region', 'C_region']);
-  });
-});
-
-describe('collectAutoParallelGroups', () => {
-  it('returns nothing for a document with no auto-wrapped parallel', () => {
-    const d: SCXMLDocument = {
-      scxml: { state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any,
-    };
-    expect(collectAutoParallelGroups(d)).toEqual([]);
-  });
-
-  it('reports single-member regions at the root', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const groups = collectAutoParallelGroups(d);
-    expect(groups).toHaveLength(1);
-    expect(groups[0].containerId).toBeNull();
-    expect(groups[0].regions.map((r) => r.memberIds).sort()).toEqual([['A'], ['B']]);
-  });
-
-  it('reports a multi-member auto-region alongside a single-member region', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'main_region state_2',
-        state: [
-          { '@_id': 'main_region', transition: { '@_event': 'event', '@_target': 'state_1' } },
-          { '@_id': 'state_1' },
-          { '@_id': 'state_2' },
-        ],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const [group] = collectAutoParallelGroups(d);
-    const multiMember = group.regions.find((r) => r.memberIds.length > 1)!;
-    expect(multiMember.memberIds.sort()).toEqual(['main_region', 'state_1']);
-  });
-
-  it('reports a nested auto-wrapped group under a compound state, with its container id', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        '@_initial': 'Parent',
-        state: [
-          {
-            '@_id': 'Parent',
-            '@_initial': 'X Y',
-            state: [{ '@_id': 'X' }, { '@_id': 'Y' }],
-          },
-        ],
-      } as any,
-    };
-    normalizeParallelGroups(d);
-    const groups = collectAutoParallelGroups(d);
-    expect(groups).toHaveLength(1);
-    expect(groups[0].containerId).toBe('Parent');
-  });
-
-  it('does not report a hand-authored <parallel> with no viz:auto-parallel marker', () => {
-    const d: SCXMLDocument = {
-      scxml: {
-        parallel: {
-          '@_id': 'Manual',
-          state: [{ '@_id': 'RegionA' }, { '@_id': 'RegionB' }],
+        state: {
+          '@_id': 'Outer',
+          '@_initial': 'A B',
+          state: [
+            { '@_id': 'A', '@_initial': 'A1 A2', state: [{ '@_id': 'A1' }, { '@_id': 'A2' }] },
+            { '@_id': 'B' },
+          ],
         },
       } as any,
     };
-    expect(collectAutoParallelGroups(d)).toEqual([]);
+    normalizeParallelGroups(d);
+    const outer = one(d.scxml.parallel);
+    expect(outer['@_id']).toBe('Outer');
+    const aRegion = (outer.state as any[]).find((r) => r['@_id'] === 'A_region');
+    expect(one(aRegion.parallel)['@_id']).toBe('A');
+    expect(ids(one(aRegion.parallel).state).sort()).toEqual(['A1_region', 'A2_region']);
+    expect(normalizeParallelGroups(d).changed).toBe(false);
   });
 
-  it('finds a nested auto-parallel group living inside a region member of an outer auto-parallel (not just under a plain compound state)', () => {
-    // Regression test: collectAutoParallelGroups only recursed into a
-    // parallel's regions in the hand-authored (else) branch, skipping that
-    // recursion whenever the parallel itself was already auto-wrapped. So a
-    // nested auto-parallel group living inside one of THAT group's own
-    // region members (as opposed to nesting under an ordinary, unwrapped
-    // compound <state> — see the "nested auto-wrapped group under a
-    // compound state" test above, which never exercised this branch) was
-    // silently missed here even though normalizeParallelGroups had
-    // correctly wrapped it, leaving the diagram layer's region separation
-    // and wrapper-node synthesis blind to it.
+  it('does not reuse an id already taken elsewhere in the document', () => {
     const d: SCXMLDocument = {
       scxml: {
-        '@_initial': 'main_region state_2',
         state: [
-          { '@_id': 'main_region', transition: { '@_event': 'event', '@_target': 'state_1' } },
-          { '@_id': 'state_1' },
-          {
-            '@_id': 'state_2',
-            '@_initial': 'Inner1 Inner2',
-            state: [{ '@_id': 'Inner1' }, { '@_id': 'Inner2' }],
-          },
+          { '@_id': 'P', '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] },
+          { '@_id': 'A_region' },
         ],
+        final: { '@_id': 'B_region' },
       } as any,
     };
-
     normalizeParallelGroups(d);
-    const groups = collectAutoParallelGroups(d);
+    const regionIds = ids(one(d.scxml.parallel).state).sort();
+    expect(regionIds).toEqual(['A_region_2', 'B_region_2']);
+  });
+});
 
-    expect(groups).toHaveLength(2);
-    const nested = groups.find((g) => g.containerId === 'state_2');
-    expect(nested).toBeDefined();
-    expect(nested!.regions.map((r) => r.memberIds).sort()).toEqual([['Inner1'], ['Inner2']]);
+describe('normalizeParallelGroups — <parallel> back to <state>', () => {
+  it('turns a <parallel> with a single region back into a <state>, keeping the region as its initial child', () => {
+    const { changed, doc } = normalizeXml(
+      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/></state></parallel></scxml>`,
+    );
+    expect(changed).toBe(true);
+    expect(doc.scxml.parallel).toBeUndefined();
+    const p = one(doc.scxml.state);
+    expect(p['@_id']).toBe('P');
+    expect(p['@_initial']).toBe('A_region');
+    expect(ids(p.state)).toEqual(['A_region']);
+  });
+
+  it('treats a hand-written <parallel> exactly the same — 2+ regions stay, fewer revert', () => {
+    const kept = normalizeXml(
+      `${HEADER}><parallel id="Motor"><state id="Speed"/><state id="Heater"/></parallel></scxml>`,
+    );
+    expect(kept.changed).toBe(false);
+
+    const reverted = normalizeXml(`${HEADER}><parallel id="Motor"><state id="Speed"/></parallel></scxml>`);
+    expect(reverted.changed).toBe(true);
+    expect(one(reverted.doc.scxml.state)['@_id']).toBe('Motor');
+  });
+
+  it('reverts an empty <parallel> to an empty <state>', () => {
+    const { doc } = normalizeXml(`${HEADER}><parallel id="P"/></scxml>`);
+    expect(one(doc.scxml.state)['@_id']).toBe('P');
+    expect(one(doc.scxml.state)['@_initial']).toBeUndefined();
+  });
+});
+
+describe('normalizeParallelGroups — root level (__root_parallel)', () => {
+  it('reports no change for a document with zero or one Initial work tree', () => {
+    const none: SCXMLDocument = { scxml: { state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
+    expect(normalizeParallelGroups(none).changed).toBe(false);
+    const single: SCXMLDocument = { scxml: { '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
+    expect(normalizeParallelGroups(single).changed).toBe(false);
+    expect(single.scxml.parallel).toBeUndefined();
+  });
+
+  it('wraps 2+ root-level work trees into __root_parallel, leaving unassigned siblings at the root', () => {
+    const d: SCXMLDocument = {
+      scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Loose' }] } as any,
+    };
+    expect(normalizeParallelGroups(d).changed).toBe(true);
+    expect(ids(d.scxml.state)).toEqual(['Loose']);
+    const rp = one(d.scxml.parallel);
+    expect(rp['@_id']).toBe('__root_parallel');
+    expect(d.scxml['@_initial']).toBe('__root_parallel');
+    expect(ids(rp.state).sort()).toEqual(['A_region', 'B_region']);
+  });
+
+  it('adds a newly marked root-level work tree as another region', () => {
+    const { doc } = normalizeXml(
+      `${HEADER} initial="__root_parallel C"><parallel id="__root_parallel"><state id="A_region" initial="A"><state id="A"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel><state id="C"/></scxml>`,
+    );
+    expect(doc.scxml.state).toBeUndefined();
+    expect(ids(one(doc.scxml.parallel).state).sort()).toEqual(['A_region', 'B_region', 'C_region']);
+    expect(doc.scxml['@_initial']).toBe('__root_parallel');
+  });
+
+  it('removes __root_parallel once only one region is left, moving the region back to the root as it is', () => {
+    const { changed, doc } = normalizeXml(
+      `${HEADER} initial="__root_parallel"><parallel id="__root_parallel"><state id="A_region" initial="A"><state id="A"/></state></parallel></scxml>`,
+    );
+    expect(changed).toBe(true);
+    expect(doc.scxml.parallel).toBeUndefined();
+    expect(ids(doc.scxml.state)).toEqual(['A_region']);
+    expect(doc.scxml['@_initial']).toBe('A_region');
+  });
+
+  it('claims a suffixed root id when __root_parallel is already taken', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Other', state: { '@_id': '__root_parallel' } }],
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    expect(one(d.scxml.parallel)['@_id']).toBe('__root_parallel_2');
+    expect(normalizeParallelGroups(d).changed).toBe(false);
+  });
+});
+
+describe('normalizeParallelGroups — __root_parallel is only special directly under <scxml>', () => {
+  const NESTED = `${HEADER} initial="Outer"><state id="Outer" initial="__root_parallel"><parallel id="__root_parallel"><state id="R1"/><state id="R2"/></parallel></state></scxml>`;
+
+  it('treats a nested <parallel> that happens to be named __root_parallel as an ordinary <parallel>', () => {
+    const { changed, doc } = normalizeXml(NESTED);
+    expect(changed).toBe(false);
+    const outer = one(doc.scxml.state);
+    expect(one(outer.parallel)['@_id']).toBe('__root_parallel');
+    expect(ids(one(outer.parallel).state)).toEqual(['R1', 'R2']);
+  });
+
+  it('reports it as an ordinary group (drawn inside itself, not at root level)', () => {
+    const { doc } = normalizeXml(NESTED);
+    const [group] = collectParallelGroups(doc);
+    expect(group.containerId).toBe('__root_parallel');
+    expect(group.parallelId).toBe('__root_parallel__parallel_group');
+  });
+
+  it('still reverts it like any other <parallel> once it has a single region', () => {
+    const { changed, doc } = normalizeXml(
+      `${HEADER} initial="Outer"><state id="Outer" initial="__root_parallel"><parallel id="__root_parallel"><state id="R1"/></parallel></state></scxml>`,
+    );
+    expect(changed).toBe(true);
+    const outer = one(doc.scxml.state);
+    expect(outer.parallel).toBeUndefined();
+    expect(one(outer.state)['@_id']).toBe('__root_parallel');
+  });
+});
+
+describe('normalizeParallelGroups — migrating documents from older versions', () => {
+  it('strips viz:auto-* markers', () => {
+    const { changed, out } = normalizeXml(
+      `${HEADER} initial="__root_parallel"><parallel id="__root_parallel" viz:auto-parallel="true"><state id="A_region" initial="A" viz:auto-region="true"><state id="A"/></state><state id="B_region" initial="B" viz:auto-region="true"><state id="B"/></state></parallel></scxml>`,
+    );
+    expect(changed).toBe(true);
+    expect(out).not.toMatch(/viz:auto-/);
+    expect(out).toMatch(/<parallel id="__root_parallel"/);
+  });
+
+  it('collapses an older <state> wrapper around its nested auto <parallel> so the state itself is the <parallel>', () => {
+    const { changed, doc, out } = normalizeXml(
+      `${HEADER} initial="main_region"><state id="main_region" initial="main_region_parallel"><transition event="go" target="main_region"/><parallel id="main_region_parallel" viz:auto-parallel="true"><state id="A_region" initial="A" viz:auto-region="true"><state id="A"/></state><state id="B_region" initial="B" viz:auto-region="true"><state id="B"/></state></parallel></state></scxml>`,
+    );
+    expect(changed).toBe(true);
+    const main = one(doc.scxml.parallel);
+    expect(main['@_id']).toBe('main_region');
+    expect(main['@_initial']).toBeUndefined();
+    expect(main.transition['@_target']).toBe('main_region');
+    expect(ids(main.state).sort()).toEqual(['A_region', 'B_region']);
+    expect(doc.scxml.state).toBeUndefined();
+    expect(out).not.toMatch(/main_region_parallel/);
+    expect(normalizeXml(out).changed).toBe(false);
+  });
+});
+
+describe('collectParallelGroups', () => {
+  it('returns nothing for a document with no <parallel>', () => {
+    const d: SCXMLDocument = { scxml: { state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
+    expect(collectParallelGroups(d)).toEqual([]);
+  });
+
+  it('reports a <parallel> with the contents of each region as its column members', () => {
+    const d: SCXMLDocument = {
+      scxml: { state: { '@_id': 'P', '@_initial': 'X Y', state: [{ '@_id': 'X' }, { '@_id': 'Y' }] } } as any,
+    };
+    normalizeParallelGroups(d);
+    const [group] = collectParallelGroups(d);
+    expect(group.containerId).toBe('P');
+    expect(group.parallelId).toBe('P__parallel_group');
+    expect(group.regions.map((r) => r.memberIds).sort()).toEqual([['X'], ['Y']]);
+  });
+
+  it('uses the region itself as the member when the region is empty or is itself a <parallel>', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'P',
+          state: { '@_id': 'Empty' },
+          parallel: { '@_id': 'Q', state: [{ '@_id': 'Q1' }, { '@_id': 'Q2' }] },
+        },
+      } as any,
+    };
+    const group = collectParallelGroups(d).find((g) => g.containerId === 'P')!;
+    expect(group.regions.map((r) => r.memberIds).sort()).toEqual([['Empty'], ['Q']]);
+  });
+
+  it('gives the wrapper key a suffix when a state already uses {id}__parallel_group', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'P',
+          state: [
+            { '@_id': 'R1', state: { '@_id': 'P__parallel_group' } },
+            { '@_id': 'R2' },
+          ],
+        },
+      } as any,
+    };
+    const [group] = collectParallelGroups(d);
+    expect(group.parallelId).toBe('P__parallel_group_2');
+  });
+
+  it('reports __root_parallel at the root level (containerId null)', () => {
+    const d: SCXMLDocument = { scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
+    normalizeParallelGroups(d);
+    const [group] = collectParallelGroups(d);
+    expect(group.containerId).toBeNull();
+    expect(group.parallelId).toBe('__root_parallel');
+  });
+
+  it('finds nested <parallel>s at any depth, including hand-written ones', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'Outer',
+          state: [
+            { '@_id': 'R1', parallel: { '@_id': 'Inner', state: [{ '@_id': 'I1' }, { '@_id': 'I2' }] } },
+            { '@_id': 'R2' },
+          ],
+        },
+      } as any,
+    };
+    expect(collectParallelGroups(d).map((g) => g.containerId).sort()).toEqual(['Inner', 'Outer']);
   });
 });
 
@@ -531,82 +411,49 @@ describe('hasAnyChildren', () => {
     expect(hasAnyChildren({} as any)).toBe(false);
   });
 
-  it('is true for a container with a plain flat <state> child', () => {
+  it('is true for a container with a <state> or a <parallel> child', () => {
     expect(hasAnyChildren({ state: [{ '@_id': 'A' }] } as any)).toBe(true);
+    expect(hasAnyChildren({ parallel: { '@_id': 'P', state: [{ '@_id': 'A' }] } } as any)).toBe(true);
   });
 
-  it('is true for a container whose only children are hidden inside an auto-wrapped <parallel> (the bug this guards against)', () => {
-    const d: SCXMLDocument = {
-      scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any,
-    };
+  it('is true for the root once its children have moved into __root_parallel', () => {
+    const d: SCXMLDocument = { scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
     normalizeParallelGroups(d);
-    // After wrapping, scxml.state is empty/undefined even though the
-    // container conceptually already has A and B as children.
     expect(d.scxml.state).toBeUndefined();
     expect(hasAnyChildren(d.scxml)).toBe(true);
   });
-
-  it('is true for a container with a hand-authored <parallel> child (no marker)', () => {
-    expect(
-      hasAnyChildren({ parallel: { '@_id': 'Manual', state: [{ '@_id': 'A' }] } } as any)
-    ).toBe(true);
-  });
 });
 
-describe('copy/cut + paste of a Parallel State (end-to-end with the paste pipeline)', () => {
-  it('re-wraps pasted region members into a real <parallel> at the new location', () => {
-    // Root has an auto-wrapped Parallel State (regions A and B) alongside an
-    // ordinary, unrelated sibling ("Target") we'll paste the copy into.
+describe('copy/cut + paste of parallel regions (end-to-end with the paste pipeline)', () => {
+  it('pasting 2+ regions carried over as Initial into an empty state turns that state into a <parallel>', () => {
     const d: SCXMLDocument = {
       scxml: {
-        '@_initial': 'A B',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }, { '@_id': 'Target' }],
+        state: [
+          { '@_id': 'P', '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] },
+          { '@_id': 'Target' },
+        ],
       } as any,
     };
     normalizeParallelGroups(d);
-    expect(ids(d.scxml.state)).toEqual(['Target']);
-    const rootParallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
-    expect((rootParallel as any)['@_viz:auto-parallel']).toBe('true');
+    const source = one(d.scxml.parallel);
+    // The copy flow carries regions of a parallel over as Initial.
+    const copied = (source.state as any[]).map((r) => JSON.parse(JSON.stringify(r)));
+    const copiedInitialIds = new Set(copied.map((s) => s['@_id']));
 
-    // Simulate selecting and copying both region members: each is Initial
-    // in its own work tree, exactly what copyActiveStatesToClipboard records
-    // via isMarkedInitial before the source states are cloned. The diagram
-    // flattens auto-wrapped structure (collectEffectiveStateChildren), so
-    // what a user actually selects/copies is each region's real member
-    // state — one level inside its *_region wrapper — not the wrapper
-    // itself.
-    const regionWrappers = (Array.isArray(rootParallel.state) ? rootParallel.state : [rootParallel.state]) as any[];
-    const copied = regionWrappers.map((r) => JSON.parse(JSON.stringify(r.state)));
-    const copiedInitialIds = new Set(copied.map((s) => s['@_id'])); // both A and B
-
-    // Paste under "Target", currently empty — mirrors handlePasteClipboard.
-    const existingIds = new Set(['Target', ...copied.map((s) => s['@_id'])]);
+    const existingIds = new Set(['P', 'Target', 'A', 'B', ...copied.map((s) => s['@_id'])]);
     const combinedIdMap = new Map<string, string>();
     const clones = copied.map((state) => {
       const { clone, idMap } = cloneStateSubtreeWithFreshIds(state, existingIds, 0, 0);
       idMap.forEach((newId, oldId) => combinedIdMap.set(oldId, newId));
       return clone;
     });
-    const target = d.scxml.state as any;
-    clones.forEach((clone) => addStateToDocument(d, clone, target['@_id']));
+    const target = one(d.scxml.state);
+    clones.forEach((clone) => addStateToDocument(d, clone, 'Target'));
+    target['@_initial'] = resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, true).join(' ');
 
-    const carriedIds = resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, true);
-    expect(carriedIds).toHaveLength(2);
-    target['@_initial'] = carriedIds.join(' ');
-
-    // The normalization pass every diagram mutation runs through should now
-    // re-wrap the pasted copies into their own real <parallel>, exactly as
-    // it did for the original — not leave them as flat ordinary siblings.
-    const result = normalizeParallelGroups(d);
-    expect(result.changed).toBe(true);
-    expect((target as any).parallel).toBeDefined();
-    const pastedParallel = Array.isArray((target as any).parallel)
-      ? (target as any).parallel[0]
-      : (target as any).parallel;
-    expect(pastedParallel['@_viz:auto-parallel']).toBe('true');
-    // Each pasted clone gets its own *_region wrapper, not a bare region.
-    expect(ids(pastedParallel.state).sort()).toEqual(
-      clones.map((c) => `${c['@_id']}_region`).sort()
-    );
+    expect(normalizeParallelGroups(d).changed).toBe(true);
+    const parallels = Array.isArray(d.scxml.parallel) ? d.scxml.parallel : [d.scxml.parallel];
+    expect(parallels).toContain(target);
+    expect((target.state as any[]).length).toBe(2);
   });
 });

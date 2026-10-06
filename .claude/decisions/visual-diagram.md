@@ -328,7 +328,7 @@ Matches this feature's explicit, narrower-than-`801145d` requirement (see `scxml
 `src/components/diagram/nodes/parallel-group-wrapper-node.tsx`, `src/components/diagram/parallel/parallel-region-divider-overlay.tsx`, `src/lib/layout/parallel-group-bbox.ts` (`computeLiveParallelDividerXs`), `src/components/diagram/visual-diagram.tsx` (`parallelDividerXs`), `.claude/features/parallel-state-auto-grouping.md`.
 
 ### Status
-Accepted.
+Accepted. Updated by `scxml.md` #12: the wrapper and divider lines now apply to every `<parallel>`, drawn on the level inside it (regions shown as columns), rather than to marker-flagged groups flattened into their container. Column labels naming each region were briefly added and removed again at the user's request, so the wrapper still renders nothing.
 
 ---
 

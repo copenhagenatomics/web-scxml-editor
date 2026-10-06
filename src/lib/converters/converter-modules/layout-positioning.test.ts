@@ -6,7 +6,7 @@ import {
   markParallelGroupMembers,
 } from './layout-positioning';
 import { getAttribute as realGetAttribute, getElements as realGetElements } from './visual-metadata';
-import type { AutoParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
+import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
 import type { HierarchicalNode } from '@/types/hierarchical-node';
 
 function getAttribute(element: any, attrName: string): string | undefined {
@@ -86,56 +86,58 @@ describe('isInitialState', () => {
     ).toBe(true);
   });
 
-  it('recovers Initial status for a flattened member of an auto-wrapped root <parallel> (bare region)', () => {
-    // After parallel-group-normalization wraps 2+ root work trees, the
-    // root's own @_initial becomes the <parallel>'s id, not the members'
-    // ids — isInitialState must fall back to the wrapper's own structure.
+  it('shows the Initial badge on the initial member of a region, drawn directly inside its <parallel>', () => {
+    const parallel = {
+      '@_id': 'P',
+      state: [
+        { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+        { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+      ],
+    };
+    const registry = new Map([['P', { state: parallel, elementType: 'parallel' }]]);
+    const check = (id: string) =>
+      isInitialState(id, 'P', {}, registry as any, realGetAttribute, realGetElements);
+    expect(check('A')).toBe(true);
+    expect(check('B')).toBe(true);
+    expect(check('A2')).toBe(false);
+  });
+
+  it('reads a region\'s <initial> element form and ids containing spaces, like any other container', () => {
+    const parallel = {
+      '@_id': 'P',
+      state: [
+        {
+          '@_id': 'R1',
+          initial: { transition: { '@_target': 'A' } },
+          state: [{ '@_id': 'A' }, { '@_id': 'A2' }],
+        },
+        { '@_id': 'R2', '@_initial': 'my state', state: [{ '@_id': 'my state' }, { '@_id': 'other' }] },
+      ],
+    };
+    const registry = new Map([['P', { state: parallel, elementType: 'parallel' }]]);
+    const check = (id: string) =>
+      isInitialState(id, 'P', {}, registry as any, realGetAttribute, realGetElements);
+    expect(check('A')).toBe(true);
+    expect(check('A2')).toBe(false);
+    expect(check('my state')).toBe(true);
+    expect(check('other')).toBe(false);
+  });
+
+  it('shows the Initial badge on the initial member of a region at root level, under __root_parallel', () => {
     const rootScxml = {
       '@_initial': '__root_parallel',
       parallel: {
         '@_id': '__root_parallel',
-        '@_viz:auto-parallel': 'true',
-        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
-      },
-    };
-    const registry = new Map([['A', { state: {} }], ['B', { state: {} }]]);
-    expect(
-      isInitialState('A', '', rootScxml, registry as any, realGetAttribute, realGetElements)
-    ).toBe(true);
-    expect(
-      isInitialState('B', '', rootScxml, registry as any, realGetAttribute, realGetElements)
-    ).toBe(true);
-  });
-
-  it('recovers Initial status for a flattened member of an auto-wrapped nested <parallel> (multi-member auto-region)', () => {
-    const parentState = {
-      '@_id': 'Parent',
-      '@_initial': 'Parent_parallel',
-      parallel: {
-        '@_id': 'Parent_parallel',
-        '@_viz:auto-parallel': 'true',
         state: [
-          {
-            '@_id': 'main_region_region',
-            '@_initial': 'main_region',
-            '@_viz:auto-region': 'true',
-            state: [{ '@_id': 'main_region' }, { '@_id': 'state_1' }],
-          },
-          { '@_id': 'state_2' },
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
         ],
       },
     };
-    const registry = new Map([['Parent', { state: parentState }]]);
-    const rootScxml = {};
-    expect(
-      isInitialState('main_region', '#Parent', rootScxml, registry as any, realGetAttribute, realGetElements)
-    ).toBe(true);
-    expect(
-      isInitialState('state_1', '#Parent', rootScxml, registry as any, realGetAttribute, realGetElements)
-    ).toBe(false);
-    expect(
-      isInitialState('state_2', '#Parent', rootScxml, registry as any, realGetAttribute, realGetElements)
-    ).toBe(true);
+    const check = (id: string) =>
+      isInitialState(id, '', rootScxml, new Map() as any, realGetAttribute, realGetElements);
+    expect(check('A')).toBe(true);
+    expect(check('A2')).toBe(false);
   });
 });
 
@@ -156,7 +158,7 @@ describe('computeParallelGroupWrapperNodes', () => {
   });
 
   it('synthesizes one wrapper node per group, parented under the container, with clicks passing through to member nodes except via its own drag handle', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     const allNodes = [node('A', 0, 0), node('B', 300, 0)];
@@ -183,7 +185,7 @@ describe('computeParallelGroupWrapperNodes', () => {
   });
 
   it('parents the wrapper node under its container when nested', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: 'Parent', parallelId: 'Parent_parallel', regions: [{ memberIds: ['X'] }, { memberIds: ['Y'] }] },
     ];
     const allNodes = [node('X', 0, 0, 'Parent'), node('Y', 300, 0, 'Parent')];
@@ -200,7 +202,7 @@ describe('separateParallelRegions', () => {
   });
 
   it('leaves already-separated regions untouched', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     const allNodes = [node('A', 0, 0), node('B', 400, 0)];
@@ -214,7 +216,7 @@ describe('separateParallelRegions', () => {
     // entirely inside region 1's span — the interleaved layout the flat ELK
     // pass can produce, which makes a single straight divider impossible
     // without moving anything.
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A', 'Z'] }, { memberIds: ['B'] }] },
     ];
     const allNodes = [node('A', 0, 0), node('Z', 500, 40), node('B', 200, 80)];
@@ -237,7 +239,7 @@ describe('markParallelGroupMembers', () => {
   });
 
   it('flags every member of every region as a parallel-group member, leaving unrelated siblings untouched', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A', 'Z'] }, { memberIds: ['B'] }] },
     ];
     const allNodes = [node('A', 0, 0), node('Z', 500, 0), node('B', 200, 0), node('Unrelated', 900, 0)];

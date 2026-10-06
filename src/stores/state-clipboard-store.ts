@@ -10,11 +10,17 @@ interface StateClipboardState {
   // separately here for paste to be able to carry it over. See
   // handlePasteClipboard in visual-diagram.tsx.
   copiedInitialIds: Set<string>;
-  copy: (states: StateElement[], initialIds?: Set<string>) => void;
+  // Ids (as at copy time) of the top-level copied elements that are
+  // <parallel>, not <state> — the cloned object alone doesn't say which tag
+  // it had, and paste must re-insert it under the same one.
+  copiedParallelIds: Set<string>;
+  copy: (states: StateElement[], initialIds?: Set<string>, parallelIds?: Set<string>) => void;
 }
 
 export const useStateClipboardStore = create<StateClipboardState>((set) => ({
   copied: null,
   copiedInitialIds: new Set(),
-  copy: (states, initialIds = new Set()) => set({ copied: states, copiedInitialIds: initialIds }),
+  copiedParallelIds: new Set(),
+  copy: (states, initialIds = new Set(), parallelIds = new Set()) =>
+    set({ copied: states, copiedInitialIds: initialIds, copiedParallelIds: parallelIds }),
 }));

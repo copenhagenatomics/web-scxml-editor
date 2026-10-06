@@ -17,7 +17,9 @@ import {
   computeRegionSeparationTranslations,
   type NodeRect,
 } from '@/lib/layout/parallel-group-bbox';
-import type { AutoParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
+import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
+import { getChildEntries, isRootParallel, type ChildEntry } from '@/lib/utils/parallel-structure';
+import { getInitialIds } from '@/lib/utils/initial-group-utils';
 import type { StateRegistryEntry } from './state-registry';
 
 /**
@@ -87,7 +89,7 @@ export function positionHistoryStates(
 }
 
 /**
- * Pulls each region of every auto-wrapped Initial-state group into its own
+ * Pulls each region of every <parallel> into its own
  * contiguous, non-overlapping horizontal band. The flat, per-level layout
  * `applyDefaultELKLayout` produces has no notion of "region" — a region's
  * members can end up interleaved with, or even fully sandwiched inside,
@@ -102,7 +104,7 @@ export function positionHistoryStates(
  */
 export function separateParallelRegions(
   allNodes: HierarchicalNode[],
-  groups: AutoParallelGroupInfo[]
+  groups: ParallelGroupInfo[]
 ): void {
   if (groups.length === 0) return;
 
@@ -130,7 +132,7 @@ export function separateParallelRegions(
 }
 
 /**
- * Flags every real member node of every auto-wrapped Initial-state group
+ * Flags every region node of every <parallel>
  * with `data.isParallelGroupMember = true`. Consumed downstream (see
  * resolveEnhancedNodePosition in visual-diagram.tsx) so a node's saved
  * viz:xywh position — normally given priority so a manually-placed node
@@ -141,7 +143,7 @@ export function separateParallelRegions(
  */
 export function markParallelGroupMembers(
   allNodes: HierarchicalNode[],
-  groups: AutoParallelGroupInfo[]
+  groups: ParallelGroupInfo[]
 ): void {
   if (groups.length === 0) return;
 
@@ -161,8 +163,8 @@ export function markParallelGroupMembers(
 }
 
 /**
- * Synthesizes one "Parallel State" wrapper node per auto-wrapped group (see
- * collectAutoParallelGroups), sized/positioned from the union bounding box
+ * Synthesizes one "Parallel State" wrapper node per <parallel> (see
+ * collectParallelGroups), sized/positioned from the union bounding box
  * of its already-laid-out flattened member nodes. Never drillable/selectable
  * as a state in its own right — no visible border/background/label at all
  * (see ParallelGroupWrapperNode); the only visual cue is the full-height
@@ -186,7 +188,7 @@ export function markParallelGroupMembers(
  */
 export function computeParallelGroupWrapperNodes(
   allNodes: HierarchicalNode[],
-  groups: AutoParallelGroupInfo[]
+  groups: ParallelGroupInfo[]
 ): HierarchicalNode[] {
   const nodeRects = new Map<string, NodeRect>();
   allNodes.forEach((n) => {
@@ -446,39 +448,19 @@ export function calculateHierarchicalPosition(
 }
 
 /**
- * Recovers Initial status for a state flattened out of an auto-wrapped
- * <parallel viz:auto-parallel="true"> child of `container` (see
- * src/lib/utils/parallel-group-normalization.ts and
- * collectEffectiveStateChildren in state-registry.ts) — once wrapped, the
- * container's own @_initial names the <parallel>'s id, not any member's id
- * anymore, so the normal @_initial / <initial> checks above no longer see
- * it. A member is Initial when it's the sole state of a bare region, or the
- * @_initial target of a multi-member viz:auto-region wrapper.
+ * A <parallel>'s regions are drawn as columns, not nodes (see
+ * getRegionDisplayEntries), so a state shown directly inside a <parallel>
+ * really lives one level down, in a region — its Initial status comes from
+ * that region's own `initial`.
  */
-function isInitialViaAutoParallel(
-  stateId: string,
-  container: any,
-  getAttribute: (element: any, attrName: string) => string | undefined,
-  getElements: (parent: any, elementName: string) => any
-): boolean {
-  const parallels = getElements(container, 'parallel');
-  const parallelArray = parallels ? (Array.isArray(parallels) ? parallels : [parallels]) : [];
-
-  for (const parallel of parallelArray) {
-    if (getAttribute(parallel, 'viz:auto-parallel') !== 'true') continue;
-
-    const regions = getElements(parallel, 'state');
-    const regionArray = regions ? (Array.isArray(regions) ? regions : [regions]) : [];
-    for (const region of regionArray) {
-      if (getAttribute(region, 'viz:auto-region') === 'true') {
-        if (getAttribute(region, 'initial') === stateId) return true;
-      } else if (getAttribute(region, 'id') === stateId) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+function isInitialInRegionOf(stateId: string, regions: ChildEntry[]): boolean {
+  // getInitialIds reads both SCXML forms (the `initial` attribute and the
+  // <initial><transition target/></initial> element), resolves ids that
+  // contain spaces via parseStateIdList, and only returns the region's own
+  // direct children — the same logic the Initial checkbox/toggle use.
+  return regions.some(
+    (region) => region.tag === 'state' && getInitialIds(region.el, 'state').has(stateId)
+  );
 }
 
 /**
@@ -521,7 +503,10 @@ export function isInitialState(
       }
     }
 
-    return isInitialViaAutoParallel(stateId, rootScxml, getAttribute, getElements);
+    const rootRegions = (Array.isArray(rootScxml?.parallel) ? rootScxml.parallel : rootScxml?.parallel ? [rootScxml.parallel] : [])
+      .filter(isRootParallel)
+      .flatMap((p: any) => getChildEntries(p));
+    return isInitialInRegionOf(stateId, rootRegions);
   }
 
   // Find parent state and check its (possibly multiple) initial ids
@@ -549,7 +534,10 @@ export function isInitialState(
         }
       }
 
-      return isInitialViaAutoParallel(stateId, parentInfo.state, getAttribute, getElements);
+      if (parentInfo.elementType === 'parallel') {
+        return isInitialInRegionOf(stateId, getChildEntries(parentInfo.state));
+      }
+      return false;
     }
   }
 

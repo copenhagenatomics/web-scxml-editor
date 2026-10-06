@@ -7,60 +7,83 @@ import type {
   OnEntryElement,
   OnExitElement,
 } from '@/types/scxml';
+import { collectStateIds } from '@/lib/validators/state-validator';
+
+/** Which tag an element is filed under in its parent: `.state` or `.parallel`. */
+export type StateTag = 'state' | 'parallel';
+
+function asList<T>(v: T | T[] | undefined): T[] {
+  if (!v) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+/** Put `el` under `container[key]`, keeping fast-xml-parser's single-object/array shape. */
+function appendChild(container: any, key: StateTag, el: any): void {
+  const existing = container[key];
+  if (!existing) container[key] = el;
+  else if (Array.isArray(existing)) existing.push(el);
+  else container[key] = [existing, el];
+}
+
+/**
+ * Find a <state> or <parallel> by its ID anywhere in the document, along
+ * with its tag — so callers that move or re-insert it (paste, drag-to-nest)
+ * keep a <parallel> a <parallel>.
+ */
+export function findElementById(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): { element: StateElement; tag: StateTag } | null {
+  function search(container: any): { element: StateElement; tag: StateTag } | null {
+    for (const tag of ['state', 'parallel'] as const) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) return { element: child, tag };
+        const found = search(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml);
+}
+
+/**
+ * Every id already taken — each <state>/<parallel>/<final>/<history> anywhere
+ * in the document, plus any extra ids (e.g. rendered diagram nodes such as
+ * sticky notes). Use this, not just the rendered nodes, when minting a new
+ * id: some elements are never rendered as nodes (the regions of a
+ * <parallel> are drawn as columns, and `__root_parallel` is invisible), so
+ * a node-only check could reuse one of their ids.
+ */
+export function collectExistingIds(
+  scxmlDoc: SCXMLDocument,
+  extraNodes: ReadonlyArray<{ id: string }> = []
+): Set<string> {
+  const ids = new Set<string>(extraNodes.map((n) => n.id));
+  collectStateIds(scxmlDoc.scxml, ids);
+  return ids;
+}
 
 /**
  * Find a state element by its ID in the SCXML document. Also searches
  * inside <parallel> elements and their region <state> children, at any
  * nesting depth, so ids that only exist inside a parallel's regions are
- * still found by every mutation helper that resolves ids through this.
+ * still found by every mutation helper that resolves ids through this. A
+ * <parallel>'s own id matches too — a compound state converted into a
+ * <parallel> (parallel-group-normalization.ts) is still the user's state.
+ * Use findElementById when the tag matters.
  */
 export function findStateById(
   scxmlDoc: SCXMLDocument,
   stateId: string
 ): StateElement | null {
-  function searchInStates(
-    states: StateElement | StateElement[] | undefined
-  ): StateElement | null {
-    if (!states) return null;
-
-    const stateArray = Array.isArray(states) ? states : [states];
-
-    for (const state of stateArray) {
-      if (state['@_id'] === stateId) {
-        return state;
-      }
-
-      // Search in nested states and parallels
-      const found = searchInStates(state.state) ?? searchInParallels(state.parallel);
-      if (found) return found;
-    }
-
-    return null;
-  }
-
-  function searchInParallels(
-    parallels: ParallelElement | ParallelElement[] | undefined
-  ): StateElement | null {
-    if (!parallels) return null;
-
-    const parallelArray = Array.isArray(parallels) ? parallels : [parallels];
-
-    for (const parallel of parallelArray) {
-      const found = searchInStates(parallel.state) ?? searchInParallels(parallel.parallel);
-      if (found) return found;
-    }
-
-    return null;
-  }
-
-  // Search in root states and parallels
-  return searchInStates(scxmlDoc.scxml.state) ?? searchInParallels(scxmlDoc.scxml.parallel);
+  return findElementById(scxmlDoc, stateId)?.element ?? null;
 }
 
 /**
  * Whether candidateId is nested anywhere inside ancestorId's subtree
- * (not counting ancestorId itself). Only walks <state> children, matching
- * findStateById/removeStateFromDocument's existing scope.
+ * (not counting ancestorId itself), through both <state> and <parallel>
+ * children.
  */
 export function isDescendantOf(
   scxmlDoc: SCXMLDocument,
@@ -70,17 +93,15 @@ export function isDescendantOf(
   const ancestor = findStateById(scxmlDoc, ancestorId);
   if (!ancestor) return false;
 
-  function search(states: StateElement | StateElement[] | undefined): boolean {
-    if (!states) return false;
-    const arr = Array.isArray(states) ? states : [states];
-    for (const s of arr) {
+  function search(container: any): boolean {
+    for (const s of [...asList<any>(container.state), ...asList<any>(container.parallel)]) {
       if (s['@_id'] === candidateId) return true;
-      if (search(s.state)) return true;
+      if (search(s)) return true;
     }
     return false;
   }
 
-  return search(ancestor.state);
+  return search(ancestor);
 }
 
 /**
@@ -316,35 +337,19 @@ export function createTransitionElement(
 }
 
 /**
- * Add a state to the SCXML document
+ * Add a state to the SCXML document, under `parentId` (any <state> or
+ * <parallel>) or at the root. `tag` says whether it goes in as a <state> or
+ * a <parallel> — pass the tag it was found/copied with so a <parallel>
+ * stays a <parallel>.
  */
 export function addStateToDocument(
   scxmlDoc: SCXMLDocument,
   stateElement: StateElement,
-  parentId?: string
+  parentId?: string,
+  tag: StateTag = 'state'
 ): void {
-  if (parentId) {
-    // Add to parent state
-    const parentState = findStateById(scxmlDoc, parentId);
-    if (parentState) {
-      if (!parentState.state) {
-        parentState.state = stateElement;
-      } else if (Array.isArray(parentState.state)) {
-        parentState.state.push(stateElement);
-      } else {
-        parentState.state = [parentState.state, stateElement];
-      }
-    }
-  } else {
-    // Add to root level
-    if (!scxmlDoc.scxml.state) {
-      scxmlDoc.scxml.state = stateElement;
-    } else if (Array.isArray(scxmlDoc.scxml.state)) {
-      scxmlDoc.scxml.state.push(stateElement);
-    } else {
-      scxmlDoc.scxml.state = [scxmlDoc.scxml.state, stateElement];
-    }
-  }
+  const parent = parentId ? findStateById(scxmlDoc, parentId) : scxmlDoc.scxml;
+  if (parent) appendChild(parent, tag, stateElement);
 }
 
 /**
@@ -660,23 +665,23 @@ export function updateStatePosition(
 }
 
 /**
- * Removes a state's element from wherever it currently sits (root or
- * nested), fixing up the OLD parent's @_initial bookkeeping the same way
- * removeStateFromDocument does — but, unlike removeStateFromDocument, this
- * does NOT touch any transitions, since reparenting must keep every
- * transition targeting the moved state intact. Returns the detached
- * StateElement for re-insertion elsewhere, or null if not found.
+ * Removes a <state> or <parallel> from wherever it currently sits (root or
+ * nested, including inside a <parallel>), fixing up the OLD parent's
+ * @_initial bookkeeping the same way removeStateFromDocument does — but,
+ * unlike removeStateFromDocument, this does NOT touch any transitions, since
+ * reparenting must keep every transition targeting the moved state intact.
+ * Returns the detached element and its tag for re-insertion elsewhere (see
+ * addStateToDocument), or null if not found. A <parallel> parent never gets
+ * an `initial` (its children are all active).
  */
-export function detachStateFromParent(
+export function detachElementFromParent(
   scxmlDoc: SCXMLDocument,
   stateId: string
-): StateElement | null {
-  function fixInitial(
-    container: { '@_initial'?: string; state?: StateElement | StateElement[] },
-    isRoot: boolean
-  ): void {
+): { element: StateElement; tag: StateTag } | null {
+  function fixInitial(container: any, kind: 'root' | 'state' | 'parallel'): void {
+    if (kind === 'parallel') return;
     if (container['@_initial']) {
-      const tokens = container['@_initial']
+      const tokens = String(container['@_initial'])
         .split(/\s+/)
         .filter((t) => t && t !== stateId);
       if (tokens.length > 0) {
@@ -685,10 +690,8 @@ export function detachStateFromParent(
       }
       delete container['@_initial'];
     }
-    if (!isRoot && !container['@_initial'] && container.state) {
-      const remaining = Array.isArray(container.state)
-        ? container.state
-        : [container.state];
+    if (kind === 'state' && !container['@_initial']) {
+      const remaining = [...asList<any>(container.state), ...asList<any>(container.parallel)];
       if (remaining.length > 0) {
         container['@_initial'] = remaining[0]['@_id'];
       }
@@ -696,29 +699,38 @@ export function detachStateFromParent(
   }
 
   function detachFrom(
-    container: { state?: StateElement | StateElement[]; '@_initial'?: string },
-    isRoot: boolean
-  ): StateElement | null {
-    const states = container.state;
-    if (!states) return null;
-    const arr = Array.isArray(states) ? states : [states];
-    const idx = arr.findIndex((s) => s['@_id'] === stateId);
-
-    if (idx !== -1) {
-      const [removed] = arr.splice(idx, 1);
-      container.state = arr.length > 0 ? arr : undefined;
-      fixInitial(container, isRoot);
-      return removed;
+    container: any,
+    kind: 'root' | 'state' | 'parallel'
+  ): { element: StateElement; tag: StateTag } | null {
+    for (const tag of ['state', 'parallel'] as const) {
+      const arr = asList<any>(container[tag]);
+      const idx = arr.findIndex((s) => s['@_id'] === stateId);
+      if (idx !== -1) {
+        const remaining = arr.filter((_, i) => i !== idx);
+        if (remaining.length === 0) delete container[tag];
+        else container[tag] = remaining;
+        fixInitial(container, kind);
+        return { element: arr[idx], tag };
+      }
     }
-
-    for (const s of arr) {
-      const found = detachFrom(s, false);
-      if (found) return found;
+    for (const tag of ['state', 'parallel'] as const) {
+      for (const child of asList<any>(container[tag])) {
+        const found = detachFrom(child, tag);
+        if (found) return found;
+      }
     }
     return null;
   }
 
-  return detachFrom(scxmlDoc.scxml as any, true);
+  return detachFrom(scxmlDoc.scxml, 'root');
+}
+
+/** detachElementFromParent, returning only the element. */
+export function detachStateFromParent(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): StateElement | null {
+  return detachElementFromParent(scxmlDoc, stateId)?.element ?? null;
 }
 
 /**
@@ -778,10 +790,7 @@ export function cloneStateSubtreeWithFreshIds(
     idMap.set(oldId, clone['@_id']);
     offsetPosition(clone);
 
-    if (clone.state) {
-      const children = Array.isArray(clone.state) ? clone.state : [clone.state];
-      children.forEach(assignIds);
-    }
+    [...asList<any>(clone.state), ...asList<any>((clone as any).parallel)].forEach(assignIds);
   }
 
   function rewriteInitial(clone: StateElement): void {
@@ -805,10 +814,7 @@ export function cloneStateSubtreeWithFreshIds(
         }
       });
     }
-    if (clone.state) {
-      const children = Array.isArray(clone.state) ? clone.state : [clone.state];
-      children.forEach(rewriteInitial);
-    }
+    [...asList<any>(clone.state), ...asList<any>((clone as any).parallel)].forEach(rewriteInitial);
   }
 
   assignIds(rootClone);
@@ -888,10 +894,7 @@ export function rewriteOrDropTransitions(
       s.transition = kept.length === 0 ? undefined : kept.length === 1 ? kept[0] : kept;
     }
 
-    if (s.state) {
-      const children = Array.isArray(s.state) ? s.state : [s.state];
-      children.forEach(walk);
-    }
+    [...asList<any>(s.state), ...asList<any>((s as any).parallel)].forEach(walk);
   }
 
   walk(state);
