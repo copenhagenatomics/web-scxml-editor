@@ -366,6 +366,22 @@ describe('collectParallelGroups', () => {
     expect(group.regions.map((r) => r.memberIds).sort()).toEqual([['Empty'], ['Q']]);
   });
 
+  it('gives the wrapper key a suffix when a state already uses {id}__parallel_group', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        parallel: {
+          '@_id': 'P',
+          state: [
+            { '@_id': 'R1', state: { '@_id': 'P__parallel_group' } },
+            { '@_id': 'R2' },
+          ],
+        },
+      } as any,
+    };
+    const [group] = collectParallelGroups(d);
+    expect(group.parallelId).toBe('P__parallel_group_2');
+  });
+
   it('reports __root_parallel at the root level (containerId null)', () => {
     const d: SCXMLDocument = { scxml: { '@_initial': 'A B', state: [{ '@_id': 'A' }, { '@_id': 'B' }] } as any };
     normalizeParallelGroups(d);

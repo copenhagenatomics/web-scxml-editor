@@ -371,7 +371,10 @@ export function hasAnyChildren(container: Container): boolean {
 export interface ParallelGroupInfo {
   /** The diagram level the regions appear on: the <parallel>'s own id, or null for the root's `__root_parallel`. */
   containerId: string | null;
-  /** Key for the group's wrapper node — distinct from the <parallel>'s own node id. */
+  /**
+   * Key for the group's wrapper node — `{id}__parallel_group` (with a `_2`…
+   * suffix if a state already uses that id), or `__root_parallel`'s own id.
+   */
   parallelId: string;
   /** One per region: the ids of the nodes drawn in its column. */
   regions: { memberIds: string[] }[];
@@ -386,6 +389,11 @@ export interface ParallelGroupInfo {
  */
 export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInfo[] {
   const result: ParallelGroupInfo[] = [];
+  // Wrapper keys share the canvas's node-id space with every state, so a
+  // derived `{id}__parallel_group` must be claimed against the document's ids
+  // (and against wrappers already generated) — a state may legitimately be
+  // named that. The root's key is its own id, already unique and never a node.
+  const wrapperIds = collectAllIds(scxmlDoc.scxml as any);
 
   function walk(el: any, isRoot = false): void {
     asArray<any>(el.state).forEach((child) => walk(child));
@@ -397,7 +405,7 @@ export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInf
         const root = isRoot && isRootParallel(p);
         result.push({
           containerId: root ? null : p['@_id'],
-          parallelId: root ? p['@_id'] : `${p['@_id']}__parallel_group`,
+          parallelId: root ? p['@_id'] : claimId(`${p['@_id']}__parallel_group`, wrapperIds),
           regions,
         });
       }
