@@ -11,8 +11,16 @@ export function PdfExportOverlay() {
 
   return (
     <div className='fixed inset-0 z-[100] flex items-center justify-center bg-black/40'>
-      <div className='flex items-center gap-3 px-5 py-4 rounded-lg shadow-lg bg-elevated border border-default text-sm text-default'>
-        <span className='h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block' />
+      <div
+        role='status'
+        aria-live='polite'
+        aria-atomic='true'
+        className='flex items-center gap-3 px-5 py-4 rounded-lg shadow-lg bg-elevated border border-default text-sm text-default'
+      >
+        <span
+          aria-hidden='true'
+          className='h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin inline-block'
+        />
         {progress.total > 0
           ? `Exporting PDF — level ${progress.current} of ${progress.total}`
           : 'Preparing PDF export…'}

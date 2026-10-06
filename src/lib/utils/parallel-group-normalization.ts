@@ -162,19 +162,37 @@ function autoParallelIdFor(containerId: string | null): string {
  * every other id in the document, not just this container's own children —
  * otherwise a synthetic wrapper id can silently collide with an unrelated,
  * hand-authored sibling elsewhere that happens to share that literal name.
+ *
+ * Counts occurrences rather than just presence: a document can already hold
+ * a duplicate id (e.g. from the older collision-prone wrapping), and
+ * releasing a wrapper's own id must not also erase the record of the other
+ * element sharing it — see releaseId.
  */
+type IdCounts = Map<string, number>;
+
+function addId(ids: IdCounts, id: string): void {
+  ids.set(id, (ids.get(id) ?? 0) + 1);
+}
+
+/** Release one occurrence of `id`, keeping it claimed if another element still holds it. */
+function releaseId(ids: IdCounts, id: string): void {
+  const count = ids.get(id) ?? 0;
+  if (count <= 1) ids.delete(id);
+  else ids.set(id, count - 1);
+}
+
 function collectAllIds(
   container: Container | ParallelElement,
-  ids: Set<string> = new Set(),
-): Set<string> {
+  ids: IdCounts = new Map(),
+): IdCounts {
   asArray(container.state).forEach((s) => {
-    if (s['@_id']) ids.add(s['@_id']);
+    if (s['@_id']) addId(ids, s['@_id']);
     collectAllIds(s, ids);
   });
   // Recurse into the <parallel> itself (not just its <state> children) so its
   // own <history> children are covered too.
   asArray(container.parallel).forEach((p) => {
-    if (p['@_id']) ids.add(p['@_id']);
+    if (p['@_id']) addId(ids, p['@_id']);
     collectAllIds(p, ids);
   });
   // <final>/<history> are leaf state-like elements whose ids share the same
@@ -185,7 +203,7 @@ function collectAllIds(
     ...asArray((container as any).history),
   ] as Array<{ '@_id'?: string }>;
   leafChildren.forEach((child) => {
-    if (child['@_id']) ids.add(child['@_id']);
+    if (child['@_id']) addId(ids, child['@_id']);
   });
   return ids;
 }
@@ -195,9 +213,9 @@ function collectAllIds(
  * the smallest `_2`, `_3`, ... suffix that isn't. Claims whatever id it
  * returns by adding it to `usedIds`.
  */
-function claimId(candidate: string, usedIds: Set<string>): string {
+function claimId(candidate: string, usedIds: IdCounts): string {
   if (!usedIds.has(candidate)) {
-    usedIds.add(candidate);
+    addId(usedIds, candidate);
     return candidate;
   }
   let n = 2;
@@ -206,7 +224,7 @@ function claimId(candidate: string, usedIds: Set<string>): string {
     n++;
     next = `${candidate}_${n}`;
   }
-  usedIds.add(next);
+  addId(usedIds, next);
   return next;
 }
 
@@ -214,7 +232,7 @@ function claimId(candidate: string, usedIds: Set<string>): string {
  * Apply this container's own wrap/unwrap decision (not recursive — callers
  * recurse separately). Returns whether the container's own shape changed.
  */
-function applyWrapDecision(container: Container, containerId: string | null, usedIds: Set<string>): boolean {
+function applyWrapDecision(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
   const { flat, initialIds, autoParallel, otherParallels } = buildLogicalView(container);
   const flatIds = flat.map((s) => s['@_id']);
   const edges = siblingEdgesFor(flat);
@@ -243,11 +261,13 @@ function applyWrapDecision(container: Container, containerId: string | null, use
   // This container's own previous auto-wrap ids (if any) are about to be
   // regenerated from the same initialIds, so they're not real collisions —
   // release them first so claimId doesn't mistake a wrapper being replaced
-  // by itself for a clash and needlessly suffix it every single pass.
+  // by itself for a clash and needlessly suffix it every single pass. Only
+  // this wrapper's own occurrence is released, so an unrelated element that
+  // already shares the id still counts as a clash and the wrapper migrates.
   if (autoParallel) {
-    usedIds.delete(autoParallel['@_id']);
+    releaseId(usedIds, autoParallel['@_id']);
     asArray(autoParallel.state).forEach((region) => {
-      if (isAutoRegion(region)) usedIds.delete(region['@_id']);
+      if (isAutoRegion(region)) releaseId(usedIds, region['@_id']);
     });
   }
 
@@ -310,7 +330,7 @@ function applyWrapDecision(container: Container, containerId: string | null, use
  * children (auto-wrapped or hand-authored — a region can independently grow
  * its own 2+ work trees), then this container's own wrap/unwrap decision.
  */
-function normalizeContainer(container: Container, containerId: string | null, usedIds: Set<string>): boolean {
+function normalizeContainer(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
   let changed = false;
 
   asArray(container.state).forEach((child) => {

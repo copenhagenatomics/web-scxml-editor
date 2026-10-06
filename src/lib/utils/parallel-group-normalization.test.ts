@@ -163,6 +163,36 @@ describe('normalizeParallelGroups', () => {
     expect(ids(parallel.state).sort()).toEqual(['A_region', 'B_region']);
   });
 
+  it('migrates an already-wrapped wrapper off an id it duplicates with an unrelated element, instead of keeping the duplicate', () => {
+    // A document left with a duplicate id by the older collision-prone
+    // wrapping: the auto <parallel> and auto region share ids with
+    // hand-authored states elsewhere. Releasing the wrapper's own ids must
+    // not also forget the hand-authored occurrences.
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': '__root_parallel',
+        state: { '@_id': 'Other', state: [{ '@_id': '__root_parallel' }, { '@_id': 'A_region' }] },
+        parallel: {
+          '@_id': '__root_parallel',
+          '@_viz:auto-parallel': 'true',
+          state: [
+            { '@_id': 'A_region', '@_initial': 'A', '@_viz:auto-region': 'true', state: { '@_id': 'A' } },
+            { '@_id': 'B_region', '@_initial': 'B', '@_viz:auto-region': 'true', state: { '@_id': 'B' } },
+          ],
+        },
+      } as any,
+    };
+    const result = normalizeParallelGroups(d);
+    expect(result.changed).toBe(true);
+    const parallel = Array.isArray(d.scxml.parallel) ? d.scxml.parallel[0] : d.scxml.parallel!;
+    expect(parallel['@_id']).toBe('__root_parallel_2');
+    expect(ids(parallel.state).sort()).toEqual(['A_region_2', 'B_region']);
+    expect(ids((d.scxml.state as any).state).sort()).toEqual(['A_region', '__root_parallel']);
+
+    // And the migrated ids are then stable on later passes.
+    expect(normalizeParallelGroups(d).changed).toBe(false);
+  });
+
   it('wraps a multi-member group (connected via a transition) into a synthetic auto-region <state>, alongside the other region\'s own *_region wrapper', () => {
     const d: SCXMLDocument = {
       scxml: {
