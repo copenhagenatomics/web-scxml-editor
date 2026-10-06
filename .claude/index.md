@@ -93,7 +93,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | compound state, parallel state, final state, simple state, dashed border, state icon | [state-node-types.md](features/state-node-types.md) |
 | initial state, Initial badge, "can't mark this initial" | [state-node-types.md](features/state-node-types.md), [initial-state-groups.md](features/initial-state-groups.md) |
 | multiple initial states, disconnected sub-machines, Initial State group conflict | [initial-state-groups.md](features/initial-state-groups.md) |
-| parallel state auto-wrap, "Parallel State" divider line, region, `viz:auto-parallel`, `viz:auto-region`, group drag, region-crossing transition blocked | [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) |
+| parallel state, state becomes `<parallel>`, `__root_parallel`, `*_region`, region column, "Parallel State" divider line, group drag, region-crossing transition blocked | [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) |
 | history state, shallow/deep history | [state-node-types.md](features/state-node-types.md) |
 | "work tree", state tree, parent/child registry, ancestor chain | [state-hierarchy-tree.md](features/state-hierarchy-tree.md) *("work tree" is not a real term in this codebase — see this doc's verification note* |
 | connection point, handle, dragging a new transition, `onConnect`, anchor point, `viz:anchors`, shift-click add anchor | [state-connections-handles.md](features/state-connections-handles.md) |
@@ -149,7 +149,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 | [labels.md](features/labels.md) | State id/rename (double-click), edge label display, note text editing |
 | [monaco-code-editor.md](features/monaco-code-editor.md) | XML syntax highlighting, hover docs, autocomplete, paste normalization |
 | [node-positioning.md](features/node-positioning.md) | Manual placement, `viz:xywh` storage, the auto-layout priority rule |
-| [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) | Live auto-wrap of 2+ Initial-State work trees into a real `<parallel>` element, its invisible wrapper node and region divider overlay |
+| [parallel-state-auto-grouping.md](features/parallel-state-auto-grouping.md) | A compound state with 2+ Initial-State work trees becomes a real `<parallel>` (root: `__root_parallel`); regions drawn as columns with a divider overlay |
 | [scxml-parsing.md](features/scxml-parsing.md) | Hand-rolled syntax checker + fast-xml-parser, distinct from validation |
 | [scxml-serialization.md](features/scxml-serialization.md) | The two independent object-tree/DOM → XML string serializers |
 | [scxml-validation.md](features/scxml-validation.md) | The 16-pass validator pipeline, error surfacing, known gaps |
@@ -233,7 +233,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...`after 2s` gets stored with a `* 1000` in the expression | [scxml.md](decisions/scxml.md) #6 |
 | ...onentry/onexit unknown-attribute checks don't fire on real files | [scxml.md](decisions/scxml.md) #8 (Inferred) |
 | ...2+ Initial-State groups get restructured into a real `<parallel>` element in the document itself | [scxml.md](decisions/scxml.md) #10 |
-| ...every auto-wrapped `<parallel>` region (even a single-member one) has its own `*_region` wrapper state | [scxml.md](decisions/scxml.md) #11 |
+| ...every `<parallel>` region the editor creates (even a single-member one) is its own `*_region` state | [scxml.md](decisions/scxml.md) #11 |
 | ...a compound `<state>` with 2+ Initial States turns into the `<parallel>` itself, there are no `viz:auto-*` markers, and only the root gets an inserted `__root_parallel` | [scxml.md](decisions/scxml.md) #12 |
 | ...compound states don't render nested inside their parent | [visual-diagram.md](decisions/visual-diagram.md) #1 |
 | ...there's no separate node component per state type | [visual-diagram.md](decisions/visual-diagram.md) #2 |

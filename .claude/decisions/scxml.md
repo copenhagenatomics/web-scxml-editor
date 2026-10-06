@@ -255,7 +255,7 @@ The moment a container has 2+ distinct Initial-marked work trees, the editor res
 `src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/parallel-group-markers.ts`, `src/stores/editor-store.ts` (`normalizeContent`, the single choke point), `docs/parallel-states-requirement.md`, commits `801145d`/`bf0ab49`.
 
 ### Status
-Accepted (amended by #11 — the "single-member tree used bare" clause no longer holds).
+Accepted, amended twice: by #11 (the "single-member tree used bare" clause no longer holds) and by #12 (superseding the marker-based mechanism — no `viz:auto-*` markers, the compound state itself becomes the `<parallel>`, hand-authored `<parallel>` is no longer exempt, and regions are drawn as columns rather than flattened by marker). The core decision — live restructuring into a real `<parallel>` — still holds.
 
 ---
 
@@ -279,7 +279,7 @@ Explicit user request, stated with a concrete example (`<parallel><state id="sta
 `src/lib/utils/parallel-group-normalization.ts` (`applyWrapDecision`), `src/lib/utils/parallel-group-normalization.test.ts`, conversation request citing the exact example above.
 
 ### Status
-Accepted.
+Accepted (the "every region is a `*_region` state" rule still holds, now via `buildRegions`). Its marker-related constraints — `viz:auto-region`, the bare-region read path, and exempting hand-authored `<parallel>` — are superseded by #12.
 
 ---
 
