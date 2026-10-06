@@ -2772,7 +2772,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     const carriedInitialIds = targetContainer
       ? resolveCarriedOverInitialIds(copied, copiedInitialIds, combinedIdMap, targetHadNoInitial)
       : [];
-    if (targetContainer && carriedInitialIds.length > 0) {
+    if (targetContainer && !targetIsParallel && carriedInitialIds.length > 0) {
       // A multi-value @_initial here is deliberate, not just the single-id
       // case handleReparent covers — it's what lets the same "2+ distinct
       // Initial work trees" normalization pass that originally created a
