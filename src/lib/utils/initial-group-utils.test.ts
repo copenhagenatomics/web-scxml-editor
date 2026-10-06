@@ -304,6 +304,34 @@ describe('wouldMergeDistinctGroups', () => {
     expect(wouldMergeDistinctGroups(doc(scxml as any), 'state_3', 'state_4').blocked).toBe(false);
   });
 
+  it('leaves a transition between two regions of __root_parallel to the cross-region check', () => {
+    const d = doc({
+      '@_initial': '__root_parallel',
+      parallel: {
+        '@_id': '__root_parallel',
+        state: [
+          { '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' }, transition: { '@_target': 'R2' } },
+          { '@_id': 'R2', '@_initial': 'Y', state: { '@_id': 'Y' } },
+        ],
+      },
+    } as any);
+    expect(wouldMergeDistinctGroups(d, 'R2', 'R1').blocked).toBe(false);
+  });
+
+  it('allows marking an ordinary root sibling Initial next to __root_parallel', () => {
+    const d = doc({ ...{
+      '@_initial': '__root_parallel',
+      parallel: {
+        '@_id': '__root_parallel',
+        state: [
+          { '@_id': 'R1', '@_initial': 'X', state: { '@_id': 'X' }, transition: { '@_target': 'R2' } },
+          { '@_id': 'R2', '@_initial': 'Y', state: { '@_id': 'Y' } },
+        ],
+      },
+    }, state: { '@_id': 'C' } } as any);
+    expect(wouldConflictIfMarkedInitial(d, 'C').blocked).toBe(false);
+  });
+
   it('leaves a transition between two regions of a <parallel> to the cross-region check', () => {
     const scxml = { parallel: { '@_id': 'P', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] } };
     expect(wouldMergeDistinctGroups(doc(scxml as any), 'R1', 'R2').blocked).toBe(false);

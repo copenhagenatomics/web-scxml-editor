@@ -274,6 +274,17 @@ export function analyzeGroups(
 }
 
 /**
+ * The container kind to use for Initial-group analysis (union-find over
+ * siblings). At the root, `__root_parallel` is analyzed as ONE child — the
+ * way any other <parallel> child counts as one child state — rather than
+ * seen through: its regions are always active, not Initial groups, so a
+ * transition between two of them must not read as merging two groups.
+ */
+export function groupAnalysisKind(kind: ContainerKind): ContainerKind {
+  return kind === "root" ? "state" : kind;
+}
+
+/**
  * Check whether creating a transition sourceId -> targetId would merge two
  * different Initial State groups. Both states must share a direct parent —
  * if they don't (or either id can't be found), this defers to
@@ -289,12 +300,16 @@ export function wouldMergeDistinctGroups(
   if (!sourceEntry || !targetEntry || sourceEntry.container !== targetEntry.container) {
     return { blocked: false };
   }
-  // Two regions of a <parallel> aren't Initial groups — a transition between
-  // them is a cross-region transition, which wouldCrossParallelRegions
-  // reports with its own message.
-  if (sourceEntry.kind === "parallel") return { blocked: false };
+  // Regions of a <parallel> (including the root's __root_parallel) aren't
+  // Initial groups — a transition touching one is a cross-region (or
+  // cross-hierarchy) transition, which wouldCrossParallelRegions /
+  // validateCrossHierarchyTransitions report with their own message.
+  if (isParallelRegion(scxmlDoc, sourceId) || isParallelRegion(scxmlDoc, targetId)) {
+    return { blocked: false };
+  }
 
-  const { container, kind } = sourceEntry;
+  const { container } = sourceEntry;
+  const kind = groupAnalysisKind(sourceEntry.kind);
   const childIds = getDirectChildStates(container, kind).map((c) => c["@_id"]);
   const initialIds = getInitialIds(container, kind);
   const edges = getSiblingEdges(container, kind);
@@ -331,7 +346,8 @@ export function wouldConflictIfMarkedInitial(
     };
   }
 
-  const { container, kind } = entry;
+  const { container } = entry;
+  const kind = groupAnalysisKind(entry.kind);
   const childIds = getDirectChildStates(container, kind).map((c) => c["@_id"]);
   const initialIds = new Set(getInitialIds(container, kind));
   initialIds.add(stateId);

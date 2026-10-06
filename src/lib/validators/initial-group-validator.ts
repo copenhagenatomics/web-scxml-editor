@@ -5,6 +5,7 @@ import {
   getInitialIds,
   getSiblingEdges,
   analyzeGroups,
+  groupAnalysisKind,
   type ContainerElement,
 } from '@/lib/utils/initial-group-utils';
 import { getChildEntries, type ContainerKind } from '@/lib/utils/parallel-structure';
@@ -29,13 +30,16 @@ function validateContainer(
   kind: ContainerKind,
   errors: ValidationError[]
 ): void {
-  const children = getDirectChildStates(container, kind);
+  // At the root, __root_parallel counts as one child — its regions aren't
+  // Initial State groups (see groupAnalysisKind).
+  const analysisKind = groupAnalysisKind(kind);
+  const children = getDirectChildStates(container, analysisKind);
 
   // A <parallel>'s children are regions, not Initial State groups.
   if (children.length > 0 && kind !== 'parallel') {
     const childIds = children.map((c) => c['@_id']);
-    const initialIds = getInitialIds(container, kind);
-    const edges = getSiblingEdges(container, kind);
+    const initialIds = getInitialIds(container, analysisKind);
+    const edges = getSiblingEdges(container, analysisKind);
     const { groupsByState, conflictedGroups } = analyzeGroups(childIds, initialIds, edges);
 
     conflictedGroups.forEach((members) => {
