@@ -19,6 +19,7 @@ import {
 } from '@/lib/layout/parallel-group-bbox';
 import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
 import { getChildEntries, isRootParallel, type ChildEntry } from '@/lib/utils/parallel-structure';
+import { getInitialIds } from '@/lib/utils/initial-group-utils';
 import type { StateRegistryEntry } from './state-registry';
 
 /**
@@ -453,15 +454,13 @@ export function calculateHierarchicalPosition(
  * that region's own `initial`.
  */
 function isInitialInRegionOf(stateId: string, regions: ChildEntry[]): boolean {
-  return regions.some((region) => {
-    if (region.tag !== 'state') return false;
-    const initial = region.el?.['@_initial'];
-    if (typeof initial !== 'string') return false;
-    return (
-      initial.split(/\s+/).includes(stateId) &&
-      getChildEntries(region.el).some((child) => child.el['@_id'] === stateId)
-    );
-  });
+  // getInitialIds reads both SCXML forms (the `initial` attribute and the
+  // <initial><transition target/></initial> element), resolves ids that
+  // contain spaces via parseStateIdList, and only returns the region's own
+  // direct children — the same logic the Initial checkbox/toggle use.
+  return regions.some(
+    (region) => region.tag === 'state' && getInitialIds(region.el, 'state').has(stateId)
+  );
 }
 
 /**

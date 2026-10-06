@@ -102,6 +102,27 @@ describe('isInitialState', () => {
     expect(check('A2')).toBe(false);
   });
 
+  it('reads a region\'s <initial> element form and ids containing spaces, like any other container', () => {
+    const parallel = {
+      '@_id': 'P',
+      state: [
+        {
+          '@_id': 'R1',
+          initial: { transition: { '@_target': 'A' } },
+          state: [{ '@_id': 'A' }, { '@_id': 'A2' }],
+        },
+        { '@_id': 'R2', '@_initial': 'my state', state: [{ '@_id': 'my state' }, { '@_id': 'other' }] },
+      ],
+    };
+    const registry = new Map([['P', { state: parallel, elementType: 'parallel' }]]);
+    const check = (id: string) =>
+      isInitialState(id, 'P', {}, registry as any, realGetAttribute, realGetElements);
+    expect(check('A')).toBe(true);
+    expect(check('A2')).toBe(false);
+    expect(check('my state')).toBe(true);
+    expect(check('other')).toBe(false);
+  });
+
   it('shows the Initial badge on the initial member of a region at root level, under __root_parallel', () => {
     const rootScxml = {
       '@_initial': '__root_parallel',
