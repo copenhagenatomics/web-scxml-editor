@@ -280,6 +280,35 @@ describe('normalizeParallelGroups — root level (__root_parallel)', () => {
   });
 });
 
+describe('normalizeParallelGroups — __root_parallel is only special directly under <scxml>', () => {
+  const NESTED = `${HEADER} initial="Outer"><state id="Outer" initial="__root_parallel"><parallel id="__root_parallel"><state id="R1"/><state id="R2"/></parallel></state></scxml>`;
+
+  it('treats a nested <parallel> that happens to be named __root_parallel as an ordinary <parallel>', () => {
+    const { changed, doc } = normalizeXml(NESTED);
+    expect(changed).toBe(false);
+    const outer = one(doc.scxml.state);
+    expect(one(outer.parallel)['@_id']).toBe('__root_parallel');
+    expect(ids(one(outer.parallel).state)).toEqual(['R1', 'R2']);
+  });
+
+  it('reports it as an ordinary group (drawn inside itself, not at root level)', () => {
+    const { doc } = normalizeXml(NESTED);
+    const [group] = collectParallelGroups(doc);
+    expect(group.containerId).toBe('__root_parallel');
+    expect(group.parallelId).toBe('__root_parallel__parallel_group');
+  });
+
+  it('still reverts it like any other <parallel> once it has a single region', () => {
+    const { changed, doc } = normalizeXml(
+      `${HEADER} initial="Outer"><state id="Outer" initial="__root_parallel"><parallel id="__root_parallel"><state id="R1"/></parallel></state></scxml>`,
+    );
+    expect(changed).toBe(true);
+    const outer = one(doc.scxml.state);
+    expect(outer.parallel).toBeUndefined();
+    expect(one(outer.state)['@_id']).toBe('__root_parallel');
+  });
+});
+
 describe('normalizeParallelGroups — migrating documents from older versions', () => {
   it('strips viz:auto-* markers', () => {
     const { changed, out } = normalizeXml(

@@ -21,7 +21,12 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-/** The <parallel> the editor inserts under <scxml> (its id may carry a `_2`... clash suffix). */
+/**
+ * Whether `el`'s id is the one the editor gives the <parallel> it inserts
+ * under <scxml> (possibly with a `_2`... clash suffix). Only meaningful for a
+ * direct child of <scxml> — callers must check that themselves; a nested
+ * <parallel> that happens to share the id is an ordinary <parallel>.
+ */
 export function isRootParallel(el: any): boolean {
   return !!el && typeof el['@_id'] === 'string' && ROOT_PARALLEL_ID_PATTERN.test(el['@_id']);
 }
@@ -36,13 +41,14 @@ export interface ChildEntry {
 /**
  * The direct child states of a container, each with its tag. A <parallel>
  * child counts as a child state like any other. The root-level
- * `__root_parallel` is the one exception: it's transparent, so its regions
- * count as the root's own children.
+ * `__root_parallel` is the one exception: when `kind` is 'root' (the
+ * container is <scxml>), it's transparent, so its regions count as the
+ * root's own children.
  */
-export function getChildEntries(container: any): ChildEntry[] {
+export function getChildEntries(container: any, kind: ContainerKind = 'state'): ChildEntry[] {
   const result: ChildEntry[] = asArray<any>(container.state).map((el) => ({ el, tag: 'state' }));
   asArray<any>(container.parallel).forEach((p) => {
-    if (isRootParallel(p)) {
+    if (kind === 'root' && isRootParallel(p)) {
       asArray<any>(p.state).forEach((el) => result.push({ el, tag: 'state' }));
       asArray<any>(p.parallel).forEach((el) => result.push({ el, tag: 'parallel' }));
     } else {
@@ -53,8 +59,8 @@ export function getChildEntries(container: any): ChildEntry[] {
 }
 
 /** Always a fresh array — never container.state's own array. */
-export function getLogicalChildStates(container: any): any[] {
-  return getChildEntries(container).map((e) => e.el);
+export function getLogicalChildStates(container: any, kind: ContainerKind = 'state'): any[] {
+  return getChildEntries(container, kind).map((e) => e.el);
 }
 
 /**
@@ -83,7 +89,7 @@ export function getDisplayChildEntries(container: any, kind: ContainerKind): Chi
   };
   asArray<any>(container.state).forEach((el) => add({ el, tag: 'state' }));
   asArray<any>(container.parallel).forEach((p) => {
-    if (isRootParallel(p)) {
+    if (kind === 'root' && isRootParallel(p)) {
       getChildEntries(p).forEach((region) => result.push(...getRegionDisplayEntries(region)));
     } else {
       add({ el: p, tag: 'parallel' });

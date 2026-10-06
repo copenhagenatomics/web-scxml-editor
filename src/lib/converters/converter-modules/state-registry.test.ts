@@ -114,3 +114,17 @@ describe('registerAllStates — <parallel> regions drawn as columns', () => {
     expect(parentMap.get('RegionA')).toBe('Manual');
   });
 });
+
+describe('registerAllStates — __root_parallel is only transparent directly under <scxml>', () => {
+  it('registers a nested <parallel> named __root_parallel as an ordinary drillable parallel', () => {
+    const { stateRegistry, parentMap } = run({
+      state: {
+        '@_id': 'Outer',
+        parallel: { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] },
+      },
+    });
+    expect(stateRegistry.get('__root_parallel')?.elementType).toBe('parallel');
+    expect(parentMap.get('__root_parallel')).toBe('Outer');
+    expect(parentMap.get('R1')).toBe('__root_parallel');
+  });
+});

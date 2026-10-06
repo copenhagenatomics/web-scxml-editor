@@ -10,6 +10,9 @@ import {
   rewriteOrDropTransitions,
   resolveCarriedOverInitialIds,
   findStateById,
+  findElementById,
+  addStateToDocument,
+  detachElementFromParent,
 } from './scxml-manipulation-utils';
 
 describe('findStateById', () => {
@@ -455,3 +458,83 @@ describe('rewriteOrDropTransitions', () => {
     expect(child.transition['@_target']).toBe('Sibling_copy');
   });
 });
+
+describe('<parallel> elements keep their tag through lookup, add, detach and clone', () => {
+  // main_region is a compound state converted into a <parallel>
+  // (parallel-group-normalization.ts), holding two regions.
+  const makeDoc = (): SCXMLDocument =>
+    ({
+      scxml: {
+        '@_initial': 'main_region',
+        state: { '@_id': 'Other' },
+        parallel: {
+          '@_id': 'main_region',
+          state: [
+            { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+            { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+          ],
+        },
+      },
+    }) as any;
+
+  it('findElementById reports the tag of each element', () => {
+    const d = makeDoc();
+    expect(findElementById(d, 'main_region')?.tag).toBe('parallel');
+    expect(findElementById(d, 'A2')?.tag).toBe('state');
+    expect(findElementById(d, 'nope')).toBeNull();
+  });
+
+  it('addStateToDocument files a <parallel> under .parallel', () => {
+    const d = makeDoc();
+    addStateToDocument(d, { '@_id': 'P2', state: [] } as any, 'Other', 'parallel');
+    const other = d.scxml.state as any;
+    expect(other.parallel['@_id']).toBe('P2');
+    expect(other.state).toBeUndefined();
+  });
+
+  it('detaches a state nested inside a region of a <parallel> (drag-to-nest out of a parallel)', () => {
+    const d = makeDoc();
+    const detached = detachElementFromParent(d, 'A2');
+    expect(detached?.tag).toBe('state');
+    expect(detached?.element['@_id']).toBe('A2');
+    expect(findStateById(d, 'A2')).toBeNull();
+  });
+
+  it('detaches a <parallel> itself, reporting its tag so it can be re-added as one', () => {
+    const d = makeDoc();
+    const detached = detachElementFromParent(d, 'main_region');
+    expect(detached?.tag).toBe('parallel');
+    expect(d.scxml.parallel).toBeUndefined();
+    addStateToDocument(d, detached!.element, 'Other', detached!.tag);
+    expect(findElementById(d, 'main_region')?.tag).toBe('parallel');
+  });
+
+  it('never writes an initial onto a <parallel> when detaching one of its regions', () => {
+    const d = makeDoc();
+    detachElementFromParent(d, 'B_region');
+    expect((d.scxml.parallel as any)['@_initial']).toBeUndefined();
+  });
+
+  it('isDescendantOf sees through <parallel> children', () => {
+    const d = makeDoc();
+    expect(isDescendantOf(d, 'A2', 'main_region')).toBe(true);
+    expect(isDescendantOf(d, 'main_region', 'A2')).toBe(false);
+  });
+
+  it('cloning gives fresh ids to everything under a <parallel> and rewrites its inner transitions', () => {
+    const d = makeDoc();
+    const region = (d.scxml.parallel as any).state[0];
+    region.state[0].transition = { '@_target': 'A2' };
+    region.parallel = { '@_id': 'Nested', state: [{ '@_id': 'N1' }, { '@_id': 'N2' }] };
+    const existing = new Set(['main_region', 'A_region', 'A', 'A2', 'B_region', 'B', 'Nested', 'N1', 'N2']);
+    const { clone, idMap } = cloneStateSubtreeWithFreshIds(d.scxml.parallel as any, existing, 0, 0);
+    rewriteOrDropTransitions(clone, idMap);
+
+    expect(idMap.get('Nested')).toBe('Nested_copy');
+    expect(idMap.get('N1')).toBe('N1_copy');
+    const cloneRegion = (clone as any).state[0];
+    expect(cloneRegion['@_initial']).toBe('A_copy');
+    expect(cloneRegion.state[0].transition['@_target']).toBe('A2_copy');
+  });
+});
+

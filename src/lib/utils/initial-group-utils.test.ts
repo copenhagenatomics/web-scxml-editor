@@ -40,7 +40,12 @@ describe('getDirectChildStates', () => {
           { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
         ],
       } };
-    expect(getDirectChildStates(container as any).map((c) => c['@_id']).sort()).toEqual(['A_region', 'B_region']);
+    expect(getDirectChildStates(container as any, 'root').map((c) => c['@_id']).sort()).toEqual(['A_region', 'B_region']);
+  });
+
+  it('does not see through a <parallel> named __root_parallel unless the container is the root', () => {
+    const container = { parallel: { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] } };
+    expect(getDirectChildStates(container as any).map((c) => c['@_id'])).toEqual(['__root_parallel']);
   });
 
   it('counts any other <parallel> child as one child state', () => {
@@ -64,9 +69,9 @@ describe('getDirectChildStates', () => {
         ],
       } };
 
-    getDirectChildStates(container as any);
-    getDirectChildStates(container as any);
-    const thirdCall = getDirectChildStates(container as any);
+    getDirectChildStates(container as any, 'root');
+    getDirectChildStates(container as any, 'root');
+    const thirdCall = getDirectChildStates(container as any, 'root');
 
     expect(ownArray).toEqual([{ '@_id': 'flat_sibling' }]);
     expect(thirdCall.map((c) => c['@_id']).sort()).toEqual(['A_region', 'B_region', 'flat_sibling']);
@@ -189,7 +194,7 @@ describe('getSiblingEdges', () => {
         state: [{ '@_id': 'R1', transition: { '@_target': 'R2' } }, { '@_id': 'R2' }],
       },
     };
-    expect(getSiblingEdges(container as any)).toEqual([['R1', 'R2']]);
+    expect(getSiblingEdges(container as any, 'root')).toEqual([['R1', 'R2']]);
   });
 });
 

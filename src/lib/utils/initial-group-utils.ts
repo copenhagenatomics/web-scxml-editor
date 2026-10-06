@@ -42,8 +42,9 @@ function asArray<T>(v: T | T[] | undefined): T[] {
  */
 export function getDirectChildStates(
   container: ContainerElement,
+  kind: ContainerKind = "state",
 ): StateElement[] {
-  return getLogicalChildStates(container);
+  return getLogicalChildStates(container, kind);
 }
 
 export interface ParentEntry {
@@ -61,7 +62,7 @@ export function findParentEntry(
   stateId: string,
 ): ParentEntry | null {
   function search(container: ContainerElement, kind: ContainerKind): ParentEntry | null {
-    const children = getChildEntries(container);
+    const children = getChildEntries(container, kind);
     if (children.some((c) => c.el["@_id"] === stateId)) return { container, kind };
     for (const child of children) {
       const found = search(child.el, child.tag);
@@ -148,11 +149,12 @@ export function getInitialIds(
   kind: ContainerKind = "state",
 ): Set<string> {
   const childIds = new Set(
-    getDirectChildStates(container).map((c) => c["@_id"]),
+    getDirectChildStates(container, kind).map((c) => c["@_id"]),
   );
   if (kind === "parallel") return childIds;
 
-  const rootParallels = asArray<any>((container as any).parallel).filter(isRootParallel);
+  const rootParallels =
+    kind === "root" ? asArray<any>((container as any).parallel).filter(isRootParallel) : [];
   const rootParallelIds = new Set(rootParallels.map((p) => p["@_id"]));
   const knownIds = new Set([...childIds, ...rootParallelIds]);
 
@@ -183,8 +185,9 @@ export function getInitialIds(
  */
 export function getSiblingEdges(
   container: ContainerElement,
+  kind: ContainerKind = "state",
 ): [string, string][] {
-  const children = getDirectChildStates(container);
+  const children = getDirectChildStates(container, kind);
   const childIds = new Set(children.map((c) => c["@_id"]));
   const edges: [string, string][] = [];
 
@@ -291,10 +294,10 @@ export function wouldMergeDistinctGroups(
   // reports with its own message.
   if (sourceEntry.kind === "parallel") return { blocked: false };
 
-  const container = sourceEntry.container;
-  const childIds = getDirectChildStates(container).map((c) => c["@_id"]);
-  const initialIds = getInitialIds(container);
-  const edges = getSiblingEdges(container);
+  const { container, kind } = sourceEntry;
+  const childIds = getDirectChildStates(container, kind).map((c) => c["@_id"]);
+  const initialIds = getInitialIds(container, kind);
+  const edges = getSiblingEdges(container, kind);
   edges.push([sourceId, targetId]);
 
   const { conflictedGroups } = analyzeGroups(childIds, initialIds, edges);
@@ -328,11 +331,11 @@ export function wouldConflictIfMarkedInitial(
     };
   }
 
-  const { container } = entry;
-  const childIds = getDirectChildStates(container).map((c) => c["@_id"]);
-  const initialIds = new Set(getInitialIds(container, entry.kind));
+  const { container, kind } = entry;
+  const childIds = getDirectChildStates(container, kind).map((c) => c["@_id"]);
+  const initialIds = new Set(getInitialIds(container, kind));
   initialIds.add(stateId);
-  const edges = getSiblingEdges(container);
+  const edges = getSiblingEdges(container, kind);
 
   const { conflictedGroups } = analyzeGroups(childIds, initialIds, edges);
   const conflict = conflictedGroups.find((members) =>

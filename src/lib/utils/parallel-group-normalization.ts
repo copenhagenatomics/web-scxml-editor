@@ -205,8 +205,8 @@ function revertParallelIfNeeded(parallel: any): boolean {
  * changed. The root's `__root_parallel` is transparent — its regions are
  * normalized as children, but it's never itself converted here.
  */
-function normalizeChildren(el: any, ctx: Ctx): void {
-  const holders = [el, ...asArray<any>(el.parallel).filter(isRootParallel)];
+function normalizeChildren(el: any, ctx: Ctx, isRoot = false): void {
+  const holders = [el, ...(isRoot ? asArray<any>(el.parallel).filter(isRootParallel) : [])];
   holders.forEach((holder) => {
     const next: ChildEntry[] = [];
     let retagged = false;
@@ -218,7 +218,7 @@ function normalizeChildren(el: any, ctx: Ctx): void {
       next.push({ el: child, tag: converted ? 'parallel' : 'state' });
     });
     asArray<any>(holder.parallel).forEach((child) => {
-      if (holder === el && isRootParallel(child)) {
+      if (isRoot && holder === el && isRootParallel(child)) {
         next.push({ el: child, tag: 'parallel' });
         return;
       }
@@ -353,7 +353,7 @@ export function normalizeParallelGroups(scxmlDoc: SCXMLDocument): { changed: boo
   const ctx: Ctx = { usedIds: new Set(), changed: false };
   migrateLegacyStructure(scxml, ctx);
   ctx.usedIds = collectAllIds(scxml);
-  normalizeChildren(scxml, ctx);
+  normalizeChildren(scxml, ctx, true);
   normalizeRoot(scxml, ctx);
   return { changed: ctx.changed };
 }
@@ -387,14 +387,14 @@ export interface ParallelGroupInfo {
 export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInfo[] {
   const result: ParallelGroupInfo[] = [];
 
-  function walk(el: any): void {
-    asArray<any>(el.state).forEach(walk);
+  function walk(el: any, isRoot = false): void {
+    asArray<any>(el.state).forEach((child) => walk(child));
     asArray<any>(el.parallel).forEach((p) => {
       const regions = getChildEntries(p).map((r) => ({
         memberIds: getRegionDisplayEntries(r).map((m) => m.el['@_id'] as string),
       }));
       if (regions.length >= 2) {
-        const root = isRootParallel(p);
+        const root = isRoot && isRootParallel(p);
         result.push({
           containerId: root ? null : p['@_id'],
           parallelId: root ? p['@_id'] : `${p['@_id']}__parallel_group`,
@@ -405,6 +405,6 @@ export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInf
     });
   }
 
-  walk(scxmlDoc.scxml);
+  walk(scxmlDoc.scxml, true);
   return result;
 }

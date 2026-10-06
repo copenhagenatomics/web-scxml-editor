@@ -29,13 +29,13 @@ function validateContainer(
   kind: ContainerKind,
   errors: ValidationError[]
 ): void {
-  const children = getDirectChildStates(container);
+  const children = getDirectChildStates(container, kind);
 
   // A <parallel>'s children are regions, not Initial State groups.
   if (children.length > 0 && kind !== 'parallel') {
     const childIds = children.map((c) => c['@_id']);
     const initialIds = getInitialIds(container, kind);
-    const edges = getSiblingEdges(container);
+    const edges = getSiblingEdges(container, kind);
     const { groupsByState, conflictedGroups } = analyzeGroups(childIds, initialIds, edges);
 
     conflictedGroups.forEach((members) => {
@@ -61,5 +61,5 @@ function validateContainer(
     }
   }
 
-  getChildEntries(container).forEach((child) => validateContainer(child.el, child.tag, errors));
+  getChildEntries(container, kind).forEach((child) => validateContainer(child.el, child.tag, errors));
 }
