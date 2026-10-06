@@ -68,4 +68,52 @@ describe('validateInitialStateGroups', () => {
     validateInitialStateGroups(scxml, errors);
     expect(errors.length).toBe(1);
   });
+
+  it('reports a compound state with 2+ Initial States that cannot become a <parallel> because it has <final> children', () => {
+    const scxml: SCXMLElement = {
+      state: {
+        '@_id': 'P',
+        '@_initial': 'A B',
+        state: [{ '@_id': 'A' }, { '@_id': 'B' }],
+        final: { '@_id': 'Done' },
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].stateId).toBe('P');
+    expect(errors[0].message).toContain('<final>');
+  });
+
+  it('does not treat the regions of a <parallel> as conflicting Initial State groups', () => {
+    const scxml: SCXMLElement = {
+      parallel: {
+        '@_id': 'P',
+        state: [{ '@_id': 'R1', transition: { '@_target': 'R2' } }, { '@_id': 'R2' }],
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toEqual([]);
+  });
+
+  it('still checks Initial State groups inside a region of a <parallel>', () => {
+    const scxml: SCXMLElement = {
+      parallel: {
+        '@_id': 'P',
+        state: [
+          {
+            '@_id': 'R1',
+            '@_initial': 'X Y',
+            state: [{ '@_id': 'X', transition: { '@_target': 'Y' } }, { '@_id': 'Y' }],
+          },
+          { '@_id': 'R2' },
+        ],
+      },
+    } as any;
+    const errors: ValidationError[] = [];
+    validateInitialStateGroups(scxml, errors);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].stateId).toBe('X');
+  });
 });

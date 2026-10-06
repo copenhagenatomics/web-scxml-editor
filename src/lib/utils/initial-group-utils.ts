@@ -15,7 +15,14 @@ import type {
   InitialElement,
 } from "@/types/scxml";
 import { parseStateIdList } from "@/lib/validators/validator-utils";
-import { AUTO_PARALLEL_MARKER, AUTO_REGION_MARKER } from "./parallel-group-markers";
+import {
+  getChildEntries,
+  getLogicalChildStates,
+  isRootParallel,
+  type ContainerKind,
+} from "./parallel-structure";
+
+export type { ContainerKind };
 
 export type ContainerElement = SCXMLElement | StateElement;
 
@@ -25,58 +32,80 @@ function asArray<T>(v: T | T[] | undefined): T[] {
 }
 
 /**
- * Direct child <state> elements of a container (root scxml, or a compound
- * state), transparently unwrapping any auto-wrapped <parallel> child (see
- * parallel-group-normalization.ts) so a flattened member is still treated
- * as this container's own direct child for every initial-group purpose
- * below — exactly as it was before wrapping. A hand-authored <parallel>
- * (no viz:auto-parallel marker) is left alone; only its content is not
- * flattened in here.
+ * Direct child states of a container (root scxml, a compound <state>, or a
+ * <parallel>). A <parallel> child counts as a child state like any other;
+ * the root-level `__root_parallel` is transparent, so its regions count as
+ * the root's own children (see parallel-structure.ts).
+ *
+ * Always returns a fresh array — never container.state's own array — since
+ * this is called many times per single check and callers may push onto it.
  */
 export function getDirectChildStates(
   container: ContainerElement,
 ): StateElement[] {
-  // Copy, never reuse container.state's own array reference — this function
-  // is called many times per single check (findParentContainer's recursive
-  // search, getInitialIds, getSiblingEdges all call it again on the same
-  // container), and pushing flattened parallel members directly onto the
-  // shared array would permanently corrupt the document a little more with
-  // every call.
-  const result = [...asArray(container.state)];
+  return getLogicalChildStates(container);
+}
 
-  asArray((container as any).parallel).forEach((parallel: any) => {
-    if (parallel[AUTO_PARALLEL_MARKER] !== "true") return;
-    asArray(parallel.state).forEach((region: any) => {
-      if (region[AUTO_REGION_MARKER] === "true") {
-        result.push(...asArray(region.state));
-      } else {
-        result.push(region);
-      }
-    });
-  });
-
-  return result;
+export interface ParentEntry {
+  container: ContainerElement;
+  kind: ContainerKind;
 }
 
 /**
- * Find the container (the scxml root, or a StateElement) that directly holds
- * the given state id as one of its own <state> children. Returns null if the
- * id doesn't exist anywhere in the document.
+ * Find the container that directly holds the given state id as one of its
+ * children, and what kind of container it is (the <scxml> root, a <state>,
+ * or a <parallel>). Returns null if the id doesn't exist in the document.
+ */
+export function findParentEntry(
+  scxmlDoc: SCXMLDocument,
+  stateId: string,
+): ParentEntry | null {
+  function search(container: ContainerElement, kind: ContainerKind): ParentEntry | null {
+    const children = getChildEntries(container);
+    if (children.some((c) => c.el["@_id"] === stateId)) return { container, kind };
+    for (const child of children) {
+      const found = search(child.el, child.tag);
+      if (found) return found;
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml, "root");
+}
+
+/**
+ * Find the container (the scxml root, a <state>, or a <parallel>) that
+ * directly holds the given state id as one of its children. Returns null if
+ * the id doesn't exist anywhere in the document.
  */
 export function findParentContainer(
   scxmlDoc: SCXMLDocument,
   stateId: string,
 ): ContainerElement | null {
-  function search(container: ContainerElement): ContainerElement | null {
-    const children = getDirectChildStates(container);
-    if (children.some((c) => c["@_id"] === stateId)) return container;
-    for (const child of children) {
-      const found = search(child);
-      if (found) return found;
-    }
-    return null;
+  return findParentEntry(scxmlDoc, stateId)?.container ?? null;
+}
+
+/**
+ * Whether stateId sits directly inside a <parallel> (including the root's
+ * `__root_parallel`) — i.e. it's a region, which is always active, so the
+ * Initial State designation doesn't apply to it.
+ */
+export function isParallelRegion(
+  scxmlDoc: SCXMLDocument,
+  stateId: string,
+): boolean {
+  const entry = findParentEntry(scxmlDoc, stateId);
+  if (!entry) return false;
+  if (entry.kind === "parallel") return true;
+  if (entry.kind === "root") {
+    return asArray<any>((entry.container as any).parallel).some(
+      (p) =>
+        isRootParallel(p) &&
+        [...asArray<any>(p.state), ...asArray<any>(p.parallel)].some(
+          (r) => r["@_id"] === stateId,
+        ),
+    );
   }
-  return search(scxmlDoc.scxml);
+  return false;
 }
 
 /**
@@ -110,55 +139,40 @@ function getInitialElementTargetIds(
  * list) and/or the `<initial>` child element (older, single-target form).
  * Both are unioned since either can independently mark a state Initial.
  *
- * Once a container has been auto-wrapped (2+ Initial-marked work trees),
- * its own `@_initial` attribute normally names the synthetic <parallel> id
- * instead of any real child — that steady-state case is recovered
- * separately below, straight from the wrapper's own structure (a bare
- * region's own id, or a multi-member auto-region's own @_initial), the same
- * recovery parallel-group-normalization.ts's buildLogicalView performs when
- * deciding whether to re-wrap.
- *
- * That structural recovery is only ever a *fallback*, used when `@_initial`
- * doesn't already resolve to real ids on its own — e.g. right after
- * ToggleInitialStateCommand writes a real, already-updated token list onto
- * `@_initial` but before the next normalization pass has restructured the
- * still-wrapped <parallel> to match. In that intermediate state, a bare
- * region's mere physical presence is stale evidence, not proof it's still
- * Initial — `@_initial` naming real ids is authoritative over it.
+ * Inside a <parallel> (`kind === "parallel"`) every child is a region and
+ * always active, so every child counts as Initial. At the root, the
+ * `__root_parallel` id in `@_initial` stands for all of its regions.
  */
-export function getInitialIds(container: ContainerElement): Set<string> {
+export function getInitialIds(
+  container: ContainerElement,
+  kind: ContainerKind = "state",
+): Set<string> {
   const childIds = new Set(
     getDirectChildStates(container).map((c) => c["@_id"]),
   );
+  if (kind === "parallel") return childIds;
+
+  const rootParallels = asArray<any>((container as any).parallel).filter(isRootParallel);
+  const rootParallelIds = new Set(rootParallels.map((p) => p["@_id"]));
+  const knownIds = new Set([...childIds, ...rootParallelIds]);
 
   const result = new Set<string>();
-  let attributeResolvedRealIds = false;
+  const add = (id: string) => {
+    const rootParallel = rootParallels.find((p) => p["@_id"] === id);
+    if (rootParallel) {
+      [...asArray<any>(rootParallel.state), ...asArray<any>(rootParallel.parallel)].forEach(
+        (r) => result.add(r["@_id"]),
+      );
+    } else if (childIds.has(id)) {
+      result.add(id);
+    }
+  };
+
   const raw = (container as any)["@_initial"] as string | undefined;
-  if (raw) {
-    parseStateIdList(raw, childIds).forEach((id) => {
-      if (childIds.has(id)) {
-        result.add(id);
-        attributeResolvedRealIds = true;
-      }
-    });
+  if (typeof raw === "string" && raw) {
+    parseStateIdList(raw, knownIds).forEach(add);
   }
-  getInitialElementTargetIds(container, childIds).forEach((id) => {
-    result.add(id);
-    attributeResolvedRealIds = true;
-  });
-
-  if (attributeResolvedRealIds) return result;
-
-  asArray((container as any).parallel).forEach((parallel: any) => {
-    if (parallel[AUTO_PARALLEL_MARKER] !== "true") return;
-    asArray(parallel.state).forEach((region: any) => {
-      if (region[AUTO_REGION_MARKER] === "true") {
-        if (region["@_initial"]) result.add(region["@_initial"]);
-      } else {
-        result.add(region["@_id"]);
-      }
-    });
-  });
+  getInitialElementTargetIds(container, knownIds).forEach(add);
 
   return result;
 }
@@ -267,13 +281,17 @@ export function wouldMergeDistinctGroups(
   sourceId: string,
   targetId: string,
 ): { blocked: boolean; reason?: string } {
-  const sourceParent = findParentContainer(scxmlDoc, sourceId);
-  const targetParent = findParentContainer(scxmlDoc, targetId);
-  if (!sourceParent || !targetParent || sourceParent !== targetParent) {
+  const sourceEntry = findParentEntry(scxmlDoc, sourceId);
+  const targetEntry = findParentEntry(scxmlDoc, targetId);
+  if (!sourceEntry || !targetEntry || sourceEntry.container !== targetEntry.container) {
     return { blocked: false };
   }
+  // Two regions of a <parallel> aren't Initial groups — a transition between
+  // them is a cross-region transition, which wouldCrossParallelRegions
+  // reports with its own message.
+  if (sourceEntry.kind === "parallel") return { blocked: false };
 
-  const container = sourceParent;
+  const container = sourceEntry.container;
   const childIds = getDirectChildStates(container).map((c) => c["@_id"]);
   const initialIds = getInitialIds(container);
   const edges = getSiblingEdges(container);
@@ -301,11 +319,18 @@ export function wouldConflictIfMarkedInitial(
   scxmlDoc: SCXMLDocument,
   stateId: string,
 ): { blocked: boolean; reason?: string } {
-  const container = findParentContainer(scxmlDoc, stateId);
-  if (!container) return { blocked: false };
+  const entry = findParentEntry(scxmlDoc, stateId);
+  if (!entry) return { blocked: false };
+  if (isParallelRegion(scxmlDoc, stateId)) {
+    return {
+      blocked: true,
+      reason: `'${stateId}' is a region of a parallel state, so it is always active — the Initial State designation doesn't apply to it.`,
+    };
+  }
 
+  const { container } = entry;
   const childIds = getDirectChildStates(container).map((c) => c["@_id"]);
-  const initialIds = new Set(getInitialIds(container));
+  const initialIds = new Set(getInitialIds(container, entry.kind));
   initialIds.add(stateId);
   const edges = getSiblingEdges(container);
 
@@ -323,13 +348,17 @@ export function wouldConflictIfMarkedInitial(
   return { blocked: false };
 }
 
-/** Whether stateId currently appears in its direct parent's `initial` list. */
+/**
+ * Whether stateId currently appears in its direct parent's `initial` list.
+ * Always false for a region of a <parallel> — regions are always active, not
+ * Initial-designated.
+ */
 export function isMarkedInitial(
   scxmlDoc: SCXMLDocument,
   stateId: string,
 ): boolean {
-  const container = findParentContainer(scxmlDoc, stateId);
-  if (!container) return false;
-  return getInitialIds(container).has(stateId);
+  const entry = findParentEntry(scxmlDoc, stateId);
+  if (!entry || isParallelRegion(scxmlDoc, stateId)) return false;
+  return getInitialIds(entry.container, entry.kind).has(stateId);
 }
 

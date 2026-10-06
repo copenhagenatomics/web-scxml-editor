@@ -85,6 +85,7 @@ import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionStri
 import {
   wouldMergeDistinctGroups,
   isMarkedInitial,
+  isParallelRegion,
   wouldConflictIfMarkedInitial,
   getInitialIds,
 } from '@/lib/utils/initial-group-utils';
@@ -302,6 +303,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     stateType: 'simple' | 'compound' | 'parallel' | 'final';
     isInitial: boolean;
     canMarkInitial: boolean;
+    /** A region of a <parallel> is always active — no Initial toggle. */
+    isParallelRegion: boolean;
   } | null>(null);
 
   // Dark mode tracking for canvas theming
@@ -1358,11 +1361,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
                   let isInitialFlag = false;
                   let canMarkFlag = true;
+                  let isRegionFlag = false;
                   if (parserRef.current && scxmlContent) {
                     const parseResult = parserRef.current.parse(scxmlContent);
                     if (parseResult.success && parseResult.data) {
                       isInitialFlag = isMarkedInitial(parseResult.data, stateId);
                       canMarkFlag = !wouldConflictIfMarkedInitial(parseResult.data, stateId).blocked;
+                      isRegionFlag = isParallelRegion(parseResult.data, stateId);
                     }
                   }
 
@@ -1383,6 +1388,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     stateType: node.data.stateType,
                     isInitial: isInitialFlag,
                     canMarkInitial: canMarkFlag,
+                    isParallelRegion: isRegionFlag,
                   });
                 }
               }
@@ -2600,11 +2606,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
 
         // Check if this will be the initial state (parent has no children).
-        // hasAnyChildren also counts members hidden inside an auto-wrapped
-        // <parallel> — a plain `!parentState.state` check alone would
-        // otherwise treat an already-wrapped (non-empty) container as
-        // empty, since its own `.state` only ever holds unassigned
-        // siblings, and would spuriously mark this new sibling Initial too.
+        // hasAnyChildren also counts <parallel> children — a plain
+        // `!parentState.state` check alone would treat the root as empty
+        // once its children have moved into __root_parallel, and would
+        // spuriously mark this new sibling Initial too.
         let isInitial = false;
         if (parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
@@ -2686,7 +2691,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const found = findStateById(parseResult.data as SCXMLDocument, id);
       if (found) {
         clones.push(JSON.parse(JSON.stringify(found)));
-        if (isMarkedInitial(parseResult.data as SCXMLDocument, id)) {
+        // A region of a parallel is always active — carry it over as
+        // Initial too, so pasting 2+ regions makes the target a parallel.
+        if (
+          isMarkedInitial(parseResult.data as SCXMLDocument, id) ||
+          isParallelRegion(parseResult.data as SCXMLDocument, id)
+        ) {
           initialIds.add(id);
         }
       }
@@ -3630,6 +3640,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         stateType={selectedStateForActions?.stateType ?? 'simple'}
         isInitial={selectedStateForActions?.isInitial ?? false}
         canMarkInitial={selectedStateForActions?.canMarkInitial ?? true}
+        isParallelRegion={selectedStateForActions?.isParallelRegion ?? false}
         onToggleInitial={() => {
           if (selectedStateForActions) {
             handleToggleInitialState(selectedStateForActions.id);

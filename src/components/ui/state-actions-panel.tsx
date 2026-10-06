@@ -54,6 +54,8 @@ interface StateActionsPanelProps {
   stateType: 'simple' | 'compound' | 'parallel' | 'final';
   isInitial: boolean;
   canMarkInitial: boolean;
+  /** A region of a <parallel> is always active, so it has no Initial toggle. */
+  isParallelRegion?: boolean;
   onToggleInitial: () => void;
   onApply: (entryActions: string[], exitActions: string[]) => void;
   onApplyReactions: (actions: InternalEventActionRow[]) => void;
@@ -276,6 +278,7 @@ export function StateActionsPanel({
   stateType,
   isInitial,
   canMarkInitial,
+  isParallelRegion = false,
   onToggleInitial,
   onApply,
   onApplyReactions,
@@ -887,10 +890,12 @@ export function StateActionsPanel({
           </div>
         </div>
 
-        {/* Initial State toggle — only markable for simple/compound states.
-            Unmarking is always allowed; only marking can be blocked (it would
-            merge two Initial State groups). */}
-        {(stateType === 'simple' || stateType === 'compound') && (() => {
+        {/* Initial State toggle — markable for simple/compound/parallel
+            states (not final), except a region of a parallel state, which
+            is always active. Unmarking is always allowed; only marking can
+            be blocked (it would merge two Initial State groups). */}
+        {(stateType === 'simple' || stateType === 'compound' || stateType === 'parallel') &&
+          !isParallelRegion && (() => {
           const disabled = !isInitial && !canMarkInitial;
           const title = !isInitial && !canMarkInitial
             ? 'This state is already connected (directly or indirectly) to another Initial State — marking it would merge two Initial State groups'

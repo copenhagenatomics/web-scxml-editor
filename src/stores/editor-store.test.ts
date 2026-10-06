@@ -13,8 +13,17 @@ describe('editor-store setContent normalization', () => {
   it('wraps 2+ initial-state work trees into a real <parallel> element', () => {
     useEditorStore.getState().setContent(XML_TWO_INITIAL_GROUPS);
     const content = useEditorStore.getState().content;
-    expect(content).toContain('<parallel');
-    expect(content).toContain('viz:auto-parallel="true"');
+    expect(content).toContain('<parallel id="__root_parallel"');
+    expect(content).not.toContain('viz:auto-');
+  });
+
+  it('turns a compound state with 2+ initial-state work trees into the <parallel> itself', () => {
+    useEditorStore.getState().setContent(
+      `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="main_region"><state id="main_region" initial="A B"><state id="A"/><state id="B"/></state></scxml>`
+    );
+    const content = useEditorStore.getState().content;
+    expect(content).toContain('<parallel id="main_region"');
+    expect(content).not.toContain('<state id="main_region"');
   });
 
   it('leaves content with a single initial group byte-identical (nothing to normalize)', () => {
@@ -44,7 +53,7 @@ describe('editor-store setContent normalization', () => {
     // do with the parallel structure (e.g. pressing Enter elsewhere).
     useEditorStore.getState().setContent(XML_TWO_INITIAL_GROUPS);
     const wrapped = useEditorStore.getState().content;
-    expect(wrapped).toContain('viz:auto-parallel="true"');
+    expect(wrapped).toContain('<parallel id="__root_parallel"');
 
     useEditorStore.getState().setContent(wrapped, { immediate: true });
     expect(useEditorStore.getState().content).toBe(wrapped);

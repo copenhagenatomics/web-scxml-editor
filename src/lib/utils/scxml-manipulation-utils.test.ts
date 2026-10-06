@@ -25,6 +25,18 @@ describe('findStateById', () => {
     expect(findStateById(d, 'RegionA')?.['@_id']).toBe('RegionA');
   });
 
+  it('finds a <parallel> by its own id (e.g. a compound state converted into a <parallel>)', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        state: {
+          '@_id': 'Outer',
+          parallel: { '@_id': 'P', state: [] },
+        },
+      } as any,
+    };
+    expect(findStateById(d, 'P')?.['@_id']).toBe('P');
+  });
+
   it('finds a state nested inside a <state> child of a <parallel> element', () => {
     const d: SCXMLDocument = {
       scxml: {

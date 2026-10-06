@@ -12,7 +12,9 @@ import type {
  * Find a state element by its ID in the SCXML document. Also searches
  * inside <parallel> elements and their region <state> children, at any
  * nesting depth, so ids that only exist inside a parallel's regions are
- * still found by every mutation helper that resolves ids through this.
+ * still found by every mutation helper that resolves ids through this. A
+ * <parallel>'s own id matches too — a compound state converted into a
+ * <parallel> (parallel-group-normalization.ts) is still the user's state.
  */
 export function findStateById(
   scxmlDoc: SCXMLDocument,
@@ -46,6 +48,9 @@ export function findStateById(
     const parallelArray = Array.isArray(parallels) ? parallels : [parallels];
 
     for (const parallel of parallelArray) {
+      if (parallel['@_id'] === stateId) {
+        return parallel as unknown as StateElement;
+      }
       const found = searchInStates(parallel.state) ?? searchInParallels(parallel.parallel);
       if (found) return found;
     }

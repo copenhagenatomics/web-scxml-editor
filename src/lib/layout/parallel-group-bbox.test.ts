@@ -6,7 +6,7 @@ import {
   type NodeRect,
   type LiveNode,
 } from './parallel-group-bbox';
-import type { AutoParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
+import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
 
 function rect(id: string, x: number, y: number, width = 100, height = 60): NodeRect {
   return { id, x, y, width, height };
@@ -18,7 +18,7 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('computes the union bounding box of two single-member regions placed side by side', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     const nodeRects = new Map([
@@ -36,7 +36,7 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('computes a per-region sub-bbox for a multi-member region', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       {
         containerId: null,
         parallelId: 'P',
@@ -59,14 +59,14 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('skips a group entirely when none of its members have a known position', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['Missing'] }] },
     ];
     expect(computeParallelGroupBBoxes(groups, new Map())).toEqual([]);
   });
 
   it('ignores a region whose members are unpositioned but still includes the group if another region has positions', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       {
         containerId: null,
         parallelId: 'P',
@@ -80,7 +80,7 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('places one vertical divider line at the midpoint between two side-by-side regions', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     // A spans x=[0,100], B spans x=[300,400] — midpoint of the gap is 200.
@@ -93,7 +93,7 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('places one divider line per gap for 3+ regions, in left-to-right order regardless of input order', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       {
         containerId: null,
         parallelId: 'P',
@@ -112,7 +112,7 @@ describe('computeParallelGroupBBoxes', () => {
   });
 
   it('has no divider lines for a single-region group', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }] },
     ];
     const nodeRects = new Map([['A', rect('A', 0, 0)]]);
@@ -214,7 +214,7 @@ describe('computeRegionSeparationTranslations', () => {
   });
 
   it('returns no translations for a single-region group', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }] },
     ];
     const nodeRects = new Map([['A', rect('A', 0, 0)]]);
@@ -222,7 +222,7 @@ describe('computeRegionSeparationTranslations', () => {
   });
 
   it('leaves two already-separated, side-by-side regions untouched', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     // A=[0,100], B=[300,400] — plenty of gap already, well past the default gap.
@@ -234,7 +234,7 @@ describe('computeRegionSeparationTranslations', () => {
   });
 
   it('pushes a region right by the gap when it overlaps the previous region', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       { containerId: null, parallelId: 'P', regions: [{ memberIds: ['A'] }, { memberIds: ['B'] }] },
     ];
     // A=[0,100], B=[50,150] — B overlaps A by 50.
@@ -250,7 +250,7 @@ describe('computeRegionSeparationTranslations', () => {
   });
 
   it('pulls a region that is fully sandwiched inside another region out to a clean, non-overlapping band', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       {
         containerId: null,
         parallelId: 'P',
@@ -275,7 +275,7 @@ describe('computeRegionSeparationTranslations', () => {
   });
 
   it('orders 3+ regions by current leftmost x and cumulatively separates them', () => {
-    const groups: AutoParallelGroupInfo[] = [
+    const groups: ParallelGroupInfo[] = [
       {
         containerId: null,
         parallelId: 'P',

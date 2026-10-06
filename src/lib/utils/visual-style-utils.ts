@@ -86,10 +86,8 @@ export function computeVisualStyles(
           styles.backgroundColor = '#fef2f2'; // red-50
           break;
         case 'compound':
+        case 'parallel': // same fill as compound; the orange border tells them apart
           styles.backgroundColor = '#faf5ff'; // purple-50
-          break;
-        case 'parallel':
-          styles.backgroundColor = '#fed7aa'; // orange-200 - more vibrant for parallel states
           break;
         default:
           styles.backgroundColor = '#f8fafc'; // slate-50
