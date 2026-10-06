@@ -1738,6 +1738,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // alone can't distinguish those two cases.
   const hasParsedOnceRef = React.useRef(false);
 
+  // PDF export readiness: true only once the LATEST parse generation has
+  // committed to parsedData (allNodesRef is only refreshed on the render
+  // after setParsedData, hence the effect). Cleared whenever a new async
+  // parse starts, so an export begun mid-ELK-layout waits for it instead of
+  // capturing the previous document's nodes. A freshly mounted diagram — e.g.
+  // export started from the Code tab — is likewise not ready until its first
+  // parse lands.
+  const committedParseGenerationRef = React.useRef(0);
+  const exportReadyRef = React.useRef(false);
+  React.useEffect(() => {
+    exportReadyRef.current =
+      hasParsedOnceRef.current &&
+      committedParseGenerationRef.current === parseGenerationRef.current;
+  }, [parsedData]);
+
   // ==================== WAYPOINT HANDLERS ====================
   const handleWaypointDrag = React.useCallback(
     (edgeId: string, index: number, x: number, y: number) => {
@@ -2049,11 +2064,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         metadataManager: null,
       });
       hasParsedOnceRef.current = true;
+      committedParseGenerationRef.current = parseGenerationRef.current;
       return;
     }
 
     let isMounted = true; // Cleanup flag to prevent state updates after unmount
     const myGeneration = ++parseGenerationRef.current;
+    exportReadyRef.current = false;
 
     async function parseAndConvert() {
       try {
@@ -2377,6 +2394,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               metadataManager,
             });
             hasParsedOnceRef.current = true;
+            committedParseGenerationRef.current = myGeneration;
           }
         } else {
           console.warn('SCXML parsing failed:', parseResult.errors);
@@ -2388,6 +2406,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               metadataManager: null,
             });
             hasParsedOnceRef.current = true;
+            committedParseGenerationRef.current = myGeneration;
           }
         }
       } catch (error) {
@@ -2400,6 +2419,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             metadataManager: null,
           });
           hasParsedOnceRef.current = true;
+          committedParseGenerationRef.current = myGeneration;
         }
       }
     }
@@ -3090,14 +3110,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   parallelDividerXsRef.current = parallelDividerXs;
   const canvasDarkRef = React.useRef(canvasDark);
   canvasDarkRef.current = canvasDark;
-  // True once the first async parse/ELK layout has committed (allNodesRef is
-  // only refreshed on the render after setParsedData, hence an effect). A
-  // freshly mounted diagram — e.g. export started from the Code tab — has no
-  // nodes until then.
-  const exportReadyRef = React.useRef(false);
-  React.useEffect(() => {
-    exportReadyRef.current = hasParsedOnceRef.current;
-  }, [parsedData]);
   const setDiagramExportSource = useDiagramExportStore((state) => state.setSource);
   React.useEffect(() => {
     setDiagramExportSource({

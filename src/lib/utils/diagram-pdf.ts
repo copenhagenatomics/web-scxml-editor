@@ -31,7 +31,7 @@ import {
 
 /** What the mounted VisualDiagram exposes for exporting (see diagram-export-store). */
 export interface DiagramExportSource {
-  /** False until the diagram's first async parse/layout has rendered. */
+  /** False while the latest async parse/layout hasn't rendered yet (including the first one). */
   isReady: () => boolean;
   /** The `.react-flow__viewport` element (null if not mounted). */
   getViewportElement: () => HTMLElement | null;

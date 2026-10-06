@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useDiagramExportStore } from '@/stores/diagram-export-store';
 
 // Covers the app while "Export PDF" steps the canvas through every hierarchy
@@ -7,6 +8,22 @@ import { useDiagramExportStore } from '@/stores/diagram-export-store';
 // outside `.react-flow__viewport`, so it never appears in the captured PDF.
 export function PdfExportOverlay() {
   const progress = useDiagramExportStore((state) => state.progress);
+  const isExporting = progress !== null;
+
+  // The overlay only stops pointer input; the app's shortcuts (undo/redo,
+  // Delete, paste…) are window keydown listeners. Swallow every keydown in
+  // the window's capture phase — which runs before all of them — so nothing
+  // can change the SCXML while pages are being captured.
+  useEffect(() => {
+    if (!isExporting) return;
+    const blockKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', blockKey, true);
+    return () => window.removeEventListener('keydown', blockKey, true);
+  }, [isExporting]);
+
   if (!progress) return null;
 
   return (
