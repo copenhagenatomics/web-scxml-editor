@@ -79,6 +79,7 @@ import { InitialGroupConflictBanner } from './initial-group-conflict-banner';
 import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
+import { useDiagramExportStore } from '@/stores/diagram-export-store';
 import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
 import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString, mergeHiddenActions } from '@/lib/utils/time-transition';
 import {
@@ -193,7 +194,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   historyActionType,
 }) => {
   // ==================== STATE MANAGEMENT ====================
-  const { fitView, screenToFlowPosition } = useReactFlow();
+  const { fitView, screenToFlowPosition, getEdges } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   // Set right before setNodes(enhancedNodes) on a full re-parse; consumed by
@@ -3081,6 +3082,42 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // some unrelated event (e.g. deselecting) happens to resync nodes from a
   // fresh SCXML re-parse — see computeLiveParallelDividerXs.
   const parallelDividerXs = React.useMemo(() => computeLiveParallelDividerXs(nodes), [nodes]);
+
+  // Expose this canvas to the toolbar's "Export PDF" action. Getters read
+  // refs so the registered source stays valid while the export navigates
+  // through hierarchy levels (which re-renders this component).
+  const parallelDividerXsRef = React.useRef(parallelDividerXs);
+  parallelDividerXsRef.current = parallelDividerXs;
+  const canvasDarkRef = React.useRef(canvasDark);
+  canvasDarkRef.current = canvasDark;
+  // True once the first async parse/ELK layout has committed (allNodesRef is
+  // only refreshed on the render after setParsedData, hence an effect). A
+  // freshly mounted diagram — e.g. export started from the Code tab — has no
+  // nodes until then.
+  const exportReadyRef = React.useRef(false);
+  React.useEffect(() => {
+    exportReadyRef.current = hasParsedOnceRef.current;
+  }, [parsedData]);
+  const setDiagramExportSource = useDiagramExportStore((state) => state.setSource);
+  React.useEffect(() => {
+    setDiagramExportSource({
+      isReady: () => exportReadyRef.current,
+      getViewportElement: () =>
+        reactFlowWrapperRef.current?.querySelector<HTMLElement>('.react-flow__viewport') ?? null,
+      getAllNodes: () => allNodesRef.current,
+      getEdgeCount: () => getEdges().length,
+      getDividerXs: () => parallelDividerXsRef.current,
+      isDark: () => canvasDarkRef.current,
+      clearSelection: () => {
+        setActiveStates(new Set());
+        setSelectedTransitions(new Set());
+        setSelectedEdgeForEdit(null);
+        setSelectedStateForActions(null);
+        setHoveredEdge(null);
+      },
+    });
+    return () => setDiagramExportSource(null);
+  }, [setDiagramExportSource, getEdges]);
 
   // Applies the latest parsed SCXML (enhancedNodes/hierarchyFilteredEdges)
   // to the live `nodes`/`edges` state — the same application the main
