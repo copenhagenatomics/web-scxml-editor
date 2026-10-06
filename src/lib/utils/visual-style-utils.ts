@@ -58,13 +58,9 @@ export function computeVisualStyles(
         styles.borderStyle = 'double';
         break;
       case 'compound':
+      case 'parallel': // same look as compound
         styles.borderColor = '#a855f7'; // purple-500
         styles.borderStyle = 'dashed';
-        break;
-      case 'parallel':
-        styles.borderColor = '#ea580c'; // orange-600
-        styles.borderStyle = 'dashed';
-        styles.borderWidth = 3;
         break;
       default: // simple
         styles.borderColor = '#64748b'; // slate-500
@@ -86,7 +82,7 @@ export function computeVisualStyles(
           styles.backgroundColor = '#fef2f2'; // red-50
           break;
         case 'compound':
-        case 'parallel': // same fill as compound; the orange border tells them apart
+        case 'parallel': // same fill as compound
           styles.backgroundColor = '#faf5ff'; // purple-50
           break;
         default:
