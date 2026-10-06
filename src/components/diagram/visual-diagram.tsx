@@ -18,6 +18,7 @@ import {
   resolveCarriedOverInitialIds,
   detachElementFromParent,
   findElementById,
+  collectExistingIds,
   isDescendantOf,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
@@ -2546,17 +2547,17 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
 
     try {
-      let newStateId = 'state_1';
-      let counter = 1;
-      const existingIds = new Set(parsedData.nodes.map((n) => n.id));
-      while (existingIds.has(newStateId)) {
-        counter++;
-        newStateId = `state_${counter}`;
-      }
-
       const parseResult = parserRef.current?.parse(scxmlContent);
       if (parseResult?.success && parseResult.data) {
         const scxmlDoc = parseResult.data;
+
+        let newStateId = 'state_1';
+        let counter = 1;
+        const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
+        while (existingIds.has(newStateId)) {
+          counter++;
+          newStateId = `state_${counter}`;
+        }
         let parentId: string | undefined = undefined;
 
         // Only set parentId if we're inside a specific parent (hierarchy navigation)
@@ -2753,7 +2754,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         ? getInitialIds(targetContainer, currentParentId ? 'state' : 'root').size === 0
         : false;
 
-    const existingIds = new Set(parsedData.nodes.map((n) => n.id));
+    const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
     const combinedIdMap = new Map<string, string>();
     const clones: StateElement[] = [];
 

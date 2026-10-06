@@ -13,6 +13,7 @@ import {
   findElementById,
   addStateToDocument,
   detachElementFromParent,
+  collectExistingIds,
 } from './scxml-manipulation-utils';
 
 describe('findStateById', () => {
@@ -535,6 +536,45 @@ describe('<parallel> elements keep their tag through lookup, add, detach and clo
     const cloneRegion = (clone as any).state[0];
     expect(cloneRegion['@_initial']).toBe('A_copy');
     expect(cloneRegion.state[0].transition['@_target']).toBe('A2_copy');
+  });
+});
+
+describe('collectExistingIds', () => {
+  const d = (): SCXMLDocument =>
+    ({
+      scxml: {
+        '@_initial': '__root_parallel',
+        parallel: {
+          '@_id': '__root_parallel',
+          state: [
+            {
+              '@_id': 'R1',
+              '@_initial': 'X',
+              state: { '@_id': 'X' },
+              parallel: { '@_id': 'P', state: [{ '@_id': 'P_region', state: { '@_id': 'Y' } }, { '@_id': 'Z' }] },
+              history: { '@_id': 'H' },
+            },
+            { '@_id': 'R2', final: { '@_id': 'Done' } },
+          ],
+        },
+      },
+    }) as any;
+
+  it('includes ids that are never rendered as nodes (regions, __root_parallel) and every element kind', () => {
+    const ids = collectExistingIds(d(), [{ id: 'note_1' }]);
+    for (const id of ['__root_parallel', 'R1', 'R2', 'X', 'P', 'P_region', 'Y', 'Z', 'H', 'Done', 'note_1']) {
+      expect(ids.has(id)).toBe(true);
+    }
+  });
+
+  it('makes a copied <parallel> get fresh ids for its regions instead of reusing the originals (no duplicates)', () => {
+    const doc = d();
+    const source = findElementById(doc, 'P')!.element;
+    const copied = JSON.parse(JSON.stringify(source));
+    // Rendered nodes alone would not include the hidden region P_region.
+    const { idMap } = cloneStateSubtreeWithFreshIds(copied, collectExistingIds(doc, [{ id: 'Y' }]), 0, 0);
+    expect(idMap.get('P_region')).toBe('P_region_copy');
+    expect(idMap.get('P')).toBe('P_copy');
   });
 });
 

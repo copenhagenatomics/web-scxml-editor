@@ -7,6 +7,7 @@ import type {
   OnEntryElement,
   OnExitElement,
 } from '@/types/scxml';
+import { collectStateIds } from '@/lib/validators/state-validator';
 
 /** Which tag an element is filed under in its parent: `.state` or `.parallel`. */
 export type StateTag = 'state' | 'parallel';
@@ -44,6 +45,23 @@ export function findElementById(
     return null;
   }
   return search(scxmlDoc.scxml);
+}
+
+/**
+ * Every id already taken — each <state>/<parallel>/<final>/<history> anywhere
+ * in the document, plus any extra ids (e.g. rendered diagram nodes such as
+ * sticky notes). Use this, not just the rendered nodes, when minting a new
+ * id: some elements are never rendered as nodes (the regions of a
+ * <parallel> are drawn as columns, and `__root_parallel` is invisible), so
+ * a node-only check could reuse one of their ids.
+ */
+export function collectExistingIds(
+  scxmlDoc: SCXMLDocument,
+  extraNodes: ReadonlyArray<{ id: string }> = []
+): Set<string> {
+  const ids = new Set<string>(extraNodes.map((n) => n.id));
+  collectStateIds(scxmlDoc.scxml, ids);
+  return ids;
 }
 
 /**

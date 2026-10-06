@@ -106,6 +106,7 @@ None dedicated — analysis is recomputed on demand, not cached. Touchpoints: `u
 - Do not treat `isRootParallel` as sufficient on its own — it must only apply to direct children of `<scxml>` (pass `'root'` as the container kind). A nested `<parallel>` sharing the id is ordinary (confirmed in PR review; regression tests in `parallel-group-normalization.test.ts` / `state-registry.test.ts`).
 - Do not let regions take part in Initial-group analysis: they're always active, never Initial-designated (`groupAnalysisKind`, `isParallelRegion`).
 - Do not move, copy or re-insert a state through `.state` only — use the tag-preserving helpers in `scxml-manipulation-utils.ts`, or a `<parallel>` silently becomes a `<state>`.
+- Do not check a new id against the rendered diagram nodes alone — regions and `__root_parallel` are never rendered, so their ids would be reused. Use `collectExistingIds(scxmlDoc, nodes)` (`scxml-manipulation-utils.ts`), as paste and add-state do (found in PR review: copying a `<parallel>` duplicated its region ids).
 
 ## Previous design decisions
 
