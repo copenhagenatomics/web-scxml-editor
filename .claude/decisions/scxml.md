@@ -237,7 +237,7 @@ Inferred behavior.
 Decision #3 lets multiple disconnected Initial-State work trees exist at one hierarchy level, but treats this purely as flat, unrelated siblings at the document level — it establishes the *connectivity* rule, not the *concurrency* semantics real SCXML `<parallel>` implies. A prior attempt to give this real `<parallel>`/region structure (commit `801145d`) was implemented and then reverted (`bf0ab49`).
 
 ### Decision
-The moment a container has 2+ distinct Initial-marked work trees, the editor restructures the actual document (not a display-only or export-only view) into a real `<parallel>` element — one region per work tree, a single-member tree used bare, a 2+-member tree wrapped in a synthetic region `<state>`. The synthetic `<parallel>`/region elements are marked `viz:auto-parallel="true"`/`viz:auto-region="true"` so this is distinguishable from a hand-authored `<parallel>`, which is never touched. If the container later drops back below 2 groups, it is symmetrically unwrapped back to flat siblings — there is no one-way "once parallel, always parallel" ratchet.
+The moment a container has 2+ distinct Initial-marked work trees, the editor restructures the actual document (not a display-only or export-only view) into a real `<parallel>` element — one region per work tree, each wrapped in its own synthetic region `<state id="{initialId}_region">` (see #11 — a single-member tree was originally left bare; that was superseded). The synthetic `<parallel>`/region elements are marked `viz:auto-parallel="true"`/`viz:auto-region="true"` so this is distinguishable from a hand-authored `<parallel>`, which is never touched. If the container later drops back below 2 groups, it is symmetrically unwrapped back to flat siblings — there is no one-way "once parallel, always parallel" ratchet.
 
 ### Reason
 `docs/parallel-states-requirement.md`'s "Support for N-Parallel Machines" phase calls for genuine parallel-machine semantics, not just a visual arrangement of disconnected trees — decision #3 alone (connectivity-only) does not satisfy that on its own. The prior `801145d` attempt shows this was tried once already; per the user's explicit direction this reintroduction is deliberately scoped **narrower** than that attempt — automatic-grouping-triggered only, with the diagram kept flattened/non-drillable and no visible wrapper box, rather than a general manual "convert to parallel" feature with its own visible state box.
@@ -253,6 +253,30 @@ The moment a container has 2+ distinct Initial-marked work trees, the editor res
 
 ### Evidence
 `src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/parallel-group-markers.ts`, `src/stores/editor-store.ts` (`normalizeContent`, the single choke point), `docs/parallel-states-requirement.md`, commits `801145d`/`bf0ab49`.
+
+### Status
+Accepted (amended by #11 — the "single-member tree used bare" clause no longer holds).
+
+---
+
+## 11. Every auto-wrapped `<parallel>` region — including a single-member one — gets its own `*_region` wrapper state; a `<parallel>`'s direct children are never bare leaf states
+
+### Context
+Decision #10's original implementation gave a 2+-member work tree its own synthetic `viz:auto-region="true"` wrapper `<state>` (since flat, mutually-exclusive siblings can't sit directly inside `<parallel>` without changing their meaning to "concurrently active"), but left a single-member work tree bare — that member's own `<state>` element was used directly as the region, with no wrapper. The user explicitly requested a single, uniform structure instead: every region, regardless of member count, wrapped in its own `<state id="{initialId}_region" initial="{initialId}">` containing the actual member(s).
+
+### Decision
+`applyWrapDecision` (`src/lib/utils/parallel-group-normalization.ts`) now always synthesizes a `viz:auto-region="true"` wrapper for every region of an auto-wrapped `<parallel>`, whether the underlying work tree has one member or several — `<parallel>`'s direct children are never bare leaf states. Scope is deliberately narrow: this applies only to the app's own auto-generated `<parallel>`/region structure (decision #10's normalization). A hand-authored `<parallel>` (no `viz:auto-parallel` marker) is unaffected — per #10's existing constraint, it is never touched by this logic, so a user-typed/pasted `<parallel>` with a bare leaf child is left exactly as written, with no live-blocking or static-validator enforcement added for that case.
+
+### Reason
+Explicit user request, stated with a concrete example (`<parallel><state id="state_1_region" initial="state_1"><state id="state_1"/></state>...</parallel>`) and an explicit enforcement instruction ("do not generate direct leaf children of `<parallel>`"). Scoping it to auto-generated structure only (rather than also policing hand-authored `<parallel>` content) was a deliberate choice confirmed with the user, preserving #10's existing "never touch hand-authored `<parallel>`" constraint rather than reversing it.
+
+### Constraints
+- Reading (not writing) still tolerates the old bare-single-member shape: `buildLogicalView`'s `isAutoRegion()` check, and the equivalent checks in `state-registry.ts`'s `collectEffectiveStateChildren`, `initial-group-utils.ts`, and `layout-positioning.ts`'s `isInitialViaAutoParallel`, all still have an `else` branch treating an unwrapped region as a single-member region. This is a deliberate one-time-migration path, not dead code: a document saved before this decision (or one whose `viz:auto-parallel` marker was hand-added without a per-region wrapper) round-trips correctly and gets re-wrapped into the current shape the next time `normalizeParallelGroups` runs — normalization always runs on load (`setFileInfo`) and on every content mutation (`setContent`), so this transient state is never user-visible for long.
+- `wouldCrossParallelRegions` (`parallel-region-connection-validation.ts`) already handled both bare and wrapped regions generically (it derives the region id from the ancestor chain rather than assuming a fixed depth), specifically because a hand-authored `<parallel>` can still have a bare region — no change was needed there.
+- Does not extend to hand-authored `<parallel>` elements — do not add a validator or live-editing guard that flags a bare leaf child under a hand-authored `<parallel>` without a fresh, explicit decision to do so; that would reverse #10's "never touch hand-authored content" constraint, which this decision was deliberately scoped to preserve.
+
+### Evidence
+`src/lib/utils/parallel-group-normalization.ts` (`applyWrapDecision`), `src/lib/utils/parallel-group-normalization.test.ts`, conversation request citing the exact example above.
 
 ### Status
 Accepted.

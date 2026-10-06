@@ -79,6 +79,7 @@ import { InitialGroupConflictBanner } from './initial-group-conflict-banner';
 import { useIsDark } from '@/lib/theme/use-is-dark';
 import { usePanelStore } from '@/stores/panel-store';
 import { useEditorStore } from '@/stores/editor-store';
+import { useDiagramExportStore } from '@/stores/diagram-export-store';
 import { buildInitialChildByParent } from '@/lib/utils/hierarchy-initial-info';
 import { findTimeEventToken, resolveTimeEventDisplay, isTimerGeneratedActionString, mergeHiddenActions } from '@/lib/utils/time-transition';
 import {
@@ -193,7 +194,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   historyActionType,
 }) => {
   // ==================== STATE MANAGEMENT ====================
-  const { fitView, screenToFlowPosition } = useReactFlow();
+  const { fitView, screenToFlowPosition, getEdges } = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   // Set right before setNodes(enhancedNodes) on a full re-parse; consumed by
@@ -1338,7 +1339,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
                       if (a.startsWith('assign|')) {
                         const parts = a.split('|');
-                        return [{ type: 'assign', location: parts[1] || '', expr: parts[2] || '' }];
+                        return [{ type: 'assign', location: parts[1] || '', expr: parts.slice(2).join('|') }];
                       }
                       if (a.startsWith('send|')) {
                         const parts = a.split('|');
@@ -1737,6 +1738,21 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // alone can't distinguish those two cases.
   const hasParsedOnceRef = React.useRef(false);
 
+  // PDF export readiness: true only once the LATEST parse generation has
+  // committed to parsedData (allNodesRef is only refreshed on the render
+  // after setParsedData, hence the effect). Cleared whenever a new async
+  // parse starts, so an export begun mid-ELK-layout waits for it instead of
+  // capturing the previous document's nodes. A freshly mounted diagram — e.g.
+  // export started from the Code tab — is likewise not ready until its first
+  // parse lands.
+  const committedParseGenerationRef = React.useRef(0);
+  const exportReadyRef = React.useRef(false);
+  React.useEffect(() => {
+    exportReadyRef.current =
+      hasParsedOnceRef.current &&
+      committedParseGenerationRef.current === parseGenerationRef.current;
+  }, [parsedData]);
+
   // ==================== WAYPOINT HANDLERS ====================
   const handleWaypointDrag = React.useCallback(
     (edgeId: string, index: number, x: number, y: number) => {
@@ -2048,11 +2064,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         metadataManager: null,
       });
       hasParsedOnceRef.current = true;
+      committedParseGenerationRef.current = parseGenerationRef.current;
       return;
     }
 
     let isMounted = true; // Cleanup flag to prevent state updates after unmount
     const myGeneration = ++parseGenerationRef.current;
+    exportReadyRef.current = false;
 
     async function parseAndConvert() {
       try {
@@ -2376,6 +2394,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               metadataManager,
             });
             hasParsedOnceRef.current = true;
+            committedParseGenerationRef.current = myGeneration;
           }
         } else {
           console.warn('SCXML parsing failed:', parseResult.errors);
@@ -2387,6 +2406,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               metadataManager: null,
             });
             hasParsedOnceRef.current = true;
+            committedParseGenerationRef.current = myGeneration;
           }
         }
       } catch (error) {
@@ -2399,6 +2419,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             metadataManager: null,
           });
           hasParsedOnceRef.current = true;
+          committedParseGenerationRef.current = myGeneration;
         }
       }
     }
@@ -3081,6 +3102,34 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // some unrelated event (e.g. deselecting) happens to resync nodes from a
   // fresh SCXML re-parse — see computeLiveParallelDividerXs.
   const parallelDividerXs = React.useMemo(() => computeLiveParallelDividerXs(nodes), [nodes]);
+
+  // Expose this canvas to the toolbar's "Export PDF" action. Getters read
+  // refs so the registered source stays valid while the export navigates
+  // through hierarchy levels (which re-renders this component).
+  const parallelDividerXsRef = React.useRef(parallelDividerXs);
+  parallelDividerXsRef.current = parallelDividerXs;
+  const canvasDarkRef = React.useRef(canvasDark);
+  canvasDarkRef.current = canvasDark;
+  const setDiagramExportSource = useDiagramExportStore((state) => state.setSource);
+  React.useEffect(() => {
+    setDiagramExportSource({
+      isReady: () => exportReadyRef.current,
+      getViewportElement: () =>
+        reactFlowWrapperRef.current?.querySelector<HTMLElement>('.react-flow__viewport') ?? null,
+      getAllNodes: () => allNodesRef.current,
+      getEdgeCount: () => getEdges().length,
+      getDividerXs: () => parallelDividerXsRef.current,
+      isDark: () => canvasDarkRef.current,
+      clearSelection: () => {
+        setActiveStates(new Set());
+        setSelectedTransitions(new Set());
+        setSelectedEdgeForEdit(null);
+        setSelectedStateForActions(null);
+        setHoveredEdge(null);
+      },
+    });
+    return () => setDiagramExportSource(null);
+  }, [setDiagramExportSource, getEdges]);
 
   // Applies the latest parsed SCXML (enhancedNodes/hierarchyFilteredEdges)
   // to the live `nodes`/`edges` state — the same application the main

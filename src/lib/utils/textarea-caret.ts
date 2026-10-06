@@ -45,7 +45,11 @@ export function getCaretCoordinates(
 
     const top = marker.offsetTop - textarea.scrollTop;
     const left = marker.offsetLeft - textarea.scrollLeft;
-    const height = marker.offsetHeight;
+    // The marker holds the rest of the text (so line-wrapping matches the
+    // textarea), which makes its offsetHeight span every wrapped line after
+    // the caret. Use one line's height instead when the line-height is known.
+    const lineHeight = parseFloat(style.lineHeight);
+    const height = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : marker.offsetHeight;
 
     if (top === 0 && left === 0 && height === 0) return null;
     return { top, left, height };

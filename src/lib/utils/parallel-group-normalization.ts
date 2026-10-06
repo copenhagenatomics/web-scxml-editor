@@ -6,18 +6,21 @@
  * element — one region per work tree — so the document itself (not just a
  * display/export view) reflects real SCXML <parallel> semantics.
  *
- * A work tree with a single member becomes a bare region (that member's own
- * <state> element, used directly as a region). A work tree with 2+ members
- * (connected via sibling transitions) is wrapped in a synthetic region
- * <state marked viz:auto-region="true">, since <parallel>'s direct children
- * must each be a single region, and flat mutually-exclusive siblings can't
- * sit directly inside <parallel> without changing their meaning to
- * "concurrently active."
+ * Every work tree, whether it has a single member or 2+ members (connected
+ * via sibling transitions), is wrapped in its own synthetic region
+ * <state id="{initialId}_region" marked viz:auto-region="true">, so a
+ * <parallel>'s direct children are never bare leaf states — each region is
+ * always its own wrapper state containing the actual member(s), never the
+ * member itself sitting directly under <parallel>.
  *
  * The synthetic <parallel>/region wrapper elements are marked with
  * viz:auto-parallel="true" / viz:auto-region="true" so this module (and the
  * diagram's flattening logic) can tell them apart from a hand-authored
  * <parallel> the user typed or pasted directly — those are never touched.
+ * Reading an older document that still has a bare (unwrapped) single-member
+ * region from before this rule existed is tolerated (buildLogicalView below
+ * recovers its member either way) — it gets wrapped into the current shape
+ * the next time normalization runs.
  *
  * Pure, operates on the parsed SCXMLDocument object model, recomputes
  * everything fresh on every call (nothing is persisted beyond the document
@@ -153,10 +156,83 @@ function autoParallelIdFor(containerId: string | null): string {
 }
 
 /**
+ * Recursively collect every `@_id` in the document, seeded once per
+ * normalizeParallelGroups call and threaded through the recursion so a
+ * freshly minted `{id}_region` / `{id}_parallel` can be checked against
+ * every other id in the document, not just this container's own children —
+ * otherwise a synthetic wrapper id can silently collide with an unrelated,
+ * hand-authored sibling elsewhere that happens to share that literal name.
+ *
+ * Counts occurrences rather than just presence: a document can already hold
+ * a duplicate id (e.g. from the older collision-prone wrapping), and
+ * releasing a wrapper's own id must not also erase the record of the other
+ * element sharing it — see releaseId.
+ */
+type IdCounts = Map<string, number>;
+
+function addId(ids: IdCounts, id: string): void {
+  ids.set(id, (ids.get(id) ?? 0) + 1);
+}
+
+/** Release one occurrence of `id`, keeping it claimed if another element still holds it. */
+function releaseId(ids: IdCounts, id: string): void {
+  const count = ids.get(id) ?? 0;
+  if (count <= 1) ids.delete(id);
+  else ids.set(id, count - 1);
+}
+
+function collectAllIds(
+  container: Container | ParallelElement,
+  ids: IdCounts = new Map(),
+): IdCounts {
+  asArray(container.state).forEach((s) => {
+    if (s['@_id']) addId(ids, s['@_id']);
+    collectAllIds(s, ids);
+  });
+  // Recurse into the <parallel> itself (not just its <state> children) so its
+  // own <history> children are covered too.
+  asArray(container.parallel).forEach((p) => {
+    if (p['@_id']) addId(ids, p['@_id']);
+    collectAllIds(p, ids);
+  });
+  // <final>/<history> are leaf state-like elements whose ids share the same
+  // document-wide namespace — e.g. a root <final id="A_region"> must stop a
+  // synthetic region for Initial state A from reusing that id.
+  const leafChildren = [
+    ...asArray((container as any).final),
+    ...asArray((container as any).history),
+  ] as Array<{ '@_id'?: string }>;
+  leafChildren.forEach((child) => {
+    if (child['@_id']) addId(ids, child['@_id']);
+  });
+  return ids;
+}
+
+/**
+ * Return `candidate` if it isn't already claimed, otherwise the same id with
+ * the smallest `_2`, `_3`, ... suffix that isn't. Claims whatever id it
+ * returns by adding it to `usedIds`.
+ */
+function claimId(candidate: string, usedIds: IdCounts): string {
+  if (!usedIds.has(candidate)) {
+    addId(usedIds, candidate);
+    return candidate;
+  }
+  let n = 2;
+  let next = `${candidate}_${n}`;
+  while (usedIds.has(next)) {
+    n++;
+    next = `${candidate}_${n}`;
+  }
+  addId(usedIds, next);
+  return next;
+}
+
+/**
  * Apply this container's own wrap/unwrap decision (not recursive — callers
  * recurse separately). Returns whether the container's own shape changed.
  */
-function applyWrapDecision(container: Container, containerId: string | null): boolean {
+function applyWrapDecision(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
   const { flat, initialIds, autoParallel, otherParallels } = buildLogicalView(container);
   const flatIds = flat.map((s) => s['@_id']);
   const edges = siblingEdgesFor(flat);
@@ -182,6 +258,19 @@ function applyWrapDecision(container: Container, containerId: string | null): bo
     return false;
   }
 
+  // This container's own previous auto-wrap ids (if any) are about to be
+  // regenerated from the same initialIds, so they're not real collisions —
+  // release them first so claimId doesn't mistake a wrapper being replaced
+  // by itself for a clash and needlessly suffix it every single pass. Only
+  // this wrapper's own occurrence is released, so an unrelated element that
+  // already shares the id still counts as a clash and the wrapper migrates.
+  if (autoParallel) {
+    releaseId(usedIds, autoParallel['@_id']);
+    asArray(autoParallel.state).forEach((region) => {
+      if (isAutoRegion(region)) releaseId(usedIds, region['@_id']);
+    });
+  }
+
   const before = stableStringify({
     initial: (container as any)['@_initial'],
     hasInitialEl: !!(container as any).initial,
@@ -190,20 +279,16 @@ function applyWrapDecision(container: Container, containerId: string | null): bo
   });
 
   if (groups.size >= 2) {
-    const parallelId = autoParallelIdFor(containerId);
+    const parallelId = claimId(autoParallelIdFor(containerId), usedIds);
     const regions: StateElement[] = [];
     groups.forEach((members, initialId) => {
-      if (members.length === 1) {
-        regions.push(members[0]);
-      } else {
-        const region: StateElement = {
-          '@_id': autoRegionId(initialId),
-          '@_initial': initialId,
-          state: members,
-        } as StateElement;
-        (region as any)[AUTO_REGION_MARKER] = 'true';
-        regions.push(region);
-      }
+      const region: StateElement = {
+        '@_id': claimId(autoRegionId(initialId), usedIds),
+        '@_initial': initialId,
+        state: members.length === 1 ? members[0] : members,
+      } as StateElement;
+      (region as any)[AUTO_REGION_MARKER] = 'true';
+      regions.push(region);
     });
 
     const parallelEl: ParallelElement = {
@@ -245,29 +330,34 @@ function applyWrapDecision(container: Container, containerId: string | null): bo
  * children (auto-wrapped or hand-authored — a region can independently grow
  * its own 2+ work trees), then this container's own wrap/unwrap decision.
  */
-function normalizeContainer(container: Container, containerId: string | null): boolean {
+function normalizeContainer(container: Container, containerId: string | null, usedIds: IdCounts): boolean {
   let changed = false;
 
   asArray(container.state).forEach((child) => {
-    if (normalizeContainer(child, child['@_id'])) changed = true;
+    if (normalizeContainer(child, child['@_id'], usedIds)) changed = true;
   });
 
   asArray(container.parallel).forEach((parallel) => {
     asArray(parallel.state).forEach((region) => {
-      if (normalizeContainer(region, region['@_id'])) changed = true;
+      if (normalizeContainer(region, region['@_id'], usedIds)) changed = true;
     });
   });
 
   // This container's own wrap/unwrap decision (a no-op, including for a
   // hand-authored <parallel> child with no viz:auto-parallel marker, bails
   // out immediately inside applyWrapDecision without touching anything).
-  if (applyWrapDecision(container, containerId)) changed = true;
+  if (applyWrapDecision(container, containerId, usedIds)) changed = true;
 
   return changed;
 }
 
 export function normalizeParallelGroups(scxmlDoc: SCXMLDocument): { changed: boolean } {
-  const changed = normalizeContainer(scxmlDoc.scxml, null);
+  // Seeded once from the whole (pre-mutation) document and threaded through
+  // the recursion so every freshly minted wrapper id is checked — and
+  // claimed — against every other id in the document, not just its own
+  // container's children. See collectAllIds / claimId above.
+  const usedIds = collectAllIds(scxmlDoc.scxml);
+  const changed = normalizeContainer(scxmlDoc.scxml, null, usedIds);
   return { changed };
 }
 
