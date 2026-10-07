@@ -18,7 +18,7 @@ import {
   type NodeRect,
 } from '@/lib/layout/parallel-group-bbox';
 import type { ParallelGroupInfo } from '@/lib/utils/parallel-group-normalization';
-import { getChildEntries, isRootParallel, type ChildEntry } from '@/lib/utils/parallel-structure';
+import { findTransparentParallel, getChildEntries, type ChildEntry } from '@/lib/utils/parallel-structure';
 import { getInitialIds } from '@/lib/utils/initial-group-utils';
 import type { StateRegistryEntry } from './state-registry';
 
@@ -503,10 +503,8 @@ export function isInitialState(
       }
     }
 
-    const rootRegions = (Array.isArray(rootScxml?.parallel) ? rootScxml.parallel : rootScxml?.parallel ? [rootScxml.parallel] : [])
-      .filter(isRootParallel)
-      .flatMap((p: any) => getChildEntries(p));
-    return isInitialInRegionOf(stateId, rootRegions);
+    const rootParallel = findTransparentParallel(rootScxml, 'root');
+    return isInitialInRegionOf(stateId, rootParallel ? getChildEntries(rootParallel) : []);
   }
 
   // Find parent state and check its (possibly multiple) initial ids
@@ -537,7 +535,10 @@ export function isInitialState(
       if (parentInfo.elementType === 'parallel') {
         return isInitialInRegionOf(stateId, getChildEntries(parentInfo.state));
       }
-      return false;
+      // A compound state's work trees may live in its transparent
+      // `{id}__parallel` (see parallel-group-normalization.ts).
+      const inner = findTransparentParallel(parentInfo.state, 'state');
+      return !!inner && isInitialInRegionOf(stateId, getChildEntries(inner));
     }
   }
 

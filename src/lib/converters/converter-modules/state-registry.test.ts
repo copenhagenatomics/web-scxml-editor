@@ -171,3 +171,33 @@ describe('registerAllStates — __root_parallel is only transparent directly und
     expect(parentMap.get('R1')).toBe('__root_parallel');
   });
 });
+
+describe('registerAllStates — inner {id}__parallel of a compound state', () => {
+  const root = {
+    state: {
+      '@_id': 'P',
+      '@_initial': 'P__parallel',
+      state: { '@_id': 'Loose' },
+      parallel: {
+        '@_id': 'P__parallel',
+        state: [
+          { '@_id': 'A_region', '@_initial': 'A', state: [{ '@_id': 'A' }, { '@_id': 'A2' }] },
+          { '@_id': 'B_region', '@_initial': 'B', state: { '@_id': 'B' } },
+        ],
+      },
+    },
+  };
+
+  it('registers neither the inner parallel nor its regions as nodes', () => {
+    const { stateRegistry } = run(root);
+    expect(stateRegistry.has('P__parallel')).toBe(false);
+    expect(stateRegistry.has('A_region')).toBe(false);
+    expect(stateRegistry.has('B_region')).toBe(false);
+  });
+
+  it("registers the regions' contents and the loose state as P's own children", () => {
+    const { parentMap, hierarchyMap } = run(root);
+    ['A', 'A2', 'B', 'Loose'].forEach((id) => expect(parentMap.get(id)).toBe('P'));
+    expect([...(hierarchyMap.get('P') ?? [])].sort()).toEqual(['A', 'A2', 'B', 'Loose']);
+  });
+});

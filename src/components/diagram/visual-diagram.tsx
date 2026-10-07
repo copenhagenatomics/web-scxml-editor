@@ -10,6 +10,7 @@ import { VisualMetadataManager } from '@/lib/metadata';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
   addStateToDocument,
+  addLooseStateToParallel,
   createStateElement,
   findStateById,
   removeTransitionByEdgeId,
@@ -2595,6 +2596,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
           finalRegionId = resolved.regionId;
         }
+        // Every direct child of a <parallel> is a region, so a state added
+        // directly to it would become a new region column of its own — it's
+        // added as a loose state instead (addLooseStateToParallel).
+        const addLoose =
+          kind === 'state' &&
+          !!currentParentId &&
+          findElementById(scxmlDoc, currentParentId)?.tag === 'parallel';
 
         const idPrefix = kind === 'final' ? 'final' : 'state';
         let newStateId = `${idPrefix}_1`;
@@ -2701,7 +2709,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        addStateToDocument(scxmlDoc, newState, parentId, kind);
+        if (addLoose && parentId) {
+          addLooseStateToParallel(scxmlDoc, parentId, newState);
+        } else {
+          addStateToDocument(scxmlDoc, newState, parentId, kind);
+        }
 
         const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
         onSCXMLChange(updatedSCXML, 'structure');

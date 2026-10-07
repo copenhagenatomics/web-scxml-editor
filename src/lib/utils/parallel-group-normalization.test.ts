@@ -99,7 +99,7 @@ describe('normalizeParallelGroups — compound state becomes the <parallel>', ()
     expect(ids(cRegion.state)).toEqual(['C']);
   });
 
-  it('puts children outside any work tree into one more region of their own instead of dropping them', () => {
+  it('keeps children outside any work tree loose beside an inner {id}__parallel instead of giving them a region', () => {
     const d: SCXMLDocument = {
       scxml: {
         state: {
@@ -110,9 +110,14 @@ describe('normalizeParallelGroups — compound state becomes the <parallel>', ()
       } as any,
     };
     normalizeParallelGroups(d);
-    const regions = one(d.scxml.parallel).state as any[];
-    expect(ids(regions).sort()).toEqual(['A_region', 'B_region', 'Loose_region']);
-    expect(ids(regions.find((r) => r['@_id'] === 'Loose_region').state)).toEqual(['Loose']);
+    const p = one(d.scxml.state);
+    expect(p['@_id']).toBe('P');
+    expect(p['@_initial']).toBe('P__parallel');
+    expect(ids(p.state)).toEqual(['Loose']);
+    const inner = one(p.parallel);
+    expect(inner['@_id']).toBe('P__parallel');
+    expect(ids(inner.state).sort()).toEqual(['A_region', 'B_region']);
+    expect(normalizeParallelGroups(d).changed).toBe(false);
   });
 
   it('wraps a <parallel> child that belongs to a work tree under the region\'s <parallel> children', () => {
@@ -455,5 +460,143 @@ describe('copy/cut + paste of parallel regions (end-to-end with the paste pipeli
     const parallels = Array.isArray(d.scxml.parallel) ? d.scxml.parallel : [d.scxml.parallel];
     expect(parallels).toContain(target);
     expect((target.state as any[]).length).toBe(2);
+  });
+});
+
+describe('normalizeParallelGroups — loose states', () => {
+  // The reported flow: state_1 (Initial) -> state_2, then state_3 marked
+  // Initial, with state_4 unconnected.
+  const compound = () => `${HEADER} initial="P">
+  <state id="P" initial="state_1 state_3">
+    <state id="state_1"><transition event="go" target="state_2"/></state>
+    <state id="state_2"/>
+    <state id="state_3"/>
+    <state id="state_4"/>
+  </state>
+</scxml>`;
+
+  it('leaves the unconnected state loose: no region of its own, not Initial', () => {
+    const { doc } = normalizeXml(compound());
+    const p = one(doc.scxml.state);
+    expect(ids(p.state)).toEqual(['state_4']);
+    expect(p['@_initial']).toBe('P__parallel');
+    const regions = one(p.parallel).state as any[];
+    expect(ids(regions).sort()).toEqual(['state_1_region', 'state_3_region']);
+    expect(regions.some((r) => ids(r.state).includes('state_4'))).toBe(false);
+    expect(collectParallelGroups(doc)).toEqual([
+      {
+        containerId: 'P',
+        parallelId: 'P__parallel',
+        regions: [{ memberIds: ['state_1', 'state_2'] }, { memberIds: ['state_3'] }],
+      },
+    ]);
+  });
+
+  it('connecting a region member to the loose state moves it into that region, and P becomes the <parallel> again', () => {
+    const parser = new SCXMLParser();
+    const doc = normalizeXml(compound()).doc;
+    // Draw state_3 -> state_4 on the canvas.
+    const p = one(doc.scxml.state);
+    const region3 = (one(p.parallel).state as any[]).find((r) => r['@_id'] === 'state_3_region');
+    region3.state.transition = { '@_event': 'next', '@_target': 'state_4' };
+    const reparsed = parser.parse(parser.serialize(doc, true)).data!;
+    normalizeParallelGroups(reparsed);
+
+    expect(reparsed.scxml.state).toBeUndefined();
+    const parallel = one(reparsed.scxml.parallel);
+    expect(parallel['@_id']).toBe('P');
+    const regions = parallel.state as any[];
+    expect(ids(regions.find((r) => r['@_id'] === 'state_3_region').state).sort()).toEqual(['state_3', 'state_4']);
+    expect(ids(regions.find((r) => r['@_id'] === 'state_1_region').state).sort()).toEqual(['state_1', 'state_2']);
+  });
+
+  it('pulls a chain of loose states in together, and keeps a loose state touching two regions loose', () => {
+    const xml = `${HEADER} initial="P">
+  <state id="P" initial="P__parallel">
+    <parallel id="P__parallel">
+      <state id="a_region" initial="a"><state id="a"><transition event="e" target="x"/></state></state>
+      <state id="b_region" initial="b"><state id="b"><transition event="e" target="z"/></state></state>
+    </parallel>
+    <state id="x"><transition event="e" target="y"/></state>
+    <state id="y"/>
+    <state id="z"/>
+    <state id="w"><transition event="e" target="a"/><transition event="f" target="b"/></state>
+  </state>
+</scxml>`;
+    const { doc } = normalizeXml(xml);
+    const p = one(doc.scxml.state);
+    expect(ids(p.state)).toEqual(['w']);
+    const regions = one(p.parallel).state as any[];
+    expect(ids(regions.find((r) => r['@_id'] === 'a_region').state).sort()).toEqual(['a', 'x', 'y']);
+    expect(ids(regions.find((r) => r['@_id'] === 'b_region').state).sort()).toEqual(['b', 'z']);
+  });
+
+  it('marking a loose state Initial makes it a new region (and P the <parallel> once nothing is loose)', () => {
+    const doc = normalizeXml(compound()).doc;
+    const p = one(doc.scxml.state);
+    // What ToggleInitialStateCommand writes: the expanded regions plus state_4.
+    p['@_initial'] = 'state_1_region state_3_region state_4';
+    normalizeParallelGroups(doc);
+    expect(doc.scxml.state).toBeUndefined();
+    const parallel = one(doc.scxml.parallel);
+    expect(parallel['@_id']).toBe('P');
+    expect(ids(parallel.state).sort()).toEqual(['state_1_region', 'state_3_region', 'state_4_region']);
+  });
+
+  it('unwraps the inner parallel when fewer than 2 regions remain', () => {
+    const doc = normalizeXml(compound()).doc;
+    const p = one(doc.scxml.state);
+    const inner = one(p.parallel);
+    inner.state = (inner.state as any[]).filter((r) => r['@_id'] !== 'state_3_region');
+    normalizeParallelGroups(doc);
+    expect(p.parallel).toBeUndefined();
+    expect(ids(p.state).sort()).toEqual(['state_1_region', 'state_4']);
+    expect(p['@_initial']).toBe('state_1_region');
+  });
+
+  it('at the root, connecting a region member to a loose root state moves it into that region', () => {
+    const parser = new SCXMLParser();
+    const xml = `${HEADER} initial="state_1 state_3">
+  <state id="state_1"><transition event="go" target="state_2"/></state>
+  <state id="state_2"/>
+  <state id="state_3"/>
+  <state id="state_4"/>
+</scxml>`;
+    const { doc } = normalizeXml(xml);
+    expect(ids(doc.scxml.state)).toEqual(['state_4']);
+    // Now draw state_3 -> state_4.
+    const region3 = (one(doc.scxml.parallel).state as any[]).find((r) => r['@_id'] === 'state_3_region');
+    region3.state.transition = { '@_event': 'next', '@_target': 'state_4' };
+    const reparsed = parser.parse(parser.serialize(doc, true)).data!;
+    normalizeParallelGroups(reparsed);
+    expect(reparsed.scxml.state).toBeUndefined();
+    const regions = one(reparsed.scxml.parallel).state as any[];
+    expect(ids(regions.find((r) => r['@_id'] === 'state_3_region').state).sort()).toEqual(['state_3', 'state_4']);
+  });
+});
+
+describe('normalizeParallelGroups — loose state ids containing spaces', () => {
+  it('absorbs a loose state whose id contains a space when a region member targets it', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': '__root_parallel',
+        parallel: {
+          '@_id': '__root_parallel',
+          state: [
+            {
+              '@_id': 'a_region',
+              '@_initial': 'a',
+              state: { '@_id': 'a', transition: { '@_event': 'e', '@_target': 'my state' } },
+            },
+            { '@_id': 'b_region', '@_initial': 'b', state: { '@_id': 'b' } },
+          ],
+        },
+        state: { '@_id': 'my state' },
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    expect(d.scxml.state).toBeUndefined();
+    const aRegion = (one(d.scxml.parallel).state as any[]).find((r) => r['@_id'] === 'a_region');
+    expect(ids(aRegion.state).sort()).toEqual(['a', 'my state']);
   });
 });

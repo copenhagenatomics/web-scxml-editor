@@ -1,16 +1,21 @@
 /**
  * Live structural transform for the "multiple Initial State work trees"
  * feature: whenever a compound <state> has 2+ distinct Initial-marked work
- * trees among its direct children, that state itself becomes a real,
- * standards-conformant <parallel> — same object, same id, transitions,
- * onentry/onexit and viz: attributes; only the tag changes — with one region
- * per work tree. There is never a <state> wrapper left above it.
+ * trees among its direct children, and every child belongs to one of them,
+ * that state itself becomes a real, standards-conformant <parallel> — same
+ * object, same id, transitions, onentry/onexit and viz: attributes; only the
+ * tag changes — with one region per work tree.
  *
  * - Each work tree is wrapped in its own region
  *   <state id="{initialId}_region" initial="{initialId}"> (decision
  *   scxml.md #11: a <parallel>'s direct children are never bare leaf
- *   states). Children that aren't part of any work tree (unassigned) get
- *   one more region of their own, so converting never drops them.
+ *   states).
+ * - Children that aren't part of any work tree (loose) are never put in a
+ *   region of their own: the regions go into an inserted, transparent
+ *   `<parallel id="{stateId}__parallel">` and the loose children stay beside
+ *   it, unmarked. Connecting a loose child to a region member moves it into
+ *   that region; once no loose child is left, the state itself becomes the
+ *   <parallel> again.
  * - A state with <final> children is never converted (<parallel> can't hold
  *   <final>) — initial-group-validator.ts reports it instead.
  * - Any <parallel> (converted or hand-authored — no marker attributes tell
@@ -18,8 +23,9 @@
  *   sole region (if any) becoming its `initial`. Regions are kept as they
  *   are, not unwrapped.
  * - The <scxml> root can't become a <parallel>, so 2+ root-level work trees
- *   go into one inserted `<parallel id="__root_parallel">` instead (see
- *   parallel-structure.ts) — the only element this feature ever inserts.
+ *   always go into an inserted `<parallel id="__root_parallel">`, loose
+ *   siblings beside it, the same way (see parallel-structure.ts). These
+ *   transparent parallels are the only elements this feature ever inserts.
  *
  * Pure, operates on the parsed SCXMLDocument object model, recomputes
  * everything fresh on every call (nothing is persisted beyond the document
@@ -28,12 +34,16 @@
  */
 import type { SCXMLDocument, SCXMLElement, StateElement, ParallelElement } from '@/types/scxml';
 import { getInitialIds, analyzeGroups } from './initial-group-utils';
+import { parseStateIdList } from '@/lib/validators/validator-utils';
 import {
   ROOT_PARALLEL_ID,
+  findTransparentParallel,
   getChildEntries,
   getRegionDisplayEntries,
-  isRootParallel,
+  innerParallelIdFor,
+  isTransparentParallel,
   type ChildEntry,
+  type ContainerKind,
 } from './parallel-structure';
 
 type Container = SCXMLElement | StateElement | ParallelElement;
@@ -143,23 +153,17 @@ function claimId(candidate: string, usedIds: IdSet): string {
   return next;
 }
 
-/** Wrap each work tree (and the unassigned rest, if any) into its own region <state>. */
-function buildRegions(
-  groups: Map<string, ChildEntry[]>,
-  unassigned: ChildEntry[],
-  usedIds: IdSet,
-): ChildEntry[] {
+/** Wrap each work tree into its own region <state>. */
+function buildRegions(groups: Map<string, ChildEntry[]>, usedIds: IdSet): ChildEntry[] {
   const regions: ChildEntry[] = [];
-  const addRegion = (initialId: string, members: ChildEntry[]) => {
+  groups.forEach((members, initialId) => {
     const region: any = {
       '@_id': claimId(`${initialId}_region`, usedIds),
       '@_initial': initialId,
     };
     assignEntries(region, members);
     regions.push({ el: region, tag: 'state' });
-  };
-  groups.forEach((members, initialId) => addRegion(initialId, members));
-  if (unassigned.length > 0) addRegion(unassigned[0].el['@_id'], unassigned);
+  });
   return regions;
 }
 
@@ -169,22 +173,152 @@ interface Ctx {
 }
 
 /**
- * Convert a compound <state> with 2+ Initial work trees into a <parallel>,
- * in place. Returns whether it converted (the caller re-files it under its
- * parent's `.parallel`).
+ * Loose children (not part of any work tree) that a transition connects —
+ * directly, or through other loose children — to a direct member of exactly
+ * one region join that region: drawing state_3 -> state_4 makes state_4 part
+ * of state_3's work tree. A loose component touching 2+ regions stays loose
+ * (that would be a cross-region transition). Returns the absorbed entries.
  */
-function convertStateIfNeeded(state: any, ctx: Ctx): boolean {
-  if (asArray(state.final).length > 0) return false;
-  const entries = getChildEntries(state);
-  if (entries.length === 0) return false;
+function absorbLooseIntoRegions(
+  loose: ChildEntry[],
+  regions: ChildEntry[],
+  allIds: IdSet,
+): Set<ChildEntry> {
+  const absorbed = new Set<ChildEntry>();
+  const stateRegions = regions.filter((r) => r.tag === 'state');
+  if (loose.length === 0 || stateRegions.length === 0) return absorbed;
 
-  const { groups, unassigned } = groupEntries(entries, getInitialIds(state, 'state'));
-  if (groups.size < 2) return false;
+  // Each region is one node; its direct members (as drawn) map onto it.
+  const nodeOf = new Map<string, string>();
+  loose.forEach((e) => nodeOf.set(e.el['@_id'], e.el['@_id']));
+  const memberEls: any[] = [];
+  stateRegions.forEach((r) => {
+    const regionId = r.el['@_id'];
+    getChildEntries(r.el, 'opaque').forEach((m) => {
+      nodeOf.set(m.el['@_id'], regionId);
+      memberEls.push(m.el);
+    });
+    asArray<any>(r.el.final).forEach((f) => nodeOf.set(f['@_id'], regionId));
+  });
 
-  assignEntries(state, buildRegions(groups, unassigned, ctx.usedIds));
-  delete state['@_initial'];
-  delete state.initial;
-  return true;
+  // Loose-to-loose edges, and which regions each loose state touches.
+  const looseIds = loose.map((e) => e.el['@_id'] as string);
+  const looseIdSet = new Set(looseIds);
+  const looseEdges: [string, string][] = [];
+  const touches = new Map<string, Set<string>>();
+  const link = (looseId: string, regionId: string) => {
+    if (!touches.has(looseId)) touches.set(looseId, new Set());
+    touches.get(looseId)!.add(regionId);
+  };
+  [...loose.map((e) => e.el), ...memberEls].forEach((el) => {
+    asArray<any>(el.transition).forEach((t) => {
+      // Matched against every id in the document, since ids may contain spaces.
+      parseStateIdList(String(t['@_target'] ?? ''), allIds).forEach((target) => {
+        const a = nodeOf.get(el['@_id']);
+        const b = nodeOf.get(target);
+        if (!a || !b || a === b) return;
+        if (looseIdSet.has(a) && looseIdSet.has(b)) looseEdges.push([a, b]);
+        else if (looseIdSet.has(a)) link(a, b);
+        else if (looseIdSet.has(b)) link(b, a);
+      });
+    });
+  });
+  if (touches.size === 0) return absorbed;
+
+  // Connected loose components (every loose id is its own "Initial", so each
+  // component is keyed by its first member), and the regions each touches.
+  const { groupsByState } = analyzeGroups(looseIds, looseIdSet, looseEdges);
+  const componentRegions = new Map<string, Set<string>>();
+  looseIds.forEach((id) => {
+    const key = groupsByState.get(id)!;
+    if (!componentRegions.has(key)) componentRegions.set(key, new Set());
+    touches.get(id)?.forEach((r) => componentRegions.get(key)!.add(r));
+  });
+
+  loose.forEach((entry) => {
+    const regionIds = componentRegions.get(groupsByState.get(entry.el['@_id'])!)!;
+    if (regionIds.size !== 1) return;
+    const [regionId] = regionIds;
+    const region = stateRegions.find((r) => r.el['@_id'] === regionId)!;
+    assignEntries(region.el, [...getChildEntries(region.el, 'opaque'), entry]);
+    absorbed.add(entry);
+  });
+  return absorbed;
+}
+
+/**
+ * Normalize a host — the <scxml> root (kind 'root') or a compound <state>
+ * (kind 'state') — whose 2+ Initial work trees become regions:
+ *
+ * - With no loose children left, a <state> host itself becomes the
+ *   <parallel> (the caller re-files it under `.parallel`; returns
+ *   'parallel'). A host with <final> children never does.
+ * - Otherwise the regions go into a transparent <parallel> child —
+ *   `__root_parallel` at the root, `{id}__parallel` in a <state> — and the
+ *   loose children stay beside it, unmarked, so they can be connected later
+ *   (absorbLooseIntoRegions). New work trees join it as new regions; once
+ *   it's down to fewer than 2 regions it's removed and its regions move back
+ *   to the host as they are.
+ */
+function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | 'parallel' {
+  const parallels = asArray<any>(host.parallel);
+  const inner = parallels.find((p) => isTransparentParallel(p, kind));
+  const outside: ChildEntry[] = [
+    ...asArray<any>(host.state).map((el): ChildEntry => ({ el, tag: 'state' })),
+    ...parallels.filter((p) => p !== inner).map((el): ChildEntry => ({ el, tag: 'parallel' })),
+  ];
+  const hasFinals = asArray(host.final).length > 0;
+  if (kind === 'state' && !inner && hasFinals) return 'state';
+
+  const existingRegions = inner ? getChildEntries(inner) : [];
+  const { groups, unassigned } = groupEntries(outside, getInitialIds(host, kind));
+  const total = existingRegions.length + groups.size;
+
+  if (total < 2) {
+    if (!inner) return 'state';
+    // Unwrap: the remaining region(s) go back to the host as they are.
+    assignEntries(host, [...outside, ...existingRegions]);
+    if (total === 1) {
+      host['@_initial'] = existingRegions[0]?.el['@_id'] ?? [...groups.keys()][0];
+    } else {
+      delete host['@_initial'];
+    }
+    delete host.initial;
+    ctx.changed = true;
+    return 'state';
+  }
+
+  const absorbed = absorbLooseIntoRegions(unassigned, existingRegions, ctx.usedIds);
+  const loose = unassigned.filter((e) => !absorbed.has(e));
+  const newRegions = buildRegions(groups, ctx.usedIds);
+
+  if (kind === 'state' && loose.length === 0 && !hasFinals) {
+    assignEntries(host, [...existingRegions, ...newRegions]);
+    delete host['@_initial'];
+    delete host.initial;
+    ctx.changed = true;
+    return 'parallel';
+  }
+
+  if (inner && groups.size === 0 && absorbed.size === 0) {
+    // Steady state — just make sure the host points at its <parallel>.
+    if (host['@_initial'] !== inner['@_id'] || host.initial) {
+      host['@_initial'] = inner['@_id'];
+      delete host.initial;
+      ctx.changed = true;
+    }
+    return 'state';
+  }
+
+  const parallel: any = inner ?? {
+    '@_id': claimId(kind === 'root' ? ROOT_PARALLEL_ID : innerParallelIdFor(host['@_id']), ctx.usedIds),
+  };
+  assignEntries(parallel, [...existingRegions, ...newRegions]);
+  assignEntries(host, [...loose, { el: parallel, tag: 'parallel' }]);
+  host['@_initial'] = parallel['@_id'];
+  delete host.initial;
+  ctx.changed = true;
+  return 'state';
 }
 
 /**
@@ -202,27 +336,29 @@ function revertParallelIfNeeded(parallel: any): boolean {
 /**
  * Bottom-up: normalize every child of `el` (its descendants first, then the
  * child's own state <-> parallel decision), re-filing any child whose tag
- * changed. The root's `__root_parallel` is transparent — its regions are
- * normalized as children, but it's never itself converted here.
+ * changed. A transparent `__root_parallel` / `{id}__parallel` is never
+ * itself converted here — its regions are normalized as children, and
+ * normalizeHost handles the parallel itself.
  */
-function normalizeChildren(el: any, ctx: Ctx, isRoot = false): void {
-  const holders = [el, ...(isRoot ? asArray<any>(el.parallel).filter(isRootParallel) : [])];
+function normalizeChildren(el: any, kind: ContainerKind, ctx: Ctx): void {
+  const inner = findTransparentParallel(el, kind);
+  const holders = [el, ...(inner ? [inner] : [])];
   holders.forEach((holder) => {
     const next: ChildEntry[] = [];
     let retagged = false;
 
     asArray<any>(holder.state).forEach((child) => {
-      normalizeChildren(child, ctx);
-      const converted = convertStateIfNeeded(child, ctx);
-      if (converted) retagged = true;
-      next.push({ el: child, tag: converted ? 'parallel' : 'state' });
+      normalizeChildren(child, 'state', ctx);
+      const tag = normalizeHost(child, 'state', ctx);
+      if (tag === 'parallel') retagged = true;
+      next.push({ el: child, tag });
     });
     asArray<any>(holder.parallel).forEach((child) => {
-      if (isRoot && holder === el && isRootParallel(child)) {
+      if (child === inner) {
         next.push({ el: child, tag: 'parallel' });
         return;
       }
-      normalizeChildren(child, ctx);
+      normalizeChildren(child, 'parallel', ctx);
       const reverted = revertParallelIfNeeded(child);
       if (reverted) retagged = true;
       next.push({ el: child, tag: reverted ? 'state' : 'parallel' });
@@ -233,61 +369,6 @@ function normalizeChildren(el: any, ctx: Ctx, isRoot = false): void {
       ctx.changed = true;
     }
   });
-}
-
-/**
- * The root's equivalent of convertStateIfNeeded/revertParallelIfNeeded: 2+
- * root-level work trees live as regions of `__root_parallel`. New root-level
- * work trees join it as new regions; once it's down to fewer than 2 regions
- * it's removed and its regions move back to the root as they are.
- */
-function normalizeRoot(scxml: any, ctx: Ctx): void {
-  const parallels = asArray<any>(scxml.parallel);
-  const rootParallel = parallels.find(isRootParallel);
-  const outside: ChildEntry[] = [
-    ...asArray<any>(scxml.state).map((el): ChildEntry => ({ el, tag: 'state' })),
-    ...parallels.filter((p) => p !== rootParallel).map((el): ChildEntry => ({ el, tag: 'parallel' })),
-  ];
-  const existingRegions = rootParallel ? getChildEntries(rootParallel) : [];
-
-  const initialIds = getInitialIds(scxml, 'root');
-  const { groups, unassigned } = groupEntries(outside, initialIds);
-  const total = existingRegions.length + groups.size;
-
-  if (total < 2) {
-    if (!rootParallel) return;
-    // Unwrap: the remaining region(s) go back to the root as they are.
-    assignEntries(scxml, [...outside, ...existingRegions]);
-    if (total === 1) {
-      scxml['@_initial'] = existingRegions[0]?.el['@_id'] ?? [...groups.keys()][0];
-    } else {
-      delete scxml['@_initial'];
-    }
-    delete scxml.initial;
-    ctx.changed = true;
-    return;
-  }
-
-  if (groups.size === 0 && rootParallel) {
-    // Steady state — just make sure the root points at its <parallel>.
-    if (scxml['@_initial'] !== rootParallel['@_id'] || scxml.initial) {
-      scxml['@_initial'] = rootParallel['@_id'];
-      delete scxml.initial;
-      ctx.changed = true;
-    }
-    return;
-  }
-
-  const newRegions = buildRegions(groups, [], ctx.usedIds);
-  const parallel: any = rootParallel ?? { '@_id': claimId(ROOT_PARALLEL_ID, ctx.usedIds) };
-  assignEntries(parallel, [...existingRegions, ...newRegions]);
-
-  // Everything outside a work tree (states and other parallels alike) stays
-  // at the root, beside the <parallel>.
-  assignEntries(scxml, [...unassigned, { el: parallel, tag: 'parallel' }]);
-  scxml['@_initial'] = parallel['@_id'];
-  delete scxml.initial;
-  ctx.changed = true;
 }
 
 /**
@@ -353,8 +434,8 @@ export function normalizeParallelGroups(scxmlDoc: SCXMLDocument): { changed: boo
   const ctx: Ctx = { usedIds: new Set(), changed: false };
   migrateLegacyStructure(scxml, ctx);
   ctx.usedIds = collectAllIds(scxml);
-  normalizeChildren(scxml, ctx, true);
-  normalizeRoot(scxml, ctx);
+  normalizeChildren(scxml, 'root', ctx);
+  normalizeHost(scxml, 'root', ctx);
   return { changed: ctx.changed };
 }
 
@@ -369,11 +450,15 @@ export function hasAnyChildren(container: Container): boolean {
 }
 
 export interface ParallelGroupInfo {
-  /** The diagram level the regions appear on: the <parallel>'s own id, or null for the root's `__root_parallel`. */
+  /**
+   * The diagram level the regions appear on: the <parallel>'s own id, or —
+   * for a transparent `__root_parallel` / `{id}__parallel` — its host's id
+   * (null at the root).
+   */
   containerId: string | null;
   /**
    * Key for the group's wrapper node — `{id}__parallel_group` (with a `_2`…
-   * suffix if a state already uses that id), or `__root_parallel`'s own id.
+   * suffix if a state already uses that id), or a transparent parallel's own id.
    */
   parallelId: string;
   /** One per region: the ids of the nodes drawn in its column. */
@@ -392,27 +477,29 @@ export function collectParallelGroups(scxmlDoc: SCXMLDocument): ParallelGroupInf
   // Wrapper keys share the canvas's node-id space with every state, so a
   // derived `{id}__parallel_group` must be claimed against the document's ids
   // (and against wrappers already generated) — a state may legitimately be
-  // named that. The root's key is its own id, already unique and never a node.
+  // named that. A transparent parallel's key is its own id, already unique
+  // and never a node.
   const wrapperIds = collectAllIds(scxmlDoc.scxml as any);
 
-  function walk(el: any, isRoot = false): void {
-    asArray<any>(el.state).forEach((child) => walk(child));
+  function walk(el: any, kind: ContainerKind): void {
+    asArray<any>(el.state).forEach((child) => walk(child, 'state'));
     asArray<any>(el.parallel).forEach((p) => {
       const regions = getChildEntries(p).map((r) => ({
         memberIds: getRegionDisplayEntries(r).map((m) => m.el['@_id'] as string),
       }));
       if (regions.length >= 2) {
-        const root = isRoot && isRootParallel(p);
+        // A transparent parallel's regions are drawn on its host's level.
+        const transparent = isTransparentParallel(p, kind);
         result.push({
-          containerId: root ? null : p['@_id'],
-          parallelId: root ? p['@_id'] : claimId(`${p['@_id']}__parallel_group`, wrapperIds),
+          containerId: transparent ? (kind === 'root' ? null : el['@_id']) : p['@_id'],
+          parallelId: transparent ? p['@_id'] : claimId(`${p['@_id']}__parallel_group`, wrapperIds),
           regions,
         });
       }
-      walk(p);
+      walk(p, 'parallel');
     });
   }
 
-  walk(scxmlDoc.scxml, true);
+  walk(scxmlDoc.scxml, 'root');
   return result;
 }

@@ -8,7 +8,12 @@ import type {
   OnExitElement,
 } from '@/types/scxml';
 import { collectStateIds } from '@/lib/validators/state-validator';
-import { getChildEntries, type ChildEntry } from '@/lib/utils/parallel-structure';
+import {
+  findTransparentParallel,
+  getChildEntries,
+  innerParallelIdFor,
+  type ChildEntry,
+} from '@/lib/utils/parallel-structure';
 
 /** Which tag an element is filed under in its parent: `.state`, `.parallel` or `.final`. */
 export type StateTag = 'state' | 'parallel' | 'final';
@@ -93,8 +98,9 @@ export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean 
 
 /**
  * Where the canvas "Add Final State" button puts a new <final>. Final states
- * are only added while viewing inside a <parallel> (`parallelId`), and a
- * <parallel> can't hold a <final> directly, so it goes into the region
+ * are only added while viewing inside a <parallel> (`parallelId`) — or a
+ * compound state whose work trees live in its transparent `{id}__parallel` —
+ * and a <parallel> can't hold a <final> directly, so it goes into the region
  * (<state> child of the <parallel>) containing the selected state(s). Returns
  * that region's id, or a user-facing reason it can't be added.
  */
@@ -103,19 +109,14 @@ export function resolveFinalStateRegion(
   parallelId: string | null | undefined,
   selectedIds: Iterable<string>
 ): { regionId: string } | { error: string } {
-  const parallel = parallelId ? findElementById(scxmlDoc, parallelId) : null;
-  if (!parallel || parallel.tag !== 'parallel') {
+  const found = parallelId ? findElementById(scxmlDoc, parallelId) : null;
+  const parallel =
+    found?.tag === 'parallel' ? found.element : findTransparentParallel(found?.element, 'state');
+  if (!parallel) {
     return { error: 'Final states can only be added inside a parallel state.' };
   }
 
-  const regions = getChildEntries(parallel.element);
-  const chosen = new Set<ChildEntry>();
-  for (const id of selectedIds) {
-    const region = regions.find(
-      (r) => r.el['@_id'] === id || isDescendantOf(scxmlDoc, id, r.el['@_id'])
-    );
-    if (region) chosen.add(region);
-  }
+  const chosen = selectedRegions(scxmlDoc, parallel, selectedIds);
 
   if (chosen.size === 0) {
     return { error: 'Select a state in the region where the final state should go.' };
@@ -128,6 +129,76 @@ export function resolveFinalStateRegion(
     return { error: 'A final state cannot be added directly inside a parallel state.' };
   }
   return { regionId: region.el['@_id'] };
+}
+
+/**
+ * Add `stateElement` to the <parallel> `parallelId` as a loose child — no
+ * region of its own, not Initial. Every direct child of a <parallel> is a
+ * region, so it can't just be appended: the <parallel> becomes a <state>
+ * holding its regions in a transparent `{id}__parallel` (see
+ * parallel-group-normalization.ts), with the new state beside it. Returns
+ * false (changing nothing) if `parallelId` isn't a <parallel>.
+ */
+export function addLooseStateToParallel(
+  scxmlDoc: SCXMLDocument,
+  parallelId: string,
+  stateElement: StateElement
+): boolean {
+  const found = findElementById(scxmlDoc, parallelId);
+  if (!found || found.tag !== 'parallel') return false;
+  const parallel = found.element as any;
+
+  function findHolder(container: any): any | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child === parallel) return container;
+        const holder = findHolder(child);
+        if (holder) return holder;
+      }
+    }
+    return null;
+  }
+  const holder = findHolder(scxmlDoc.scxml);
+  if (!holder) return false;
+
+  const usedIds = collectExistingIds(scxmlDoc);
+  const base = innerParallelIdFor(parallelId);
+  let innerId = base;
+  for (let n = 2; usedIds.has(innerId); n++) innerId = `${base}_${n}`;
+
+  const inner: any = { '@_id': innerId };
+  if (parallel.state) inner.state = parallel.state;
+  if (parallel.parallel) inner.parallel = parallel.parallel;
+  delete parallel.state;
+  delete parallel.parallel;
+  delete parallel.initial;
+  parallel['@_initial'] = innerId;
+  parallel.parallel = inner;
+  parallel.state = stateElement;
+
+  // Re-file it under its holder as a <state>.
+  const rest = asList<any>(holder.parallel).filter((p) => p !== parallel);
+  if (rest.length === 0) delete holder.parallel;
+  else holder.parallel = rest.length === 1 ? rest[0] : rest;
+  appendChild(holder, 'state', parallel);
+  return true;
+}
+
+/** The regions of `parallel` containing any of `selectedIds` (as the region itself or a descendant). */
+function selectedRegions(
+  scxmlDoc: SCXMLDocument,
+  parallel: any,
+  selectedIds: Iterable<string>
+): Set<ChildEntry> {
+  const regions = getChildEntries(parallel);
+  const chosen = new Set<ChildEntry>();
+  for (const id of selectedIds) {
+    const region = regions.find(
+      (r) => r.el['@_id'] === id || isDescendantOf(scxmlDoc, id, r.el['@_id'])
+    );
+    if (region) chosen.add(region);
+  }
+  return chosen;
 }
 
 /**
