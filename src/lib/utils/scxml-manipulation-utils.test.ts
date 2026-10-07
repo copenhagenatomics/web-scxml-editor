@@ -17,7 +17,10 @@ import {
   collectExistingIds,
   isFinalState,
   resolveFinalStateRegion,
+  addLooseStateToParallel,
 } from './scxml-manipulation-utils';
+import { getInitialIds, isParallelRegion } from './initial-group-utils';
+import { normalizeParallelGroups } from './parallel-group-normalization';
 
 describe('<final> lookups', () => {
   const makeDoc = () =>
@@ -116,6 +119,60 @@ describe('<final> lookups', () => {
 
     it('refuses when the region is itself a <parallel>', () => {
       expect('error' in resolveFinalStateRegion(doc(), 'P', ['Q1'])).toBe(true);
+    });
+
+    it("finds the region through a compound state's transparent {id}__parallel", () => {
+      const d = {
+        scxml: {
+          state: {
+            '@_id': 'H',
+            '@_initial': 'H__parallel',
+            state: { '@_id': 'Loose' },
+            parallel: {
+              '@_id': 'H__parallel',
+              state: [
+                { '@_id': 'R1', '@_initial': 'A', state: { '@_id': 'A' } },
+                { '@_id': 'R2', '@_initial': 'B', state: { '@_id': 'B' } },
+              ],
+            },
+          },
+        },
+      } as any as SCXMLDocument;
+      expect(resolveFinalStateRegion(d, 'H', ['B'])).toEqual({ regionId: 'R2' });
+    });
+
+    describe('addLooseStateToParallel (canvas "Add State" inside a <parallel>)', () => {
+      it('adds the state beside the regions, moved into a transparent {id}__parallel, instead of as a new region', () => {
+        const d = doc();
+        expect(addLooseStateToParallel(d, 'P', { '@_id': 'New' } as any)).toBe(true);
+
+        const p = findElementById(d, 'P')!;
+        expect(p.tag).toBe('state');
+        expect((d.scxml as any).parallel).toBeUndefined();
+        const el = p.element as any;
+        expect(el['@_initial']).toBe('P__parallel');
+        expect(el.state['@_id']).toBe('New');
+        expect(el.parallel['@_id']).toBe('P__parallel');
+        expect(el.parallel.state.map((r: any) => r['@_id'])).toEqual(['R1', 'R2', 'Empty']);
+        expect(el.parallel.parallel['@_id']).toBe('Q');
+        expect(isParallelRegion(d, 'R1')).toBe(true);
+        expect(isParallelRegion(d, 'New')).toBe(false);
+        // Not Initial: P's initial stands for its regions only.
+        expect(getInitialIds(el, 'state').has('New')).toBe(false);
+      });
+
+      it('stays loose through normalization', () => {
+        const d = doc();
+        addLooseStateToParallel(d, 'P', { '@_id': 'New' } as any);
+        expect(normalizeParallelGroups(d).changed).toBe(false);
+      });
+
+      it('changes nothing when the target is not a <parallel>', () => {
+        const d = doc();
+        const before = JSON.stringify(d);
+        expect(addLooseStateToParallel(d, 'main_region', { '@_id': 'New' } as any)).toBe(false);
+        expect(JSON.stringify(d)).toBe(before);
+      });
     });
   });
 

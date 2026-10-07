@@ -18,7 +18,8 @@ import { parseStateIdList } from "@/lib/validators/validator-utils";
 import {
   getChildEntries,
   getLogicalChildStates,
-  isRootParallel,
+  findTransparentParallel,
+  isTransparentParallel,
   type ContainerKind,
 } from "./parallel-structure";
 
@@ -86,8 +87,8 @@ export function findParentContainer(
 }
 
 /**
- * Whether stateId sits directly inside a <parallel> (including the root's
- * `__root_parallel`) — i.e. it's a region, which is always active, so the
+ * Whether stateId sits directly inside a <parallel> (including a
+ * transparent `__root_parallel` / `{id}__parallel`) — i.e. it's a region, which is always active, so the
  * Initial State designation doesn't apply to it.
  */
 export function isParallelRegion(
@@ -97,15 +98,11 @@ export function isParallelRegion(
   const entry = findParentEntry(scxmlDoc, stateId);
   if (!entry) return false;
   if (entry.kind === "parallel") return true;
-  if (entry.kind === "root") {
-    return asArray<any>((entry.container as any).parallel).some(
-      (p) =>
-        isRootParallel(p) &&
-        [...asArray<any>(p.state), ...asArray<any>(p.parallel)].some(
-          (r) => r["@_id"] === stateId,
-        ),
-    );
-  }
+  const transparent = findTransparentParallel(entry.container, entry.kind);
+  return (
+    !!transparent &&
+    getChildEntries(transparent).some((r) => r.el["@_id"] === stateId)
+  );
   return false;
 }
 
@@ -141,8 +138,9 @@ function getInitialElementTargetIds(
  * Both are unioned since either can independently mark a state Initial.
  *
  * Inside a <parallel> (`kind === "parallel"`) every child is a region and
- * always active, so every child counts as Initial. At the root, the
- * `__root_parallel` id in `@_initial` stands for all of its regions.
+ * always active, so every child counts as Initial. A transparent
+ * `__root_parallel` / `{id}__parallel` id in `@_initial` stands for all of
+ * its regions.
  */
 export function getInitialIds(
   container: ContainerElement,
@@ -153,16 +151,17 @@ export function getInitialIds(
   );
   if (kind === "parallel") return childIds;
 
-  const rootParallels =
-    kind === "root" ? asArray<any>((container as any).parallel).filter(isRootParallel) : [];
-  const rootParallelIds = new Set(rootParallels.map((p) => p["@_id"]));
-  const knownIds = new Set([...childIds, ...rootParallelIds]);
+  const transparentParallels = asArray<any>((container as any).parallel).filter((p) =>
+    isTransparentParallel(p, kind),
+  );
+  const transparentParallelIds = new Set(transparentParallels.map((p) => p["@_id"]));
+  const knownIds = new Set([...childIds, ...transparentParallelIds]);
 
   const result = new Set<string>();
   const add = (id: string) => {
-    const rootParallel = rootParallels.find((p) => p["@_id"] === id);
-    if (rootParallel) {
-      [...asArray<any>(rootParallel.state), ...asArray<any>(rootParallel.parallel)].forEach(
+    const transparent = transparentParallels.find((p) => p["@_id"] === id);
+    if (transparent) {
+      [...asArray<any>(transparent.state), ...asArray<any>(transparent.parallel)].forEach(
         (r) => result.add(r["@_id"]),
       );
     } else if (childIds.has(id)) {
@@ -275,13 +274,14 @@ export function analyzeGroups(
 
 /**
  * The container kind to use for Initial-group analysis (union-find over
- * siblings). At the root, `__root_parallel` is analyzed as ONE child — the
- * way any other <parallel> child counts as one child state — rather than
- * seen through: its regions are always active, not Initial groups, so a
- * transition between two of them must not read as merging two groups.
+ * siblings). A transparent `__root_parallel` / `{id}__parallel` is analyzed
+ * as ONE child — the way any other <parallel> child counts as one child
+ * state — rather than seen through: its regions are always active, not
+ * Initial groups, so a transition between two of them must not read as
+ * merging two groups.
  */
 export function groupAnalysisKind(kind: ContainerKind): ContainerKind {
-  return kind === "root" ? "state" : kind;
+  return kind === "root" || kind === "state" ? "opaque" : kind;
 }
 
 /**

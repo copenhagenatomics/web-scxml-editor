@@ -31,7 +31,52 @@ export function isRootParallel(el: any): boolean {
   return !!el && typeof el['@_id'] === 'string' && ROOT_PARALLEL_ID_PATTERN.test(el['@_id']);
 }
 
-export type ContainerKind = 'root' | 'state' | 'parallel';
+/**
+ * A compound <state> holding 2+ Initial work trees plus loose (unassigned)
+ * children can't itself become a <parallel> (its loose children would each
+ * become a region), so its work trees go into an inner
+ * `<parallel id="{stateId}__parallel">` beside them instead — the compound
+ * equivalent of the root's `__root_parallel`.
+ */
+const INNER_PARALLEL_ID_PATTERN = /__parallel(_\d+)?$/;
+
+export function innerParallelIdFor(stateId: string): string {
+  return `${stateId}__parallel`;
+}
+
+/**
+ * Whether `el`'s id is the one the editor gives the inner <parallel> it
+ * inserts under a compound <state>. Only meaningful for a direct child of a
+ * <state> — see isTransparentParallel.
+ */
+export function isInnerParallel(el: any): boolean {
+  return !!el && typeof el['@_id'] === 'string' && INNER_PARALLEL_ID_PATTERN.test(el['@_id']);
+}
+
+/**
+ * What a container is, for walking its children: the <scxml> root, a
+ * <state> or a <parallel>. 'opaque' is a <state> or the root with its
+ * editor-inserted <parallel> counted as one ordinary child instead of seen
+ * through (see initial-group-utils.ts's groupAnalysisKind).
+ */
+export type ContainerKind = 'root' | 'state' | 'parallel' | 'opaque';
+
+/**
+ * Whether `el`, a direct <parallel> child of a container of `kind`, is the
+ * editor-inserted one (`__root_parallel` under <scxml>, `{id}__parallel`
+ * under a <state>) — transparent: its regions count as the container's own
+ * children, and it's never drawn as a node.
+ */
+export function isTransparentParallel(el: any, kind: ContainerKind): boolean {
+  if (kind === 'root') return isRootParallel(el);
+  if (kind === 'state') return isInnerParallel(el);
+  return false;
+}
+
+/** The container's transparent <parallel> child (see isTransparentParallel), if any. */
+export function findTransparentParallel(container: any, kind: ContainerKind): any | undefined {
+  return asArray<any>(container?.parallel).find((p) => isTransparentParallel(p, kind));
+}
 
 export interface ChildEntry {
   el: any;
@@ -40,15 +85,15 @@ export interface ChildEntry {
 
 /**
  * The direct child states of a container, each with its tag. A <parallel>
- * child counts as a child state like any other. The root-level
- * `__root_parallel` is the one exception: when `kind` is 'root' (the
- * container is <scxml>), it's transparent, so its regions count as the
- * root's own children.
+ * child counts as a child state like any other. The editor-inserted
+ * `__root_parallel` / `{id}__parallel` is the one exception: it's
+ * transparent (isTransparentParallel), so its regions count as the
+ * container's own children.
  */
 export function getChildEntries(container: any, kind: ContainerKind = 'state'): ChildEntry[] {
   const result: ChildEntry[] = asArray<any>(container.state).map((el) => ({ el, tag: 'state' }));
   asArray<any>(container.parallel).forEach((p) => {
-    if (kind === 'root' && isRootParallel(p)) {
+    if (isTransparentParallel(p, kind)) {
       asArray<any>(p.state).forEach((el) => result.push({ el, tag: 'state' }));
       asArray<any>(p.parallel).forEach((el) => result.push({ el, tag: 'parallel' }));
     } else {
@@ -91,8 +136,8 @@ export function getRegionDisplayEntries(region: ChildEntry): DisplayEntry[] {
 /**
  * The children the diagram shows for a container: the same as
  * getChildEntries plus the container's <final> children, except that every
- * region of a <parallel> (including the root's `__root_parallel`) is
- * replaced by its contents — see getRegionDisplayEntries.
+ * region of a <parallel> (including a transparent `__root_parallel` /
+ * `{id}__parallel`) is replaced by its contents — see getRegionDisplayEntries.
  */
 export function getDisplayChildEntries(container: any, kind: ContainerKind): DisplayEntry[] {
   const result: DisplayEntry[] = [];
@@ -102,7 +147,7 @@ export function getDisplayChildEntries(container: any, kind: ContainerKind): Dis
   };
   asArray<any>(container.state).forEach((el) => add({ el, tag: 'state' }));
   asArray<any>(container.parallel).forEach((p) => {
-    if (kind === 'root' && isRootParallel(p)) {
+    if (isTransparentParallel(p, kind)) {
       getChildEntries(p).forEach((region) => result.push(...getRegionDisplayEntries(region)));
     } else {
       add({ el: p, tag: 'parallel' });

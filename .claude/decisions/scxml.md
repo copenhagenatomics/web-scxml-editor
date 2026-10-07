@@ -308,4 +308,30 @@ Under #10, a compound state with 2+ Initial work trees kept its `<state>` elemen
 `src/lib/utils/parallel-structure.ts`, `src/lib/utils/parallel-group-normalization.ts`, `src/lib/utils/initial-group-utils.ts` (`findParentEntry`, `isParallelRegion`), `parallel-group-normalization.test.ts`, `initial-group-utils.test.ts`, `toggle-initial-state-command.test.ts`, `state-registry.test.ts`, `initial-group-validator.test.ts`.
 
 ### Status
+Accepted, except two points superseded by #13: children outside every work tree no longer get an extra region, and adding a state inside a `<parallel>` no longer makes a new region.
+
+---
+
+## 13. Children outside every work tree stay loose beside an inner `{id}__parallel`; connecting one to a region member moves it into that region
+
+### Context
+Under #12, a compound state's unassigned children went into one extra region of their own, which made them look Initial and moved them into a new column. Once there, connecting a work-tree state to them was blocked as a cross-region transition, so they could never join a tree. Adding a state inside a `<parallel>` likewise always created a new region. The user asked for unassigned states to be "left loose" so they can be connected later.
+
+### Decision
+`normalizeParallelGroups` (`src/lib/utils/parallel-group-normalization.ts`, `normalizeHost`):
+- A compound `<state>` with 2+ work trees and **no** loose children still becomes the `<parallel>` itself (#12).
+- With loose children, it stays a `<state>`: its regions go into an inserted, transparent `<parallel id="{id}__parallel">` (`parallel-structure.ts`'s `innerParallelIdFor` / `isInnerParallel`, `_2`… clash suffix allowed), its `initial` points at it, and the loose children stay beside it, unmarked. This is the same shape the root already used with `__root_parallel`.
+- `absorbLooseIntoRegions`: a loose child connected by a transition (either direction, directly or through other loose children) to a direct member of exactly **one** region moves into that region. A loose component touching 2+ regions stays loose. This applies at the root too, where such a transition used to exit `__root_parallel` instead.
+- Once no loose child is left, the inner parallel is dropped and the state becomes the `<parallel>` again. With fewer than 2 regions left, the inner parallel is unwrapped like `__root_parallel`.
+- Canvas "Add State" while viewing inside a `<parallel>` adds a loose state (`addLooseStateToParallel` in `scxml-manipulation-utils.ts`): the `<parallel>` becomes a `<state>` holding its regions in `{id}__parallel`, with the new state beside it.
+
+### Constraints
+- Transparency is positional and kind-based: `isTransparentParallel(el, kind)` — `__root_parallel` only directly under `<scxml>` (`'root'`), `{id}__parallel` only directly under a `<state>` (`'state'`). `getChildEntries` / `getDisplayChildEntries` / `getInitialIds` / `isParallelRegion` / `collectParallelGroups` / `isInitialState` see through it. Initial-group analysis must not: `groupAnalysisKind` now maps both `'root'` and `'state'` to the new `'opaque'` kind, which counts the transparent parallel as one child.
+- A state with `<final>` children is still never converted (no inner parallel is created for it).
+- Not done: a region member that loses its last transition to the work tree is **not** moved back out to loose; it stays in its region.
+
+### Evidence
+`parallel-group-normalization.test.ts` ("loose states" block), `scxml-manipulation-utils.test.ts` (`addLooseStateToParallel`), `state-registry.test.ts` (inner parallel registration).
+
+### Status
 Accepted.
