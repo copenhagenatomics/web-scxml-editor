@@ -18,7 +18,7 @@ import type { SCXMLDocument } from '@/types/scxml';
 
 interface ChainEntry {
   element: any;
-  kind: 'root' | 'state' | 'parallel';
+  kind: 'root' | 'state' | 'parallel' | 'final';
 }
 
 function asArray<T>(v: T | T[] | undefined): T[] {
@@ -42,6 +42,13 @@ function findAncestorChain(
   }
   for (const p of asArray(node.parallel)) {
     const found = findAncestorChain(p, 'parallel', targetId, nextPath);
+    if (found) return found;
+  }
+  // A <final> is a valid transition target, so it must be locatable too —
+  // otherwise a transition into a final in a sibling region slips past this
+  // guard (a final is a leaf, so it only ever matches itself).
+  for (const f of asArray(node.final)) {
+    const found = findAncestorChain(f, 'final', targetId, nextPath);
     if (found) return found;
   }
   return null;
