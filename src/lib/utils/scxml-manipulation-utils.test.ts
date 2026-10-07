@@ -93,6 +93,14 @@ describe('<final> lookups', () => {
       expect(resolveFinalStateRegion(doc(), 'P', ['B'])).toEqual({ regionId: 'R2' });
     });
 
+    it("targets an existing <final>'s region when that final is selected", () => {
+      const d = doc();
+      (d.scxml as any).parallel.state[1].final = { '@_id': 'R2Done' };
+      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual({ regionId: 'R2' });
+      expect(isDescendantOf(d, 'R2Done', 'R2')).toBe(true);
+      expect(isDescendantOf(d, 'R2Done', 'R1')).toBe(false);
+    });
+
     it('targets an empty region shown as its own node when that node is selected', () => {
       expect(resolveFinalStateRegion(doc(), 'P', ['Empty'])).toEqual({ regionId: 'Empty' });
     });

@@ -132,8 +132,8 @@ export function resolveFinalStateRegion(
 
 /**
  * Whether candidateId is nested anywhere inside ancestorId's subtree
- * (not counting ancestorId itself), through both <state> and <parallel>
- * children.
+ * (not counting ancestorId itself), through <state>, <parallel> and
+ * <final> children (a <final> is a leaf, so it only ever matches itself).
  */
 export function isDescendantOf(
   scxmlDoc: SCXMLDocument,
@@ -144,7 +144,8 @@ export function isDescendantOf(
   if (!ancestor) return false;
 
   function search(container: any): boolean {
-    for (const s of [...asList<any>(container.state), ...asList<any>(container.parallel)]) {
+    const children = STATE_TAGS.flatMap((tag) => asList<any>(container[tag]));
+    for (const s of children) {
       if (s['@_id'] === candidateId) return true;
       if (search(s)) return true;
     }
