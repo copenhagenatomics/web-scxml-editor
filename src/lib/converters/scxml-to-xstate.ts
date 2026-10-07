@@ -51,6 +51,22 @@ import {
 } from '@/lib/layout/edge-obstacle-utils';
 
 /**
+ * One-line summary of a <final>'s <donedata> for the node: its <param>
+ * names ("{status, code}"), or "{content}" for a <content> payload.
+ */
+function summarizeDoneData(doneData: any): string | undefined {
+  const dd = Array.isArray(doneData) ? doneData[0] : doneData;
+  if (!dd || typeof dd !== 'object') return undefined;
+  const params = getElements(dd, 'param');
+  const names = (Array.isArray(params) ? params : params ? [params] : [])
+    .map((p: any) => getAttribute(p, 'name'))
+    .filter((n: string | undefined): n is string => !!n);
+  if (names.length > 0) return `{${names.join(', ')}}`;
+  if (getElements(dd, 'content') !== undefined) return '{content}';
+  return undefined;
+}
+
+/**
  * Converts SCXML documents to XState v5 machine configurations and React Flow diagram data
  */
 
@@ -649,15 +665,17 @@ export class SCXMLToXStateConverter {
     let nodeType: 'scxmlState' | 'scxmlHistory' = 'scxmlState';
     let stateType: SCXMLStateNodeData['stateType'] = 'simple';
 
-    if (stateInfo.elementType === 'parallel') {
+    // A final state is the <final> element itself — SCXML has no
+    // type="final" attribute on <state>.
+    if (stateInfo.elementType === 'final') {
+      stateType = 'final';
+    } else if (stateInfo.elementType === 'parallel') {
       stateType = 'parallel';
     } else if (stateInfo.elementType === 'history') {
       nodeType = 'scxmlHistory'; // Keep history wrapper as special type
       stateType = 'simple';
     } else if (isContainer) {
       stateType = 'compound';
-    } else if (state['@_type'] === 'final') {
-      stateType = 'final';
     }
 
     // Check if this is an initial state
@@ -683,6 +701,11 @@ export class SCXMLToXStateConverter {
       exitActions,
       internalEventActions,
     };
+
+    if (stateType === 'final') {
+      const doneDataSummary = summarizeDoneData(this.getElements(state, 'donedata'));
+      if (doneDataSummary) baseNodeData.doneDataSummary = doneDataSummary;
+    }
 
     // Create hierarchical node
     const node: HierarchicalNode = {

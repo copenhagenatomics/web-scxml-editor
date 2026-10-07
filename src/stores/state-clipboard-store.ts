@@ -14,13 +14,26 @@ interface StateClipboardState {
   // <parallel>, not <state> — the cloned object alone doesn't say which tag
   // it had, and paste must re-insert it under the same one.
   copiedParallelIds: Set<string>;
-  copy: (states: StateElement[], initialIds?: Set<string>, parallelIds?: Set<string>) => void;
+  // Same as copiedParallelIds, for <final> elements.
+  copiedFinalIds: Set<string>;
+  copy: (
+    states: StateElement[],
+    initialIds?: Set<string>,
+    parallelIds?: Set<string>,
+    finalIds?: Set<string>
+  ) => void;
 }
 
 export const useStateClipboardStore = create<StateClipboardState>((set) => ({
   copied: null,
   copiedInitialIds: new Set(),
   copiedParallelIds: new Set(),
-  copy: (states, initialIds = new Set(), parallelIds = new Set()) =>
-    set({ copied: states, copiedInitialIds: initialIds, copiedParallelIds: parallelIds }),
+  copiedFinalIds: new Set(),
+  copy: (states, initialIds = new Set(), parallelIds = new Set(), finalIds = new Set()) =>
+    set({
+      copied: states,
+      copiedInitialIds: initialIds,
+      copiedParallelIds: parallelIds,
+      copiedFinalIds: finalIds,
+    }),
 }));

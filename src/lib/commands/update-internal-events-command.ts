@@ -31,6 +31,14 @@ export class UpdateInternalEventsCommand extends BaseCommand {
       );
     }
 
+    // Reactions are <transition> children, which a <final> can't have
+    if (stateElement.localName === 'final' && this.actions.length > 0) {
+      return this.createFailureResult(
+        `A final state cannot have transitions: ${this.nodeId}`,
+        scxmlContent
+      );
+    }
+
     // Snapshot existing internal transitions for undo
     this.oldActions = this.extractCurrentActions(stateElement);
 

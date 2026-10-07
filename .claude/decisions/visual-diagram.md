@@ -355,3 +355,33 @@ Converting `isUpdatingPositionRef` from a plain ref to `React.useState` (so clea
 
 ### Status
 Accepted.
+
+---
+
+## 15. Final states are detected from the `<final>` element only and drawn as a marked box, not a UML end-state circle
+
+### Context
+`<final>` was never registered by `state-registry.ts`, so final states never reached the diagram. The converter instead checked `state['@_type'] === 'final'` (an attribute SCXML doesn't have), and `SCXMLStateNode` guessed "terminal" from a label containing "final"/"complete", so an ordinary `<state id="CompleteSetup">` was drawn purple. Final styling was also defined twice, inconsistently: red double border in `computeVisualStyles`, purple in the node's fallback.
+
+### Decision
+- A state is final **only** if it is a `<final>` element (`StateRegistryEntry.elementType === 'final'`). Names, labels and attributes play no part.
+- A final state keeps the normal rectangular `SCXMLStateNode` box with a double border, a muted slate fill and a `◉` icon after its name; it has target handles only. `computeVisualStyles` is the single owner of that look; the node falls back to it rather than styling finals itself.
+- No outgoing transition can be created from a `<final>`: the hidden source handles are backed by checks in `isValidConnection`/`onConnect`, `ReconnectTransitionCommand` and `UpdateInternalEventsCommand`.
+
+### Reason
+Explicit request (October 2026): "Treat `<final>` as a real SCXML element … render it as a normal state box with a small ◉ bullseye icon, a double border, and muted fill. Do not implement the actual circular UML end-state shape", and "Do not infer final-ness from the state ID/name/label." Enforcement below the UI was asked for because the canvas runs in `ConnectionMode.Loose`, where a drag can start from a target handle, so hiding source handles alone doesn't stop a final from becoming a source.
+
+### Constraints
+- Keep this inside `SCXMLStateNode` (decision #2); don't add a separate final-node component.
+- A CSS `double` border needs at least 3px, so `computeVisualStyles` gives finals `borderWidth: 4` unless metadata overrides it.
+- Don't bring back name-based "final"/"complete" styling. The remaining idle/error label heuristics in the node's no-`visualStyles` fallback are older and out of scope here.
+
+### Alternatives
+- The UML circular end-state shape was explicitly rejected in the request.
+- Name-based detection (the previous behavior) was removed because it styled ordinary states as final.
+
+### Evidence
+`src/lib/converters/converter-modules/state-registry.ts`, `src/lib/utils/parallel-structure.ts` (`DisplayEntry`), `src/lib/converters/scxml-to-xstate.ts` (`createHierarchicalNode`, `summarizeDoneData`), `src/lib/utils/visual-style-utils.ts`, `src/components/diagram/nodes/scxml-state-node.tsx`, `src/components/diagram/visual-diagram.tsx` (`FINAL_STATE_SOURCE_MESSAGE`), `src/lib/utils/scxml-manipulation-utils.ts` (`isFinalState`). Tests: `scxml-state-node.test.tsx`, `visual-style-utils.test.ts`, the `<final>` blocks in `state-registry.test.ts` / `scxml-to-xstate.test.ts`, `reconnect-transition-command.test.ts`.
+
+### Status
+Accepted.

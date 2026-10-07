@@ -3,7 +3,12 @@ import type { ElementVisualMetadata } from '@/types/visual-metadata';
 import type { VisualStyles } from '@/components/diagram/nodes/scxml-state-node';
 
 /**
- * Converts visual metadata style properties to VisualStyles format
+ * Converts visual metadata style properties to VisualStyles format.
+ *
+ * This is the single source of the default per-state-type look, including
+ * the <final> look (double border, muted fill) — SCXMLStateNode falls back
+ * to it rather than defining its own. `stateType` must come from the SCXML
+ * element, never from the state's name.
  */
 export function computeVisualStyles(
   visualMetadata: ElementVisualMetadata | undefined,
@@ -54,8 +59,7 @@ export function computeVisualStyles(
     // Apply state-specific colors only if not overridden by visual metadata
     switch (stateType) {
       case 'final':
-        styles.borderColor = '#ef4444'; // red-500
-        styles.borderStyle = 'double';
+        styles.borderColor = '#475569'; // slate-600
         break;
       case 'compound':
       case 'parallel': // same look as compound
@@ -79,7 +83,7 @@ export function computeVisualStyles(
     } else {
       switch (stateType) {
         case 'final':
-          styles.backgroundColor = '#fef2f2'; // red-50
+          styles.backgroundColor = '#f1f5f9'; // slate-100 (muted)
           break;
         case 'compound':
         case 'parallel': // same fill as compound
@@ -91,9 +95,16 @@ export function computeVisualStyles(
     }
   }
 
+  // A final state always gets the double border unless its metadata sets an
+  // explicit border style — even when only the stroke color is customized.
+  if (stateType === 'final' && !styles.borderStyle) {
+    styles.borderStyle = 'double';
+  }
+
   // Set default border width if not specified
   if (!styles.borderWidth) {
-    if (stateType === 'compound' || stateType === 'parallel') {
+    // A CSS double border needs >= 3px to draw two lines
+    if (stateType === 'compound' || stateType === 'parallel' || stateType === 'final') {
       styles.borderWidth = 4;
     } else {
       styles.borderWidth = 1;

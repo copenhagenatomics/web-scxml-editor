@@ -22,7 +22,7 @@ Only one hierarchy level is shown on the canvas at any time — clicking into a 
 
 ## State type visuals — the rules a user relies on
 
-- **Solid border** = simple state. **Dashed border** = compound (has children). **Overlapping-square icon + ⚡** = parallel. **Target icon, smallest size** = final.
+- **Solid border** = simple state. **Dashed border** = compound (has children). **Overlapping-square icon + ⚡** = parallel. **Double border, muted fill, `◉` next to the name, no outgoing handles** = final — only for a real `<final>` element; never style a state as final because of its name (see `decisions/visual-diagram.md` #15).
 - **"Initial" green badge** = this state is the entry point of its container. There is **no arrow drawn into the initial state** — this app does not use the classic "black dot with an arrow" convention. Do not add one without checking whether other assumptions (dimension calculations that budget +70px for the badge) also need updating.
 - **History states** render as a separate oversized dashed purple box drawn *around* the container they wrap (not replacing it) — this is decorative positioning only, not a real nesting relationship.
 - A label containing the word "history" (case-insensitive, anywhere in the id) also gets a small "📜 History" chip on the regular state node — independent of the actual `<history>` element check. Renaming a state to include "history" in its name will trigger this even if it isn't a real history state; this is a known cosmetic quirk, not a bug to silently "fix" by removing the chip logic without checking for reliance elsewhere.

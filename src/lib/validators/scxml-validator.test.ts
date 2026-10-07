@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SCXMLElement } from '@/types/scxml';
 import { SCXMLValidator } from './scxml-validator';
+import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 
 describe('SCXMLValidator duplicate state id', () => {
   it('attaches the duplicated id as stateId', () => {
@@ -82,5 +83,39 @@ describe('SCXMLValidator main_ prefixed variables', () => {
     expect(warning).toBeDefined();
     expect(warning!.severity).toBe('warning');
     expect(warning!.line).toBe(3);
+  });
+});
+
+describe('SCXMLValidator final states with outgoing transitions', () => {
+  const validate = (xml: string) => {
+    const parsed = new SCXMLParser().parse(xml);
+    expect(parsed.success).toBe(true);
+    return new SCXMLValidator().validate(parsed.data!.scxml, xml);
+  };
+  const finalErrors = (errors: { message: string }[]) =>
+    errors.filter((e) => e.message.includes('cannot have outgoing transitions'));
+
+  it('flags a <transition> inside a <final>, including one nested in a parallel region', () => {
+    const errors = validate(`<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="P">
+  <parallel id="P">
+    <state id="R1" initial="A">
+      <state id="A"><transition event="e2" target="F"/></state>
+      <final id="F"><transition event="again" target="A"/></final>
+    </state>
+    <state id="R2" initial="B"><state id="B"/></state>
+  </parallel>
+</scxml>`);
+    const flagged = finalErrors(errors);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].message).toContain("Final state 'F'");
+    expect((flagged[0] as any).severity).toBe('error');
+  });
+
+  it('does not flag transitions that merely target a <final>', () => {
+    const errors = validate(`<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A">
+  <state id="A"><transition event="e1" target="Done"/></state>
+  <final id="Done"><onentry><log expr="'done'"/></onentry></final>
+</scxml>`);
+    expect(finalErrors(errors)).toHaveLength(0);
   });
 });
