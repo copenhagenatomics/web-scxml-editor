@@ -558,6 +558,19 @@ export class VisualMetadataManager {
       }
     }
 
+    // Process final states — rendered as nodes like any other state, so they
+    // honor the same viz: metadata. Leaves: no child states or transitions.
+    const finals = parent.final;
+    if (finals) {
+      const finalsArray = Array.isArray(finals) ? finals : [finals];
+      for (const final of finalsArray) {
+        const finalId = final['@_id'];
+        if (finalId) {
+          this.extractVisualMetadata(final, finalId);
+        }
+      }
+    }
+
     // Process transitions
     const transitions = parent.transition;
     if (transitions) {
@@ -631,6 +644,18 @@ export class VisualMetadataManager {
       });
       if (!Array.isArray(parent.parallel)) {
         updated.parallel = updated.parallel[0];
+      }
+    }
+
+    // Apply to final states (leaves — no recursion needed)
+    if (updated.final) {
+      const finalsArray = Array.isArray(updated.final) ? updated.final : [updated.final];
+      updated.final = finalsArray.map((final: any) => {
+        const finalId = final['@_id'];
+        return finalId ? this.applyVisualMetadataToElement(final, finalId) : final;
+      });
+      if (!Array.isArray(parent.final)) {
+        updated.final = updated.final[0];
       }
     }
 
