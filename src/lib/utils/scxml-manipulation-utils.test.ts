@@ -368,6 +368,30 @@ describe('detachStateFromParent', () => {
 });
 
 describe('cloneStateSubtreeWithFreshIds', () => {
+  it('gives a nested <final> a fresh id and keeps internal transitions into it', () => {
+    const original = {
+      '@_id': 'Job',
+      '@_initial': 'Work',
+      state: { '@_id': 'Work', transition: { '@_event': 'done', '@_target': 'JobDone' } },
+      final: { '@_id': 'JobDone', '@_viz:xywh': '10,20,120,60' },
+    };
+    const { clone, idMap } = cloneStateSubtreeWithFreshIds(
+      original as any,
+      new Set(['Job', 'Work', 'JobDone']),
+      40,
+      40
+    );
+    rewriteOrDropTransitions(clone, idMap);
+
+    const c = clone as any;
+    expect(c.final['@_id']).toBe('JobDone_copy');
+    expect(c.final['@_viz:xywh']).toBe('50,60,120,60');
+    expect(idMap.get('JobDone')).toBe('JobDone_copy');
+    // The internal Work → JobDone transition survives, retargeted to the copy
+    expect(c.state.transition['@_target']).toBe('JobDone_copy');
+    expect(original.final['@_id']).toBe('JobDone');
+  });
+
   it('assigns a fresh "_copy" id and does not mutate the original', () => {
     const original = { '@_id': 'A' };
     const { clone, idMap } = cloneStateSubtreeWithFreshIds(

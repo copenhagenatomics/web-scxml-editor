@@ -840,7 +840,15 @@ export function cloneStateSubtreeWithFreshIds(
     idMap.set(oldId, clone['@_id']);
     offsetPosition(clone);
 
-    [...asList<any>(clone.state), ...asList<any>((clone as any).parallel)].forEach(assignIds);
+    // <final> children need fresh ids (and offset positions) too — otherwise a
+    // pasted copy duplicates their ids, and transitions into them are dropped
+    // by rewriteOrDropTransitions since their old ids aren't in idMap. They
+    // have no child states/initial/transitions, so the other walks skip them.
+    [
+      ...asList<any>(clone.state),
+      ...asList<any>((clone as any).parallel),
+      ...asList<any>((clone as any).final),
+    ].forEach(assignIds);
   }
 
   function rewriteInitial(clone: StateElement): void {
