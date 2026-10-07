@@ -68,6 +68,17 @@ describe('ChangeStateTypeCommand <state> ↔ <final>', () => {
     expect(result.newContent).not.toContain('target="C1"');
   });
 
+  it('does not remove transitions to a surviving state that shares an id with a dropped <data>', () => {
+    // <data id="X"> is dropped with C's datamodel, but the state X survives,
+    // so B's transition to it must be kept.
+    const xml = `${VIZ_HEADER}><state id="C"><datamodel><data id="X"/></datamodel></state><state id="X"/><state id="B"><transition event="go" target="X"/></state></scxml>`;
+    const result = new ChangeStateTypeCommand('C', 'final').execute(xml);
+    expect(result.success).toBe(true);
+    expect(result.newContent).toContain('<final id="C"');
+    expect(result.newContent).not.toContain('<datamodel');
+    expect(result.newContent).toMatch(/<transition event="go" target="X"/);
+  });
+
   it('final → state replaces the <final> element with a real <state> element', () => {
     const xml = `${VIZ_HEADER}><state id="A"><transition target="Done"/></state><final id="Done" viz:xywh="1,2,3,4"><onexit><log expr="1"/></onexit><donedata><param name="status" expr="1"/></donedata></final></scxml>`;
     const result = new ChangeStateTypeCommand('Done', 'simple').execute(xml);

@@ -26,11 +26,22 @@ const ALLOWED_CHILDREN: Record<'state' | 'final', ReadonlySet<string>> = {
 /** Attributes valid on a <state> but not on a <final>. */
 const STATE_ONLY_ATTRIBUTES = new Set(['initial']);
 
-/** Element ids that would disappear along with `removed` (itself + descendants). */
-function collectIds(removed: Element[]): Set<string> {
+/** Elements a transition can target. */
+const TARGETABLE_TAGS = ['state', 'parallel', 'final', 'history'];
+const TARGETABLE_SELECTOR = TARGETABLE_TAGS.map((tag) => `${tag}[id]`).join(', ');
+
+/**
+ * Ids of the transition-targetable elements that disappear along with
+ * `removed` (each one itself + its descendants). Only state-like elements
+ * count: other elements' ids (e.g. `<data id="X">`) live in a different
+ * namespace and must not cause transitions targeting a state `X` to be removed.
+ */
+function collectTargetableIds(removed: Element[]): Set<string> {
   const ids = new Set<string>();
   removed.forEach((el) => {
-    [el, ...Array.from(el.querySelectorAll('[id]'))].forEach((e) => {
+    const candidates = TARGETABLE_TAGS.includes(el.localName) ? [el] : [];
+    candidates.push(...Array.from(el.querySelectorAll(TARGETABLE_SELECTOR)));
+    candidates.forEach((e) => {
       const id = e.getAttribute('id');
       if (id) ids.add(id);
     });
@@ -150,7 +161,7 @@ export class ChangeStateTypeCommand extends BaseCommand {
     element.parentNode?.replaceChild(replacement, element);
 
     // Transitions anywhere that targeted a dropped descendant would dangle
-    const droppedIds = collectIds(dropped);
+    const droppedIds = collectTargetableIds(dropped);
     if (droppedIds.size > 0) {
       doc.querySelectorAll('transition[target]').forEach((transition) => {
         const targets = (transition.getAttribute('target') || '').split(/\s+/);
