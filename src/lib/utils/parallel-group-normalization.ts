@@ -34,6 +34,7 @@
  */
 import type { SCXMLDocument, SCXMLElement, StateElement, ParallelElement } from '@/types/scxml';
 import { getInitialIds, analyzeGroups } from './initial-group-utils';
+import { parseStateIdList } from '@/lib/validators/validator-utils';
 import {
   ROOT_PARALLEL_ID,
   findTransparentParallel,
@@ -178,7 +179,11 @@ interface Ctx {
  * of state_3's work tree. A loose component touching 2+ regions stays loose
  * (that would be a cross-region transition). Returns the absorbed entries.
  */
-function absorbLooseIntoRegions(loose: ChildEntry[], regions: ChildEntry[]): Set<ChildEntry> {
+function absorbLooseIntoRegions(
+  loose: ChildEntry[],
+  regions: ChildEntry[],
+  allIds: IdSet,
+): Set<ChildEntry> {
   const absorbed = new Set<ChildEntry>();
   const stateRegions = regions.filter((r) => r.tag === 'state');
   if (loose.length === 0 || stateRegions.length === 0) return absorbed;
@@ -207,17 +212,15 @@ function absorbLooseIntoRegions(loose: ChildEntry[], regions: ChildEntry[]): Set
   };
   [...loose.map((e) => e.el), ...memberEls].forEach((el) => {
     asArray<any>(el.transition).forEach((t) => {
-      String(t['@_target'] ?? '')
-        .split(/\s+/)
-        .filter(Boolean)
-        .forEach((target) => {
-          const a = nodeOf.get(el['@_id']);
-          const b = nodeOf.get(target);
-          if (!a || !b || a === b) return;
-          if (looseIdSet.has(a) && looseIdSet.has(b)) looseEdges.push([a, b]);
-          else if (looseIdSet.has(a)) link(a, b);
-          else if (looseIdSet.has(b)) link(b, a);
-        });
+      // Matched against every id in the document, since ids may contain spaces.
+      parseStateIdList(String(t['@_target'] ?? ''), allIds).forEach((target) => {
+        const a = nodeOf.get(el['@_id']);
+        const b = nodeOf.get(target);
+        if (!a || !b || a === b) return;
+        if (looseIdSet.has(a) && looseIdSet.has(b)) looseEdges.push([a, b]);
+        else if (looseIdSet.has(a)) link(a, b);
+        else if (looseIdSet.has(b)) link(b, a);
+      });
     });
   });
   if (touches.size === 0) return absorbed;
@@ -285,7 +288,7 @@ function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | '
     return 'state';
   }
 
-  const absorbed = absorbLooseIntoRegions(unassigned, existingRegions);
+  const absorbed = absorbLooseIntoRegions(unassigned, existingRegions, ctx.usedIds);
   const loose = unassigned.filter((e) => !absorbed.has(e));
   const newRegions = buildRegions(groups, ctx.usedIds);
 

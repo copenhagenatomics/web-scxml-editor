@@ -574,3 +574,29 @@ describe('normalizeParallelGroups — loose states', () => {
     expect(ids(regions.find((r) => r['@_id'] === 'state_3_region').state).sort()).toEqual(['state_3', 'state_4']);
   });
 });
+
+describe('normalizeParallelGroups — loose state ids containing spaces', () => {
+  it('absorbs a loose state whose id contains a space when a region member targets it', () => {
+    const d: SCXMLDocument = {
+      scxml: {
+        '@_initial': '__root_parallel',
+        parallel: {
+          '@_id': '__root_parallel',
+          state: [
+            {
+              '@_id': 'a_region',
+              '@_initial': 'a',
+              state: { '@_id': 'a', transition: { '@_event': 'e', '@_target': 'my state' } },
+            },
+            { '@_id': 'b_region', '@_initial': 'b', state: { '@_id': 'b' } },
+          ],
+        },
+        state: { '@_id': 'my state' },
+      } as any,
+    };
+    normalizeParallelGroups(d);
+    expect(d.scxml.state).toBeUndefined();
+    const aRegion = (one(d.scxml.parallel).state as any[]).find((r) => r['@_id'] === 'a_region');
+    expect(ids(aRegion.state).sort()).toEqual(['a', 'my state']);
+  });
+});
