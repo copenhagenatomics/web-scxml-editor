@@ -2773,6 +2773,28 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       useStateClipboardStore.getState();
     if (!copied || copied.length === 0 || !onSCXMLChange || !scxmlContent) return;
 
+    const parseResult = parserRef.current?.parse(scxmlContent);
+    if (!parseResult?.success || !parseResult.data) return;
+    const scxmlDoc = parseResult.data as SCXMLDocument;
+
+    // A <parallel> can't hold a <final> directly (its children are regions),
+    // so pasted finals go into the selected state's region — the same rule as
+    // the "Add Final State" button. Checked before anything is mutated.
+    let finalRegionId: string | undefined;
+    const pastingFinals = copied.some((s) => copiedFinalIds.has(s['@_id']));
+    if (
+      pastingFinals &&
+      currentParentId &&
+      findElementById(scxmlDoc, currentParentId)?.tag === 'parallel'
+    ) {
+      const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
+      if ('error' in resolved) {
+        showFeedback(resolved.error, 'warning');
+        return;
+      }
+      finalRegionId = resolved.regionId;
+    }
+
     if (copied !== lastPastedClipboardRef.current) {
       lastPastedClipboardRef.current = copied;
       pasteOffsetMultiplierRef.current = 1;
@@ -2780,10 +2802,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       pasteOffsetMultiplierRef.current += 1;
     }
     const offset = 40 * pasteOffsetMultiplierRef.current;
-
-    const parseResult = parserRef.current?.parse(scxmlContent);
-    if (!parseResult?.success || !parseResult.data) return;
-    const scxmlDoc = parseResult.data as SCXMLDocument;
 
     // "Initial" lives on the parent, not on the state itself (see
     // isMarkedInitial), so carrying it over from a copied/cut state that was
@@ -2820,7 +2838,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         : copiedFinalIds.has(copiedId)
           ? 'final'
           : 'state';
-      addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined, tag);
+      const parentId = tag === 'final' && finalRegionId ? finalRegionId : currentParentId ?? undefined;
+      addStateToDocument(scxmlDoc, clone, parentId, tag);
     });
 
     const carriedInitialIds = targetContainer
@@ -2837,7 +2856,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
     onSCXMLChange(updatedSCXML, 'structure');
     setActiveStates(new Set(clones.map((c) => c['@_id'])));
-  }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId]);
+  }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId, activeStates, showFeedback]);
 
   const handleCutSelection = useCallback(() => {
     if (activeStates.size === 0) return;
@@ -2858,10 +2877,15 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const scxmlDoc = parseResult.data as SCXMLDocument;
       // A <final> can't contain child states
       if (targetParentId && isFinalState(scxmlDoc, targetParentId)) return;
+      const targetIsParallel =
+        !!targetParentId && findElementById(scxmlDoc, targetParentId)?.tag === 'parallel';
 
       let changed = false;
       stateIds.forEach((id) => {
         if (id === targetParentId) return;
+        // A <parallel> can't hold a <final> directly — it would vanish from
+        // the diagram (computeDropTarget already rejects this drop).
+        if (targetIsParallel && isFinalState(scxmlDoc, id)) return;
         if (targetParentId && isDescendantOf(scxmlDoc, targetParentId, id)) return;
         const detached = detachElementFromParent(scxmlDoc, id);
         if (!detached) return;
@@ -2952,6 +2976,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         candidate.type !== 'scxmlState' ||
         // A <final> can't contain child states
         isFinalState(scxmlDoc, candidate.id) ||
+        // ...and a <parallel> can't hold a <final> directly (only regions)
+        (findElementById(scxmlDoc, candidate.id)?.tag === 'parallel' &&
+          draggingNodeIdsRef.current.some((id) => isFinalState(scxmlDoc, id))) ||
         draggingNodeIdsRef.current.includes(candidate.id) ||
         draggingNodeIdsRef.current.some((id) => isDescendantOf(scxmlDoc, candidate.id, id));
 
