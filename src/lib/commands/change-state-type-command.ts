@@ -160,12 +160,18 @@ export class ChangeStateTypeCommand extends BaseCommand {
 
     element.parentNode?.replaceChild(replacement, element);
 
-    // Transitions anywhere that targeted a dropped descendant would dangle
+    // Targets pointing at a dropped descendant would dangle. A transition can
+    // list several targets ("A B"), so only the dropped ones are removed from
+    // the list; the transition itself goes only once no target is left.
     const droppedIds = collectTargetableIds(dropped);
     if (droppedIds.size > 0) {
       doc.querySelectorAll('transition[target]').forEach((transition) => {
-        const targets = (transition.getAttribute('target') || '').split(/\s+/);
-        if (targets.some((t) => droppedIds.has(t))) {
+        const targets = (transition.getAttribute('target') || '').split(/\s+/).filter(Boolean);
+        const remaining = targets.filter((t) => !droppedIds.has(t));
+        if (remaining.length === targets.length) return;
+        if (remaining.length > 0) {
+          transition.setAttribute('target', remaining.join(' '));
+        } else {
           transition.parentNode?.removeChild(transition);
         }
       });

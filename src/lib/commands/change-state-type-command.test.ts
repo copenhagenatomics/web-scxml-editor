@@ -79,6 +79,17 @@ describe('ChangeStateTypeCommand <state> ↔ <final>', () => {
     expect(result.newContent).toMatch(/<transition event="go" target="X"/);
   });
 
+  it('removes only the dropped ids from a multi-target transition, keeping its other targets', () => {
+    // C1 is dropped with C; Y survives, so the transition keeps target="Y".
+    // A transition whose only target is dropped is still removed entirely.
+    const xml = `${VIZ_HEADER}><state id="C" initial="C1"><state id="C1"/></state><parallel id="P"><state id="X"><transition event="fork" target="C1 Y"/><transition event="solo" target="C1"/></state><state id="Y"/></parallel></scxml>`;
+    const result = new ChangeStateTypeCommand('C', 'final').execute(xml);
+    expect(result.success).toBe(true);
+    expect(result.newContent).toMatch(/<transition event="fork" target="Y"/);
+    expect(result.newContent).not.toContain('event="solo"');
+    expect(result.newContent).not.toContain('C1');
+  });
+
   it('final → state replaces the <final> element with a real <state> element', () => {
     const xml = `${VIZ_HEADER}><state id="A"><transition target="Done"/></state><final id="Done" viz:xywh="1,2,3,4"><onexit><log expr="1"/></onexit><donedata><param name="status" expr="1"/></donedata></final></scxml>`;
     const result = new ChangeStateTypeCommand('Done', 'simple').execute(xml);
