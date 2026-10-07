@@ -11,49 +11,6 @@ function run(root: any) {
   return { stateRegistry, hierarchyMap, parentMap };
 }
 
-describe('registerAllStates — <final>', () => {
-  it('registers a root-level <final> as a leaf with elementType "final"', () => {
-    const { stateRegistry } = run({ state: { '@_id': 'A' }, final: { '@_id': 'Done' } });
-    const entry = stateRegistry.get('Done');
-    expect(entry?.elementType).toBe('final');
-    expect(entry?.isContainer).toBe(false);
-    expect(entry?.parentPath).toBe('');
-  });
-
-  it('registers a nested <final> as a child of its parent, making the parent a container', () => {
-    const { stateRegistry, parentMap, hierarchyMap } = run({
-      state: { '@_id': 'Job', '@_initial': 'Work', state: { '@_id': 'Work' }, final: { '@_id': 'JobDone' } },
-    });
-    expect(stateRegistry.get('Job')?.isContainer).toBe(true);
-    expect(stateRegistry.get('JobDone')?.elementType).toBe('final');
-    expect(parentMap.get('JobDone')).toBe('Job');
-    expect(hierarchyMap.get('Job')).toEqual(['Work', 'JobDone']);
-  });
-
-  it("shows a <final> inside a <parallel> region in the region's column", () => {
-    const { stateRegistry, parentMap } = run({
-      parallel: {
-        '@_id': 'P',
-        state: [
-          { '@_id': 'R1', state: { '@_id': 'W1' }, final: { '@_id': 'F1' } },
-          { '@_id': 'R2', final: { '@_id': 'F2' } },
-        ],
-      },
-    });
-    expect(stateRegistry.has('R1')).toBe(false);
-    expect(stateRegistry.has('R2')).toBe(false);
-    expect(parentMap.get('F1')).toBe('P');
-    expect(parentMap.get('F2')).toBe('P');
-    expect(stateRegistry.get('F2')?.elementType).toBe('final');
-  });
-
-  it('a <state> merely named like a final state stays a plain state', () => {
-    const { stateRegistry } = run({ state: [{ '@_id': 'Final' }, { '@_id': 'CompleteSetup' }] });
-    expect(stateRegistry.get('Final')?.elementType).toBe('state');
-    expect(stateRegistry.get('CompleteSetup')?.elementType).toBe('state');
-  });
-});
-
 describe('registerAllStates — hand-authored <parallel> (regression guard)', () => {
   it('registers a hand-authored parallel and its regions normally (drillable)', () => {
     const root = {

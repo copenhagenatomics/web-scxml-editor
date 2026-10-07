@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import type { SCXMLDocument } from '@/types/scxml';
-import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
   updateTransitionTargets,
   removeStateFromDocument,
@@ -15,119 +14,7 @@ import {
   addStateToDocument,
   detachElementFromParent,
   collectExistingIds,
-  isFinalState,
-  resolveFinalStateRegion,
 } from './scxml-manipulation-utils';
-
-describe('<final> lookups', () => {
-  const makeDoc = () =>
-    ({
-      scxml: {
-        state: { '@_id': 'Job', state: { '@_id': 'Work' }, final: { '@_id': 'JobDone' } },
-        final: { '@_id': 'Done' },
-      },
-    }) as any as SCXMLDocument;
-
-  it('findElementById finds <final> elements and reports their tag', () => {
-    const d = makeDoc();
-    expect(findElementById(d, 'Done')?.tag).toBe('final');
-    expect(findElementById(d, 'JobDone')?.tag).toBe('final');
-    expect(findElementById(d, 'Work')?.tag).toBe('state');
-  });
-
-  it('isFinalState is true only for <final> elements', () => {
-    const d = makeDoc();
-    expect(isFinalState(d, 'Done')).toBe(true);
-    expect(isFinalState(d, 'JobDone')).toBe(true);
-    expect(isFinalState(d, 'Job')).toBe(false);
-    expect(isFinalState(d, 'missing')).toBe(false);
-  });
-
-  it('a <final> added via addStateToDocument survives a real serialize → parse round trip', () => {
-    // Mirrors the canvas "F" (Add Final State) button: parse, add, serialize.
-    const parser = new SCXMLParser();
-    const parsed = parser.parse(
-      '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A"><state id="A"/><state id="Job" initial="Work"><state id="Work"/></state></scxml>'
-    );
-    const doc = parsed.data!;
-    addStateToDocument(doc, { '@_id': 'final_1' } as any, undefined, 'final');
-    addStateToDocument(doc, { '@_id': 'final_2' } as any, 'Job', 'final');
-
-    const xml = parser.serialize(doc, true);
-    expect(xml).toMatch(/<final id="final_1"/);
-    expect(xml).toMatch(/<final id="final_2"/);
-    expect(xml).not.toMatch(/<state id="final_/);
-
-    const reparsed = parser.parse(xml).data!;
-    expect(findElementById(reparsed, 'final_1')?.tag).toBe('final');
-    expect(findElementById(reparsed, 'final_2')?.tag).toBe('final');
-  });
-
-  describe('resolveFinalStateRegion (canvas "Add Final State")', () => {
-    const doc = () =>
-      ({
-        scxml: {
-          state: { '@_id': 'main_region', state: { '@_id': 'Plain' } },
-          parallel: {
-            '@_id': 'P',
-            state: [
-              { '@_id': 'R1', '@_initial': 'A', state: [{ '@_id': 'A', state: { '@_id': 'A1' } }, { '@_id': 'A2' }] },
-              { '@_id': 'R2', '@_initial': 'B', state: { '@_id': 'B' } },
-              { '@_id': 'Empty' },
-            ],
-            parallel: { '@_id': 'Q', state: [{ '@_id': 'Q1' }, { '@_id': 'Q2' }] },
-          },
-        },
-      }) as any as SCXMLDocument;
-
-    it('refuses at the top level and inside an ordinary compound state', () => {
-      expect(resolveFinalStateRegion(doc(), null, ['main_region'])).toEqual({
-        error: 'Final states can only be added inside a parallel state.',
-      });
-      expect('error' in resolveFinalStateRegion(doc(), 'main_region', ['Plain'])).toBe(true);
-    });
-
-    it("targets the selected state's region, including for nested selections", () => {
-      expect(resolveFinalStateRegion(doc(), 'P', ['A2'])).toEqual({ regionId: 'R1' });
-      expect(resolveFinalStateRegion(doc(), 'P', ['A1'])).toEqual({ regionId: 'R1' });
-      expect(resolveFinalStateRegion(doc(), 'P', ['B'])).toEqual({ regionId: 'R2' });
-    });
-
-    it("targets an existing <final>'s region when that final is selected", () => {
-      const d = doc();
-      (d.scxml as any).parallel.state[1].final = { '@_id': 'R2Done' };
-      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual({ regionId: 'R2' });
-      expect(isDescendantOf(d, 'R2Done', 'R2')).toBe(true);
-      expect(isDescendantOf(d, 'R2Done', 'R1')).toBe(false);
-    });
-
-    it('targets an empty region shown as its own node when that node is selected', () => {
-      expect(resolveFinalStateRegion(doc(), 'P', ['Empty'])).toEqual({ regionId: 'Empty' });
-    });
-
-    it('refuses with no selection, or a selection spanning regions', () => {
-      expect(resolveFinalStateRegion(doc(), 'P', [])).toEqual({
-        error: 'Select a state in the region where the final state should go.',
-      });
-      expect(resolveFinalStateRegion(doc(), 'P', ['A', 'B'])).toEqual({
-        error: 'Select states from a single region to add a final state.',
-      });
-    });
-
-    it('refuses when the region is itself a <parallel>', () => {
-      expect('error' in resolveFinalStateRegion(doc(), 'P', ['Q1'])).toBe(true);
-    });
-  });
-
-  it('detaching and re-adding a <final> keeps it a <final>', () => {
-    const d = makeDoc();
-    const detached = detachElementFromParent(d, 'JobDone');
-    expect(detached?.tag).toBe('final');
-    addStateToDocument(d, detached!.element, undefined, detached!.tag);
-    expect(findElementById(d, 'JobDone')?.tag).toBe('final');
-    expect((d.scxml as any).state.final).toBeUndefined();
-  });
-});
 
 describe('findStateById', () => {
   it('finds a state nested directly inside a <parallel> element', () => {
@@ -376,30 +263,6 @@ describe('detachStateFromParent', () => {
 });
 
 describe('cloneStateSubtreeWithFreshIds', () => {
-  it('gives a nested <final> a fresh id and keeps internal transitions into it', () => {
-    const original = {
-      '@_id': 'Job',
-      '@_initial': 'Work',
-      state: { '@_id': 'Work', transition: { '@_event': 'done', '@_target': 'JobDone' } },
-      final: { '@_id': 'JobDone', '@_viz:xywh': '10,20,120,60' },
-    };
-    const { clone, idMap } = cloneStateSubtreeWithFreshIds(
-      original as any,
-      new Set(['Job', 'Work', 'JobDone']),
-      40,
-      40
-    );
-    rewriteOrDropTransitions(clone, idMap);
-
-    const c = clone as any;
-    expect(c.final['@_id']).toBe('JobDone_copy');
-    expect(c.final['@_viz:xywh']).toBe('50,60,120,60');
-    expect(idMap.get('JobDone')).toBe('JobDone_copy');
-    // The internal Work → JobDone transition survives, retargeted to the copy
-    expect(c.state.transition['@_target']).toBe('JobDone_copy');
-    expect(original.final['@_id']).toBe('JobDone');
-  });
-
   it('assigns a fresh "_copy" id and does not mutate the original', () => {
     const original = { '@_id': 'A' };
     const { clone, idMap } = cloneStateSubtreeWithFreshIds(

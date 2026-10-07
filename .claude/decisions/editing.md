@@ -41,7 +41,7 @@ Most commands implement `undo()` by constructing the inverse command (old/new va
 Not documented in one place, but the pattern makes sense pragmatically: reconstructing exactly where a deleted subtree and its cascaded transition removals should be re-inserted is significantly harder than a full-string restore, so the snapshot approach trades undo-implementation complexity for a slightly heavier per-command memory cost (already effectively "free" given the app already keeps full-string history snapshots — see `state-management.md` #2).
 
 ### Constraints
-A command using the snapshot-restore pattern must capture the snapshot **before** mutating, and its `undo()` must not attempt partial/structural reinsertion — mixing the two strategies within one command has led to bugs (see `ChangeStateTypeCommand`, next entry — since fixed).
+A command using the snapshot-restore pattern must capture the snapshot **before** mutating, and its `undo()` must not attempt partial/structural reinsertion — mixing the two strategies within one command has led to bugs (see `ChangeStateTypeCommand`, next entry).
 
 ### Alternatives
 None found evidenced as a third strategy.
@@ -75,7 +75,7 @@ N/A — not a deliberate decision.
 `src/lib/commands/change-state-type-command.ts` (`oldTransitions`/`oldSubstates` fields set in `execute()`, never read in `undo()`).
 
 ### Status
-Superseded — fixed. `ChangeStateTypeCommand` now snapshots the whole pre-`execute()` document and `undo()` restores it (approach (b) from #2, like `DeleteNodeCommand`), because converting to `<final>` can drop children and transitions elsewhere, which no inverse conversion can rebuild. Covered by the "undo restores the original document" test in `change-state-type-command.test.ts`. See also `visual-diagram.md` #15.
+Inferred behavior — confirmed defect, not an accepted or intended design.
 
 ---
 

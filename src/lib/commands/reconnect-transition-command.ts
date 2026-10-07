@@ -137,12 +137,6 @@ export class ReconnectTransitionCommand extends BaseCommand {
           scxmlContent
         );
       }
-      if (newSourceElement.localName === 'final') {
-        return this.createFailureResult(
-          `A final state cannot have outgoing transitions: ${finalNewSourceId}`,
-          scxmlContent
-        );
-      }
 
       // Remove transition from old source
       transitionElement.remove();

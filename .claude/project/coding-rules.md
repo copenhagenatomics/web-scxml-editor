@@ -16,8 +16,7 @@ There are exactly two ways SCXML content gets mutated. Pick based on precedent, 
 - If your command can change a state's **rendered width or height** (rename — label length; type change — different min-size; actions edit — height grows with action count; initial toggle — badge width), call `clearWaypointsForTouchingTransitions(doc, stateId)` from `waypoint-invalidation.ts` before returning. The edge renderer always prefers a persisted `viz:waypoints` path over dynamic routing, so a stale path will visually cut through a resized node if you skip this.
 - Use `this.findStateElement(doc, id)` (matches `state`/`parallel`/`final`) or `this.findNoteElement(doc, noteId)` (viz-namespace-aware, handles the transient `note:idx-N` fallback id) from `BaseCommand` rather than writing your own `querySelector`.
 - Call `this.ensureVizNamespace(doc)` before setting any `viz:*` attribute for the first time on a document that may not have declared the namespace yet.
-- If your command can drop content that an inverse command can't rebuild (e.g. `ChangeStateTypeCommand` turning a `<state>` into a `<final>` drops its transitions/substates), use the whole-document snapshot undo (b), not inverse re-execute (a).
-- A `<final>` can never be a transition source. A command that adds or moves a transition onto a source element must refuse when that element's `localName === 'final'` (see `ReconnectTransitionCommand`, `UpdateInternalEventsCommand`); object-model code can use `isFinalState()` from `scxml-manipulation-utils.ts`.
+- Known gap to be aware of (don't copy this pattern): `ChangeStateTypeCommand`'s `undo()` for a state→final conversion does not actually restore the transitions/substates it stripped during `execute()` — the snapshot is taken but never used. If you touch this command, this is a real bug, not intended behavior.
 
 ## 3. Validators
 

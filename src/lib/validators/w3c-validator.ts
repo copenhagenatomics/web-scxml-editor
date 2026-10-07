@@ -272,25 +272,6 @@ function validateFinalRequiredAttributes(
       });
     }
   }
-
-  // A <final> is a terminal state: SCXML doesn't allow <transition> children.
-  // The diagram never creates one (see isFinalState / ReconnectTransitionCommand),
-  // so this catches hand-edited XML.
-  if ((final as any).transition) {
-    const count = Array.isArray((final as any).transition) ? (final as any).transition.length : 1;
-    const position = findElementPosition('final', path, elementPositions);
-    const errorKey = `final_has_transition_${path}`;
-
-    if (!reportedErrors.has(errorKey)) {
-      reportedErrors.add(errorKey);
-      errors.push({
-        message: `Final state '${final['@_id'] ?? '(no id)'}' has ${count === 1 ? 'an outgoing transition' : `${count} outgoing transitions`}. A final state cannot have outgoing transitions — remove the <transition> element${count === 1 ? '' : 's'}.`,
-        severity: 'error',
-        line: position?.line,
-        column: position?.column,
-      });
-    }
-  }
 }
 
 function validateTransitionRequiredAttributes(

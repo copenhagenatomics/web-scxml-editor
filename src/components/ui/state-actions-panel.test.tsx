@@ -116,42 +116,6 @@ describe('StateActionsPanel reaction ordering', () => {
   });
 });
 
-describe('StateActionsPanel event reactions tab for final states', () => {
-  it('shows the event reactions tab for a normal state', () => {
-    renderPanel({ stateType: 'simple' });
-    expect(screen.getByText(/event reactions/)).toBeInTheDocument();
-  });
-
-  it('hides the event reactions tab for a final state, keeping onentry', () => {
-    renderPanel({ stateType: 'final' });
-    expect(screen.queryByText(/event reactions/)).not.toBeInTheDocument();
-    expect(screen.getByText(/onentry \(0\)/)).toBeInTheDocument();
-  });
-
-  it('falls back to onentry when a final state is selected while the reactions tab is open', () => {
-    const props = {
-      isVisible: true,
-      onClose: noop,
-      entryActions: [],
-      exitActions: [],
-      internalEventActions: [],
-      scxmlContent: '<scxml xmlns="http://www.w3.org/2005/07/scxml"><state id="StateA"/><final id="Done"/></scxml>',
-      isInitial: false,
-      canMarkInitial: true,
-      onToggleInitial: noop,
-      onApply: noop,
-      onApplyReactions: noop,
-    };
-    const { rerender } = render(<StateActionsPanel {...props} stateId='StateA' stateType='simple' />);
-    fireEvent.click(screen.getByText(/event reactions/));
-    expect(screen.getByText('No reactions yet.')).toBeInTheDocument();
-
-    rerender(<StateActionsPanel {...props} stateId='Done' stateType='final' />);
-    expect(screen.queryByText(/event reactions/)).not.toBeInTheDocument();
-    expect(screen.queryByText('No reactions yet.')).not.toBeInTheDocument();
-  });
-});
-
 describe('StateActionsPanel onexit tab visibility', () => {
   it('hides the onexit tab when the state has no onexit actions', () => {
     renderPanel();

@@ -49,39 +49,6 @@ describe('SCXMLToXStateConverter node width recalculation', () => {
   });
 });
 
-describe('SCXMLToXStateConverter <final> states', () => {
-  const HEADER = '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A"';
-
-  it('turns a <final> element into a diagram node with stateType "final"', async () => {
-    const { nodes } = await convert(`${HEADER}><state id="A"><transition event="go" target="Done"/></state><final id="Done"/></scxml>`);
-    const node = nodes.find((n) => n.id === 'Done');
-    expect(node).toBeDefined();
-    expect(node!.type).toBe('scxmlState');
-    expect(node!.data.stateType).toBe('final');
-  });
-
-  it('creates an edge for a transition targeting a <final>', async () => {
-    const { edges } = await convert(`${HEADER}><state id="A"><transition event="go" target="Done"/></state><final id="Done"/></scxml>`);
-    expect(edges.some((e) => e.source === 'A' && e.target === 'Done')).toBe(true);
-  });
-
-  it('does not treat a type="final" attribute or a final-sounding name as final', async () => {
-    const { nodes } = await convert(
-      `${HEADER}><state id="A"/><state id="Final"/><state id="CompleteSetup"/><state id="T" type="final"/></scxml>`
-    );
-    for (const id of ['A', 'Final', 'CompleteSetup', 'T']) {
-      expect(nodes.find((n) => n.id === id)!.data.stateType).toBe('simple');
-    }
-  });
-
-  it('summarizes <donedata> params on the final node', async () => {
-    const { nodes } = await convert(
-      `${HEADER}><state id="A"/><final id="Done"><donedata><param name="status" expr="1"/><param name="code" expr="2"/></donedata></final></scxml>`
-    );
-    expect(nodes.find((n) => n.id === 'Done')!.data.doneDataSummary).toBe('{status, code}');
-  });
-});
-
 describe('SCXMLToXStateConverter onentry/onexit action ordering', () => {
   // fast-xml-parser's default parse groups <onentry> children by tag name
   // (all <assign> together, then all <send> together), which silently

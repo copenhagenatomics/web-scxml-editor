@@ -20,8 +20,6 @@ import {
   findElementById,
   collectExistingIds,
   isDescendantOf,
-  isFinalState,
-  resolveFinalStateRegion,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
@@ -112,8 +110,6 @@ interface VisualDiagramProps {
 }
 
 // ==================== CONSTANTS ====================
-const FINAL_STATE_SOURCE_MESSAGE = 'A final state cannot have outgoing transitions.';
-
 // Custom node types for SCXML elements
 const nodeTypes: NodeTypes = {
   scxmlState: SCXMLStateNode,
@@ -1038,11 +1034,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       if (params.source && params.target && parserRef.current && scxmlContent) {
         const preCheck = parserRef.current.parse(scxmlContent);
         if (preCheck.success && preCheck.data) {
-          if (isFinalState(preCheck.data, params.source)) {
-            setConnectionBlockedMessage(FINAL_STATE_SOURCE_MESSAGE);
-            return;
-          }
-
           const { blocked, reason } = wouldMergeDistinctGroups(
             preCheck.data,
             params.source,
@@ -1208,13 +1199,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const parseResult = parserRef.current.parse(scxmlContent);
       if (!parseResult.success || !parseResult.data) return true;
 
-      // A <final> state has no source handles, but reconnecting an existing
-      // edge's source end could still land on one — reject that here too.
-      if (isFinalState(parseResult.data, connection.source)) {
-        setConnectionBlockedMessage(FINAL_STATE_SOURCE_MESSAGE);
-        return false;
-      }
-
       const { blocked, reason } = wouldMergeDistinctGroups(
         parseResult.data,
         connection.source,
@@ -1348,13 +1332,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 newStates.add(stateId);
 
                 // Show actions editor for single selected state
-                // (notes are annotations - they select but have no actions panel;
-                // final states select too, but don't get the panel either — close
-                // it so a previously selected state's actions aren't left showing)
+                // (notes are annotations - they select but have no actions panel)
                 const node = nodes.find((n) => n.id === stateId);
-                if (node?.data?.stateType === 'final') {
-                  setSelectedStateForActions(null);
-                } else if (node && node.data && nodeType !== 'scxmlNote') {
+                if (node && node.data && nodeType !== 'scxmlNote') {
                   const parseActions = (actions: string[]): ParsedActionRow[] => {
                     // Timer-generated send/cancel rows (the "after X" delay's
                     // implementation) are hidden here — the user authors/edits
@@ -1426,17 +1406,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     },
     [nodes, scxmlContent]
   );
-
-  // Final states never get the State Actions panel (see handleStateClick). If
-  // the state whose panel is open becomes a <final> (e.g. edited in the XML),
-  // close the panel.
-  React.useEffect(() => {
-    if (!selectedStateForActions) return;
-    const node = nodes.find((n) => n.id === selectedStateForActions.id);
-    if (node?.data?.stateType === 'final') {
-      setSelectedStateForActions(null);
-    }
-  }, [nodes, selectedStateForActions]);
 
   // ==================== MARQUEE (CTRL/CMD+DRAG) SELECTION HANDLER ====================
   // Triggered via selectionKeyCode={['Control', 'Meta']} on <ReactFlow> below.
@@ -2571,11 +2540,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   ]);
 
   // ==================== ADD ROOT STATE HANDLER ====================
-  // Adds a <state> (kind 'state') at the current hierarchy level, or a
-  // <final> (kind 'final') into the region of the selected state — final
-  // states are only added while viewing inside a <parallel> (see
-  // resolveFinalStateRegion).
-  const handleAddRootState = React.useCallback((kind: 'state' | 'final' = 'state') => {
+  const handleAddRootState = React.useCallback(() => {
     if (!onSCXMLChange || !scxmlContent) {
       console.error('Cannot add state: SCXML not available');
       return;
@@ -2586,23 +2551,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       if (parseResult?.success && parseResult.data) {
         const scxmlDoc = parseResult.data;
 
-        let finalRegionId: string | undefined;
-        if (kind === 'final') {
-          const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
-          if ('error' in resolved) {
-            showFeedback(resolved.error, 'warning');
-            return;
-          }
-          finalRegionId = resolved.regionId;
-        }
-
-        const idPrefix = kind === 'final' ? 'final' : 'state';
-        let newStateId = `${idPrefix}_1`;
+        let newStateId = 'state_1';
         let counter = 1;
         const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
         while (existingIds.has(newStateId)) {
           counter++;
-          newStateId = `${idPrefix}_${counter}`;
+          newStateId = `state_${counter}`;
         }
         let parentId: string | undefined = undefined;
 
@@ -2615,16 +2569,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         let x = 100;
         let y = 100;
 
-        if (finalRegionId) {
-          // Goes into the selected state's region, placed just below the
-          // selected node so it lands in that region's column.
-          parentId = finalRegionId;
-          const anchor = nodes.find((n) => activeStates.has(n.id));
-          if (anchor) {
-            x = anchor.position.x;
-            y = anchor.position.y + (anchor.height || (anchor.data as any)?.height || 80) + 60;
-          }
-        } else if (parentId) {
+        if (parentId) {
           const childNodes = nodes.length;
 
           if (childNodes) {
@@ -2667,11 +2612,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // `!parentState.state` check alone would treat the root as empty
         // once its children have moved into __root_parallel, and would
         // spuriously mark this new sibling Initial too.
-        // A final state is never auto-marked Initial (it's an end point, and
-        // the Initial toggle isn't offered for it) — the next ordinary state
-        // added to this container gets the marker instead.
         let isInitial = false;
-        if (parentId && kind === 'state') {
+        if (parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
           if (parentState && !hasAnyChildren(parentState)) {
             isInitial = true;
@@ -2682,7 +2624,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // This accounts for the "Initial" tag width when isInitial is true
         const dimensions = nodeDimensionCalculator.calculateDimensions(
           newStateId,
-          kind === 'final' ? 'final' : 'simple',
+          'simple',
           0,
           0,
           isInitial
@@ -2701,7 +2643,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        addStateToDocument(scxmlDoc, newState, parentId, kind);
+        addStateToDocument(scxmlDoc, newState, parentId);
 
         const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
         onSCXMLChange(updatedSCXML, 'structure');
@@ -2726,8 +2668,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     currentParentId,
     nodes,
     fitView,
-    showFeedback,
-    activeStates,
   ]);
 
   // ==================== COPY / PASTE SELECTION HANDLERS ====================
@@ -2750,13 +2690,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     // carrying it over onto the pasted copy.
     const initialIds = new Set<string>();
     const parallelIds = new Set<string>();
-    const finalIds = new Set<string>();
     activeStates.forEach((id) => {
       const found = findElementById(parseResult.data as SCXMLDocument, id);
       if (found) {
         clones.push(JSON.parse(JSON.stringify(found.element)));
         if (found.tag === 'parallel') parallelIds.add(id);
-        if (found.tag === 'final') finalIds.add(id);
         // A region of a parallel is always active — carry it over as
         // Initial too, so pasting 2+ regions makes the target a parallel.
         if (
@@ -2768,7 +2706,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
     });
     if (clones.length > 0) {
-      useStateClipboardStore.getState().copy(clones, initialIds, parallelIds, finalIds);
+      useStateClipboardStore.getState().copy(clones, initialIds, parallelIds);
       // Clear the selection so the Multi-Select Toolbar closes, matching
       // Cut/Delete's behavior of dismissing it once their action completes.
       setActiveStates(new Set());
@@ -2784,31 +2722,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   }, [copyActiveStatesToClipboard, showFeedback]);
 
   const handlePasteClipboard = useCallback(() => {
-    const { copied, copiedInitialIds, copiedParallelIds, copiedFinalIds } =
-      useStateClipboardStore.getState();
+    const { copied, copiedInitialIds, copiedParallelIds } = useStateClipboardStore.getState();
     if (!copied || copied.length === 0 || !onSCXMLChange || !scxmlContent) return;
-
-    const parseResult = parserRef.current?.parse(scxmlContent);
-    if (!parseResult?.success || !parseResult.data) return;
-    const scxmlDoc = parseResult.data as SCXMLDocument;
-
-    // A <parallel> can't hold a <final> directly (its children are regions),
-    // so pasted finals go into the selected state's region — the same rule as
-    // the "Add Final State" button. Checked before anything is mutated.
-    let finalRegionId: string | undefined;
-    const pastingFinals = copied.some((s) => copiedFinalIds.has(s['@_id']));
-    if (
-      pastingFinals &&
-      currentParentId &&
-      findElementById(scxmlDoc, currentParentId)?.tag === 'parallel'
-    ) {
-      const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
-      if ('error' in resolved) {
-        showFeedback(resolved.error, 'warning');
-        return;
-      }
-      finalRegionId = resolved.regionId;
-    }
 
     if (copied !== lastPastedClipboardRef.current) {
       lastPastedClipboardRef.current = copied;
@@ -2817,6 +2732,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       pasteOffsetMultiplierRef.current += 1;
     }
     const offset = 40 * pasteOffsetMultiplierRef.current;
+
+    const parseResult = parserRef.current?.parse(scxmlContent);
+    if (!parseResult?.success || !parseResult.data) return;
+    const scxmlDoc = parseResult.data as SCXMLDocument;
 
     // "Initial" lives on the parent, not on the state itself (see
     // isMarkedInitial), so carrying it over from a copied/cut state that was
@@ -2847,14 +2766,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
     clones.forEach((clone, i) => {
       rewriteOrDropTransitions(clone, combinedIdMap);
-      const copiedId = copied[i]['@_id'];
-      const tag = copiedParallelIds.has(copiedId)
-        ? 'parallel'
-        : copiedFinalIds.has(copiedId)
-          ? 'final'
-          : 'state';
-      const parentId = tag === 'final' && finalRegionId ? finalRegionId : currentParentId ?? undefined;
-      addStateToDocument(scxmlDoc, clone, parentId, tag);
+      const tag = copiedParallelIds.has(copied[i]['@_id']) ? 'parallel' : 'state';
+      addStateToDocument(scxmlDoc, clone, currentParentId ?? undefined, tag);
     });
 
     const carriedInitialIds = targetContainer
@@ -2871,7 +2784,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
     onSCXMLChange(updatedSCXML, 'structure');
     setActiveStates(new Set(clones.map((c) => c['@_id'])));
-  }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId, activeStates, showFeedback]);
+  }, [scxmlContent, onSCXMLChange, parsedData?.nodes, currentParentId]);
 
   const handleCutSelection = useCallback(() => {
     if (activeStates.size === 0) return;
@@ -2890,17 +2803,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const parseResult = parserRef.current?.parse(scxmlContent);
       if (!parseResult?.success || !parseResult.data) return;
       const scxmlDoc = parseResult.data as SCXMLDocument;
-      // A <final> can't contain child states
-      if (targetParentId && isFinalState(scxmlDoc, targetParentId)) return;
-      const targetIsParallel =
-        !!targetParentId && findElementById(scxmlDoc, targetParentId)?.tag === 'parallel';
 
       let changed = false;
       stateIds.forEach((id) => {
         if (id === targetParentId) return;
-        // A <parallel> can't hold a <final> directly — it would vanish from
-        // the diagram (computeDropTarget already rejects this drop).
-        if (targetIsParallel && isFinalState(scxmlDoc, id)) return;
         if (targetParentId && isDescendantOf(scxmlDoc, targetParentId, id)) return;
         const detached = detachElementFromParent(scxmlDoc, id);
         if (!detached) return;
@@ -2989,11 +2895,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const scxmlDoc = parseResult.data as SCXMLDocument;
       const invalid =
         candidate.type !== 'scxmlState' ||
-        // A <final> can't contain child states
-        isFinalState(scxmlDoc, candidate.id) ||
-        // ...and a <parallel> can't hold a <final> directly (only regions)
-        (findElementById(scxmlDoc, candidate.id)?.tag === 'parallel' &&
-          draggingNodeIdsRef.current.some((id) => isFinalState(scxmlDoc, id))) ||
         draggingNodeIdsRef.current.includes(candidate.id) ||
         draggingNodeIdsRef.current.some((id) => isDescendantOf(scxmlDoc, candidate.id, id));
 
@@ -3673,20 +3574,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               showInteractive={true}
             >
               <ControlButton
-                onClick={() => handleAddRootState('state')}
+                onClick={handleAddRootState}
                 title='Add State'
                 aria-label='Add State'
                 className='text-muted hover:text-default'
               >
                 S
-              </ControlButton>
-              <ControlButton
-                onClick={() => handleAddRootState('final')}
-                title='Add Final State'
-                aria-label='Add Final State'
-                className='text-muted hover:text-default'
-              >
-                F
               </ControlButton>
               <ControlButton
                 onClick={handleAddNote}

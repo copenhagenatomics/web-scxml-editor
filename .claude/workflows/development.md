@@ -127,7 +127,7 @@ Do not refactor adjacent code "while you're in there" unless the refactor is the
 Read your own diff before calling the task done. Specifically check:
 - Does it touch only what step 11's plan said it would?
 - Did an editor/formatter reformat unrelated lines? Revert those.
-- For a Command: does `execute()`/`undo()` stay symmetric? Does it follow one of the two established undo strategies (inverse-re-execute or snapshot-restore — see `.claude/project/coding-rules.md` §2), not a half-and-half mix (the documented cause of the since-fixed `ChangeStateTypeCommand` undo defect, `decisions/editing.md` #3)?
+- For a Command: does `execute()`/`undo()` stay symmetric? Does it follow one of the two established undo strategies (inverse-re-execute or snapshot-restore — see `.claude/project/coding-rules.md` §2), not a half-and-half mix (the documented cause of the `ChangeStateTypeCommand` undo defect)?
 - For a validator: did you add the rule to the right pass position, and does it use the existing position-lookup helpers rather than new ad hoc line-counting?
 
 ### 16. Check for regressions

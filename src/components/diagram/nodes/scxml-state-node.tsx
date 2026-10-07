@@ -12,7 +12,6 @@ import {
 } from 'reactflow';
 import { Trash2, ArrowDownCircle, Plus } from 'lucide-react';
 import {
-  computeVisualStyles,
   visualStylesToCSS,
   getAdditionalClasses,
 } from '@/lib/utils/visual-style-utils';
@@ -35,8 +34,6 @@ export interface SCXMLStateNodeData {
   entryActions?: string[];
   exitActions?: string[];
   internalEventActions?: { event: string; location: string; expr: string; type: 'internal' | 'external' }[];
-  // <final> only: compact summary of its <donedata>, e.g. "{status, code}"
-  doneDataSummary?: string;
   onEntryActions?: string[];
   onExitActions?: string[];
   visualStyles?: VisualStyles;
@@ -134,8 +131,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       entryActions = [],
       exitActions = [],
       internalEventActions = [],
-      doneDataSummary,
-      visualStyles: providedVisualStyles,
+      visualStyles,
       onLabelChange,
       onStateTypeChange,
       onActionsChange,
@@ -149,13 +145,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       anchors,
       onAddAnchor,
     } = data;
-
-    // Final-ness comes only from the SCXML element (<final>), never the name.
-    // Its look is owned by computeVisualStyles, so use it even when the
-    // diagram hasn't supplied visualStyles yet.
-    const isFinal = stateType === 'final';
-    const visualStyles =
-      providedVisualStyles ?? (isFinal ? computeVisualStyles(undefined, 'final') : undefined);
 
     // Shift-click near one of the node's four borders adds another anchor
     // point to that side (see the anchors feature). A margin of EDGE_MARGIN
@@ -371,6 +360,13 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       ) {
         return { type: 'error', color: '#dc2626', bg: '#fef2f2' }; // Red
       }
+      if (
+        stateType === 'final' ||
+        labelLower.includes('final') ||
+        labelLower.includes('complete')
+      ) {
+        return { type: 'terminal', color: '#7c3aed', bg: '#f3e8ff' }; // Purple
+      }
       if (actionCount >= 3) {
         return { type: 'complex', color: '#f59e0b', bg: '#fffbeb' }; // Orange
       }
@@ -543,8 +539,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
           {/* Connection handles - all 4 sides support both incoming and outgoing.
               Each side renders `anchors[side] ?? 1` evenly-spaced handle pairs;
               index 0 keeps the bare side id for backward compatibility, see
-              .claude/features/state-connections-handles.md. A <final> state
-              gets target handles only — it can't have outgoing transitions. */}
+              .claude/features/state-connections-handles.md */}
           {HANDLE_SIDES.flatMap((side) => {
             const count = anchors?.[side] ?? 1;
             return Array.from({ length: count }, (_, i) => {
@@ -559,15 +554,13 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
                     style={style}
                     className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
                   />
-                  {!isFinal && (
-                    <Handle
-                      type='source'
-                      position={HANDLE_SIDE_POSITION[side]}
-                      id={id}
-                      style={style}
-                      className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
-                    />
-                  )}
+                  <Handle
+                    type='source'
+                    position={HANDLE_SIDE_POSITION[side]}
+                    id={id}
+                    style={style}
+                    className='!bg-slate-500 !border-white !w-4 !h-4 !border-2 hover:!bg-blue-500 transition-colors'
+                  />
                 </React.Fragment>
               );
             });
@@ -587,9 +580,8 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
             </button>
           )}
 
-          {/* Navigate into button - show for all states except <final>,
-              which can't contain child states */}
-          {onNavigateInto && !isFinal && (
+          {/* Navigate into button - show for all states */}
+          {onNavigateInto && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -634,16 +626,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
                     {label}
                   </span>
                 )}
-                {isFinal && (
-                  <span
-                    data-testid='final-state-icon'
-                    className='text-slate-500 text-sm leading-none'
-                    title='Final state'
-                    aria-label='Final state'
-                  >
-                    ◉
-                  </span>
-                )}
               </div>
               {isInitial && (
                 <div className='bg-gradient-to-r from-green-100 to-emerald-100 text-green-800 text-xs px-2.5 py-1 rounded-full font-bold shadow-sm border border-green-300'>
@@ -651,15 +633,6 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
                 </div>
               )}
             </div>
-
-            {isFinal && doneDataSummary && (
-              <div
-                className='pl-[10px] mb-1 text-[10px] text-slate-500 truncate'
-                title={`donedata: ${doneDataSummary}`}
-              >
-                done: {doneDataSummary}
-              </div>
-            )}
 
             {/* Action count indicators */}
             {actionCountIndicator}

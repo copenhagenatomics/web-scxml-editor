@@ -3,18 +3,12 @@ import { useStateClipboardStore } from './state-clipboard-store';
 
 describe('useStateClipboardStore', () => {
   beforeEach(() => {
-    useStateClipboardStore.setState({
-      copied: null,
-      copiedInitialIds: new Set(),
-      copiedParallelIds: new Set(),
-      copiedFinalIds: new Set(),
-    });
+    useStateClipboardStore.setState({ copied: null, copiedInitialIds: new Set(), copiedParallelIds: new Set() });
   });
 
   it('starts with an empty clipboard', () => {
     expect(useStateClipboardStore.getState().copied).toBeNull();
     expect(useStateClipboardStore.getState().copiedInitialIds.size).toBe(0);
-    expect(useStateClipboardStore.getState().copiedFinalIds.size).toBe(0);
   });
 
   it('stores copied states via copy()', () => {
@@ -47,24 +41,5 @@ describe('useStateClipboardStore', () => {
     expect(useStateClipboardStore.getState().copiedParallelIds.size).toBe(0);
     useStateClipboardStore.getState().copy([{ '@_id': 'P' }] as any, new Set(), new Set(['P']));
     expect(useStateClipboardStore.getState().copiedParallelIds.has('P')).toBe(true);
-  });
-
-  it('defaults copiedFinalIds to an empty set when omitted', () => {
-    useStateClipboardStore.getState().copy([{ '@_id': 'A' }] as any);
-    expect(useStateClipboardStore.getState().copiedFinalIds.size).toBe(0);
-  });
-
-  it('stores which copied elements are <final>, separately from <parallel> ones', () => {
-    const states = [{ '@_id': 'S' }, { '@_id': 'P' }, { '@_id': 'Done' }] as any;
-    useStateClipboardStore.getState().copy(states, new Set(), new Set(['P']), new Set(['Done']));
-    const { copiedFinalIds, copiedParallelIds } = useStateClipboardStore.getState();
-    expect([...copiedFinalIds]).toEqual(['Done']);
-    expect([...copiedParallelIds]).toEqual(['P']);
-  });
-
-  it('does not carry copiedFinalIds over into a later copy that has no finals', () => {
-    useStateClipboardStore.getState().copy([{ '@_id': 'Done' }] as any, new Set(), new Set(), new Set(['Done']));
-    useStateClipboardStore.getState().copy([{ '@_id': 'A' }] as any);
-    expect(useStateClipboardStore.getState().copiedFinalIds.size).toBe(0);
   });
 });
