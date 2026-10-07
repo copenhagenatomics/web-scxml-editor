@@ -1348,9 +1348,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 newStates.add(stateId);
 
                 // Show actions editor for single selected state
-                // (notes are annotations - they select but have no actions panel)
+                // (notes are annotations - they select but have no actions panel;
+                // final states select too, but don't get the panel either — close
+                // it so a previously selected state's actions aren't left showing)
                 const node = nodes.find((n) => n.id === stateId);
-                if (node && node.data && nodeType !== 'scxmlNote') {
+                if (node?.data?.stateType === 'final') {
+                  setSelectedStateForActions(null);
+                } else if (node && node.data && nodeType !== 'scxmlNote') {
                   const parseActions = (actions: string[]): ParsedActionRow[] => {
                     // Timer-generated send/cancel rows (the "after X" delay's
                     // implementation) are hidden here — the user authors/edits
@@ -1422,6 +1426,17 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     },
     [nodes, scxmlContent]
   );
+
+  // Final states never get the State Actions panel (see handleStateClick). If
+  // the state whose panel is open becomes a <final> (e.g. edited in the XML),
+  // close the panel.
+  React.useEffect(() => {
+    if (!selectedStateForActions) return;
+    const node = nodes.find((n) => n.id === selectedStateForActions.id);
+    if (node?.data?.stateType === 'final') {
+      setSelectedStateForActions(null);
+    }
+  }, [nodes, selectedStateForActions]);
 
   // ==================== MARQUEE (CTRL/CMD+DRAG) SELECTION HANDLER ====================
   // Triggered via selectionKeyCode={['Control', 'Meta']} on <ReactFlow> below.
