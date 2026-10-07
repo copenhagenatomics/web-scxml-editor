@@ -160,6 +160,11 @@ export class ChangeStateTypeCommand extends BaseCommand {
 
     element.parentNode?.replaceChild(replacement, element);
 
+    // Known limitation: this and collectTargetableIds use document-wide
+    // selectors, so XML embedded in data payloads (<content>, inline <data>)
+    // isn't excluded. No UI calls this command yet — scope both to the real
+    // state hierarchy before wiring one up (see .claude/features/state-node-types.md).
+    //
     // Targets pointing at a dropped descendant would dangle. A transition can
     // list several targets ("A B"), so only the dropped ones are removed from
     // the list; the transition itself goes only once no target is left.
