@@ -25,18 +25,22 @@ export interface StateRegistryEntry {
  * src/lib/utils/parallel-group-normalization.ts) is likewise never a node:
  * its regions' contents register at root level.
  *
- * Returns the effective "direct <state> / <parallel> children" of an element.
+ * Returns the effective "direct <state> / <parallel> / <final> children" of
+ * an element.
  */
 function collectEffectiveChildren(
   parent: any,
   kind: ContainerKind
-): { states: any[]; parallels: any[] } {
+): { states: any[]; parallels: any[]; finals: any[] } {
   const states: any[] = [];
   const parallels: any[] = [];
+  const finals: any[] = [];
   getDisplayChildEntries(parent, kind).forEach((entry) => {
-    (entry.tag === 'state' ? states : parallels).push(entry.el);
+    if (entry.tag === 'state') states.push(entry.el);
+    else if (entry.tag === 'parallel') parallels.push(entry.el);
+    else finals.push(entry.el);
   });
-  return { states, parallels };
+  return { states, parallels, finals };
 }
 
 
@@ -196,6 +200,26 @@ export function registerAllStates(
     }
   }
 
+  // Register final states — always leaves (a <final> has no child states)
+  for (const final of collectEffectiveChildren(parent, kind).finals) {
+    const finalId = getAttribute(final, 'id');
+    if (finalId) {
+      stateRegistry.set(finalId, {
+        state: final,
+        parentPath,
+        children: [],
+        isContainer: false,
+        depth,
+        elementType: 'final',
+      });
+
+      if (parentId) {
+        hierarchyMap.get(parentId)?.push(finalId);
+        parentMap.set(finalId, parentId);
+      }
+    }
+  }
+
   // Register history states
   const histories = getElements(parent, 'history');
   if (histories) {
@@ -237,9 +261,10 @@ export function hasChildStates(
 ): boolean {
   const childStates = getElements(element, 'state');
   const childParallels = getElements(element, 'parallel');
+  const childFinals = getElements(element, 'final');
   const childHistories = getElements(element, 'history');
 
-  return !!(childStates || childParallels || childHistories);
+  return !!(childStates || childParallels || childFinals || childHistories);
 }
 
 /**
@@ -257,7 +282,7 @@ export function collectDirectChildIds(
 
   // Collect child states - only those not already claimed. Includes the
   // regions of the root's __root_parallel.
-  const { states, parallels: parallelsArray } = collectEffectiveChildren(element, kind);
+  const { states, parallels: parallelsArray, finals } = collectEffectiveChildren(element, kind);
   for (const state of states) {
     const stateId = getAttribute(state, 'id');
     if (!stateId) continue;
@@ -279,6 +304,13 @@ export function collectDirectChildIds(
       if (!claimedStates.has(parallelId)) {
         childIds.push(parallelId);
       }
+    }
+  }
+
+  for (const final of finals) {
+    const finalId = getAttribute(final, 'id');
+    if (finalId && !claimedStates.has(finalId)) {
+      childIds.push(finalId);
     }
   }
 

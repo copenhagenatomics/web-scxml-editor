@@ -6,21 +6,21 @@ Consolidate the full lifecycle of editing a state's own identity and structural 
 
 ## User behavior
 
-- **Create**: toolbar "S" button (New State) adds a root-level state at a free grid slot with a default id, no children, no actions.
+- **Create**: toolbar "S" button (New State) adds a state at the hierarchy level currently being viewed (root, or inside the navigated-into state — see below) at a free grid slot, with a default id, no children, no actions. The "F" button (Add Final State) adds a `<final>` (ids `final_1`, `final_2`, …), but **only while viewing inside a `<parallel>`** (product decision, October 2026). Since a `<parallel>` can't hold a `<final>` directly, it goes into the region (`<state>` child of the parallel) containing the currently selected state(s), placed just below the selected node. It is refused with a warning toast at the top level, inside an ordinary compound state, with nothing selected, with a selection spanning several regions, or when that region is itself a `<parallel>` — see `resolveFinalStateRegion` in `scxml-manipulation-utils.ts`. A new final is never auto-marked Initial. Finals can still be written anywhere valid by editing the XML; this restriction is on the button only.
 - **Rename**: double-click the state, type a new value, Enter/blur to commit (see `labels.md` for the full mechanism — every reference to the old id updates automatically).
 - **Change type**: via a control in the State Actions panel / elsewhere in the UI (verify exact UI entry point in current build), switching between simple/compound/parallel/final.
 - **Delete**: select and press Delete/Backspace; cascades to remove any transitions elsewhere in the document that targeted the deleted state.
 
 ## UI behavior
 
-- New states always appear at root level (`handleAddRootState`), never pre-nested inside whatever compound state the user happens to be viewing — a new state created while drilled into a parent still needs an explicit drag-to-reparent afterward to become that parent's child (verify this against current behavior; if `handleAddRootState` has since been made hierarchy-level-aware, update this note).
+- New states (and finals) are added at the hierarchy level currently being viewed: `handleAddRootState` adds under `currentParentId` when the user has navigated into a state, and at the document root otherwise. Despite its name, it is not root-only.
 - The Initial-State checkbox (hosted in the State Actions panel, not a separate "state editing" control) can be disabled with an explanatory tooltip when checking it would merge two Initial-State groups (see `.claude/features/initial-state-groups.md`).
 
 ## Internal architecture
 
-- **Create**: `handleAddRootState` in `visual-diagram.tsx` uses the **direct object-tree edit path** (`scxml-manipulation-utils.ts`'s `createStateElement`/`addStateToDocument`), not a Command — see `.claude/project/architecture.md`. Sets `@_viz:xywh` for initial placement and `@_initial` if it's the very first state in the document.
+- **Create**: `handleAddRootState` in `visual-diagram.tsx` uses the **direct object-tree edit path** (`scxml-manipulation-utils.ts`'s `createStateElement`/`addStateToDocument`), not a Command — see `.claude/project/architecture.md`. Sets `@_viz:xywh` for initial placement and, for a `<state>` added inside a navigated-into parent that has no `<state>`/`<parallel>` children yet, sets that parent's `@_initial` to it (nothing is set at the document root). Takes a `kind` (`'state' | 'final'`) that picks the element tag passed to `addStateToDocument`.
 - **Rename**: `RenameStateCommand` — see `.claude/features/labels.md` for the full cascading-rewrite behavior (transition targets, `initial` attributes, time-event tokens, waypoint invalidation).
-- **Change type**: `ChangeStateTypeCommand` — **known broken for the state→final conversion's undo path** (snapshots removed transitions/substates but never restores them — see `.claude/features/state-node-types.md` and `.claude/project/coding-rules.md` §2 for the specifics), and **not fully implemented for state→parallel conversion** (logs a `console.warn` rather than actually rewriting the element tag).
+- **Change type**: `ChangeStateTypeCommand` — swaps `<state>` ↔ `<final>` for real (keeping valid attributes/children, dropping invalid ones), with whole-document snapshot undo; **not implemented for state→parallel conversion** (logs a `console.warn`). Details in `.claude/features/state-node-types.md` ("SCXML behavior").
 - **Delete**: `DeleteNodeCommand` — removes the state element itself and separately scans the **entire document** for any `<transition target="deletedId">` to clean up (not scoped to the deleted subtree — a transition from an unrelated branch pointing at the deleted state is also cleaned up). If the deleted state was the document's `initial` state, reassigns `initial` to the first `<state>` found in document order (not necessarily a sibling) or removes the attribute if none remain. Undo is a **whole-document snapshot restore**, not structural reinsertion (see `.claude/project/coding-rules.md` §2).
 
 ## Relevant components
@@ -50,7 +50,7 @@ Create/delete/retype all operate on the `<state>`/`<parallel>`/`<final>` element
 - `state-node-types.md` — the visual consequence of a type change.
 - `state-hierarchy-tree.md` — deletion's document-wide transition cleanup interacts with the hierarchy the deleted state was part of.
 - `initial-state-groups.md` — interactions between delete/retype and Initial-marker validity.
-- `undo-redo-history.md` — delete's snapshot-based undo vs. rename/retype's inverse-command undo (two different Command undo strategies both represented in this one feature).
+- `undo-redo-history.md` — delete's and retype's snapshot-based undo vs. rename's inverse-command undo (two different Command undo strategies both represented in this one feature).
 
 ## Related files
 
@@ -62,7 +62,7 @@ Create/delete/retype all operate on the `<state>`/`<parallel>`/`<final>` element
 
 ## Known limitations
 
-- `ChangeStateTypeCommand`'s undo is broken for state→final (see `.claude/features/state-node-types.md` — this is the single most concrete, confirmed bug repeatedly cross-referenced across this knowledge base).
+- `ChangeStateTypeCommand` can't convert to `<parallel>` (see `.claude/features/state-node-types.md`).
 - Delete's initial-reassignment picks the first `<state>` in raw document order, which may not be a meaningful choice for a document using multiple Initial-State groups (see Validation rules above) — worth manual verification if you're deleting a group's Initial state deliberately.
 - No confirmation/undo-prompt before delete beyond the general Ctrl+Z availability — a multi-state delete removes everything selected immediately.
 
@@ -76,4 +76,4 @@ Create/delete/retype all operate on the `<state>`/`<parallel>`/`<final>` element
 
 ## Previous design decisions
 
-`README.md`'s "Deleting States" section documents the current cascade-delete + Ctrl+Z-recovery UX as intended end-user behavior. No plan/spec document specifically addresses the state→final undo gap or the state→parallel incomplete-implementation — both appear to be unrecognized/undocumented issues rather than deliberate, accepted limitations.
+`README.md`'s "Deleting States" section documents the current cascade-delete + Ctrl+Z-recovery UX as intended end-user behavior. No plan/spec document specifically addresses the state→parallel incomplete-implementation — it appears to be an unrecognized issue rather than a deliberate, accepted limitation. (The former state→final undo gap is fixed — `decisions/editing.md` #3.)

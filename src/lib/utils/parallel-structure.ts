@@ -58,6 +58,19 @@ export function getChildEntries(container: any, kind: ContainerKind = 'state'): 
   return result;
 }
 
+/**
+ * An entry the diagram draws as a node. Unlike ChildEntry (the structural
+ * view used by normalization), this also covers <final> children.
+ */
+export interface DisplayEntry {
+  el: any;
+  tag: 'state' | 'parallel' | 'final';
+}
+
+function finalEntries(container: any): DisplayEntry[] {
+  return asArray<any>(container.final).map((el) => ({ el, tag: 'final' }));
+}
+
 /** Always a fresh array — never container.state's own array. */
 export function getLogicalChildStates(container: any, kind: ContainerKind = 'state'): any[] {
   return getChildEntries(container, kind).map((e) => e.el);
@@ -66,23 +79,23 @@ export function getLogicalChildStates(container: any, kind: ContainerKind = 'sta
 /**
  * What the diagram shows for one region of a <parallel>: the region itself
  * is drawn as a column, not a node, so its contents are shown in its place.
- * A region that is itself a <parallel>, or has no child states, is shown as
- * a node.
+ * A region that is itself a <parallel>, or has no child states (<state>,
+ * <parallel> or <final>), is shown as a node.
  */
-export function getRegionDisplayEntries(region: ChildEntry): ChildEntry[] {
+export function getRegionDisplayEntries(region: ChildEntry): DisplayEntry[] {
   if (region.tag === 'parallel') return [region];
-  const inner = getChildEntries(region.el);
+  const inner: DisplayEntry[] = [...getChildEntries(region.el), ...finalEntries(region.el)];
   return inner.length > 0 ? inner : [region];
 }
 
 /**
  * The children the diagram shows for a container: the same as
- * getChildEntries, except that every region of a <parallel> (including the
- * root's `__root_parallel`) is replaced by its contents — see
- * getRegionDisplayEntries.
+ * getChildEntries plus the container's <final> children, except that every
+ * region of a <parallel> (including the root's `__root_parallel`) is
+ * replaced by its contents — see getRegionDisplayEntries.
  */
-export function getDisplayChildEntries(container: any, kind: ContainerKind): ChildEntry[] {
-  const result: ChildEntry[] = [];
+export function getDisplayChildEntries(container: any, kind: ContainerKind): DisplayEntry[] {
+  const result: DisplayEntry[] = [];
   const add = (entry: ChildEntry) => {
     if (kind === 'parallel') result.push(...getRegionDisplayEntries(entry));
     else result.push(entry);
@@ -95,5 +108,7 @@ export function getDisplayChildEntries(container: any, kind: ContainerKind): Chi
       add({ el: p, tag: 'parallel' });
     }
   });
+  // A <parallel>'s direct children are its regions; <final> isn't valid there.
+  if (kind !== 'parallel') result.push(...finalEntries(container));
   return result;
 }

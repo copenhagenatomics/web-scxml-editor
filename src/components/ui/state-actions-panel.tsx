@@ -359,6 +359,15 @@ export function StateActionsPanel({
     }
   }, [activeTab, localExit.length]);
 
+  // Same fallback for the reactions tab, which a final state doesn't get
+  // (reactions are <transition> children — see the tab bar below).
+  const isFinal = stateType === 'final';
+  React.useEffect(() => {
+    if (activeTab === 'reactions' && isFinal) {
+      setActiveTab('onentry');
+    }
+  }, [activeTab, isFinal]);
+
   // Cleanup blur timer on unmount
   React.useEffect(() => {
     return () => {
@@ -922,10 +931,12 @@ export function StateActionsPanel({
           );
         })()}
 
-        {/* Tabs */}
+        {/* Tabs — no event reactions for a final state: reactions are
+            <transition> children, which a <final> can't have */}
         <div className='flex border-b border-default flex-shrink-0'>
           {(['onentry', 'onexit', 'reactions'] as Tab[])
             .filter((tab) => tab !== 'onexit' || localExit.length > 0)
+            .filter((tab) => tab !== 'reactions' || !isFinal)
             .map((tab) => (
             <button
               key={tab}

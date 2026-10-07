@@ -8,9 +8,12 @@ import type {
   OnExitElement,
 } from '@/types/scxml';
 import { collectStateIds } from '@/lib/validators/state-validator';
+import { getChildEntries, type ChildEntry } from '@/lib/utils/parallel-structure';
 
-/** Which tag an element is filed under in its parent: `.state` or `.parallel`. */
-export type StateTag = 'state' | 'parallel';
+/** Which tag an element is filed under in its parent: `.state`, `.parallel` or `.final`. */
+export type StateTag = 'state' | 'parallel' | 'final';
+
+const STATE_TAGS = ['state', 'parallel', 'final'] as const;
 
 function asList<T>(v: T | T[] | undefined): T[] {
   if (!v) return [];
@@ -26,16 +29,16 @@ function appendChild(container: any, key: StateTag, el: any): void {
 }
 
 /**
- * Find a <state> or <parallel> by its ID anywhere in the document, along
- * with its tag — so callers that move or re-insert it (paste, drag-to-nest)
- * keep a <parallel> a <parallel>.
+ * Find a <state>, <parallel> or <final> by its ID anywhere in the document,
+ * along with its tag — so callers that move or re-insert it (paste,
+ * drag-to-nest) keep a <parallel> a <parallel> and a <final> a <final>.
  */
 export function findElementById(
   scxmlDoc: SCXMLDocument,
   stateId: string
 ): { element: StateElement; tag: StateTag } | null {
   function search(container: any): { element: StateElement; tag: StateTag } | null {
-    for (const tag of ['state', 'parallel'] as const) {
+    for (const tag of STATE_TAGS) {
       for (const child of asList<any>(container[tag])) {
         if (child['@_id'] === stateId) return { element: child, tag };
         const found = search(child);
@@ -81,9 +84,56 @@ export function findStateById(
 }
 
 /**
+ * Whether `stateId` is a <final> element. A final state has no outgoing
+ * transitions, so it can never be a transition source.
+ */
+export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean {
+  return findElementById(scxmlDoc, stateId)?.tag === 'final';
+}
+
+/**
+ * Where the canvas "Add Final State" button puts a new <final>. Final states
+ * are only added while viewing inside a <parallel> (`parallelId`), and a
+ * <parallel> can't hold a <final> directly, so it goes into the region
+ * (<state> child of the <parallel>) containing the selected state(s). Returns
+ * that region's id, or a user-facing reason it can't be added.
+ */
+export function resolveFinalStateRegion(
+  scxmlDoc: SCXMLDocument,
+  parallelId: string | null | undefined,
+  selectedIds: Iterable<string>
+): { regionId: string } | { error: string } {
+  const parallel = parallelId ? findElementById(scxmlDoc, parallelId) : null;
+  if (!parallel || parallel.tag !== 'parallel') {
+    return { error: 'Final states can only be added inside a parallel state.' };
+  }
+
+  const regions = getChildEntries(parallel.element);
+  const chosen = new Set<ChildEntry>();
+  for (const id of selectedIds) {
+    const region = regions.find(
+      (r) => r.el['@_id'] === id || isDescendantOf(scxmlDoc, id, r.el['@_id'])
+    );
+    if (region) chosen.add(region);
+  }
+
+  if (chosen.size === 0) {
+    return { error: 'Select a state in the region where the final state should go.' };
+  }
+  if (chosen.size > 1) {
+    return { error: 'Select states from a single region to add a final state.' };
+  }
+  const [region] = chosen;
+  if (region.tag !== 'state') {
+    return { error: 'A final state cannot be added directly inside a parallel state.' };
+  }
+  return { regionId: region.el['@_id'] };
+}
+
+/**
  * Whether candidateId is nested anywhere inside ancestorId's subtree
- * (not counting ancestorId itself), through both <state> and <parallel>
- * children.
+ * (not counting ancestorId itself), through <state>, <parallel> and
+ * <final> children (a <final> is a leaf, so it only ever matches itself).
  */
 export function isDescendantOf(
   scxmlDoc: SCXMLDocument,
@@ -94,7 +144,8 @@ export function isDescendantOf(
   if (!ancestor) return false;
 
   function search(container: any): boolean {
-    for (const s of [...asList<any>(container.state), ...asList<any>(container.parallel)]) {
+    const children = STATE_TAGS.flatMap((tag) => asList<any>(container[tag]));
+    for (const s of children) {
       if (s['@_id'] === candidateId) return true;
       if (search(s)) return true;
     }
@@ -665,7 +716,7 @@ export function updateStatePosition(
 }
 
 /**
- * Removes a <state> or <parallel> from wherever it currently sits (root or
+ * Removes a <state>, <parallel> or <final> from wherever it currently sits (root or
  * nested, including inside a <parallel>), fixing up the OLD parent's
  * @_initial bookkeeping the same way removeStateFromDocument does — but,
  * unlike removeStateFromDocument, this does NOT touch any transitions, since
@@ -702,7 +753,7 @@ export function detachElementFromParent(
     container: any,
     kind: 'root' | 'state' | 'parallel'
   ): { element: StateElement; tag: StateTag } | null {
-    for (const tag of ['state', 'parallel'] as const) {
+    for (const tag of STATE_TAGS) {
       const arr = asList<any>(container[tag]);
       const idx = arr.findIndex((s) => s['@_id'] === stateId);
       if (idx !== -1) {
@@ -790,7 +841,15 @@ export function cloneStateSubtreeWithFreshIds(
     idMap.set(oldId, clone['@_id']);
     offsetPosition(clone);
 
-    [...asList<any>(clone.state), ...asList<any>((clone as any).parallel)].forEach(assignIds);
+    // <final> children need fresh ids (and offset positions) too — otherwise a
+    // pasted copy duplicates their ids, and transitions into them are dropped
+    // by rewriteOrDropTransitions since their old ids aren't in idMap. They
+    // have no child states/initial/transitions, so the other walks skip them.
+    [
+      ...asList<any>(clone.state),
+      ...asList<any>((clone as any).parallel),
+      ...asList<any>((clone as any).final),
+    ].forEach(assignIds);
   }
 
   function rewriteInitial(clone: StateElement): void {

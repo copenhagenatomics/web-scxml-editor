@@ -3,6 +3,38 @@ import type { SCXMLDocument } from '@/types/scxml';
 import { wouldCrossParallelRegions } from './parallel-region-connection-validation';
 import { normalizeParallelGroups } from './parallel-group-normalization';
 
+describe('wouldCrossParallelRegions — <final> targets', () => {
+  // A hand-authored <parallel> whose regions each end in a <final>
+  const doc = (): SCXMLDocument =>
+    ({
+      scxml: {
+        '@_initial': 'P',
+        parallel: {
+          '@_id': 'P',
+          state: [
+            { '@_id': 'R1', '@_initial': 'A', state: { '@_id': 'A' }, final: { '@_id': 'R1Done' } },
+            { '@_id': 'R2', '@_initial': 'B', state: { '@_id': 'B' }, final: { '@_id': 'R2Done' } },
+          ],
+        },
+        final: { '@_id': 'AllDone' },
+      },
+    }) as any;
+
+  it("blocks a transition into a <final> in a sibling region (creation and reconnection share this guard)", () => {
+    const result = wouldCrossParallelRegions(doc(), 'A', 'R2Done');
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("'P'");
+  });
+
+  it('allows a transition into the <final> of its own region', () => {
+    expect(wouldCrossParallelRegions(doc(), 'A', 'R1Done').blocked).toBe(false);
+  });
+
+  it('allows a transition to a <final> outside the parallel (leaves it entirely)', () => {
+    expect(wouldCrossParallelRegions(doc(), 'A', 'AllDone').blocked).toBe(false);
+  });
+});
+
 describe('wouldCrossParallelRegions', () => {
   it('blocks a transition between two different regions of the same auto-wrapped parallel', () => {
     const d: SCXMLDocument = {

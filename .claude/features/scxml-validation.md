@@ -23,7 +23,7 @@ Two fully independent stages, chained but not coupled:
    1. Build element-position index + state-id/hierarchy maps.
    2. State reference validation (root `@initial`, every `transition/@target` must resolve).
    3. Root-level `state/@initial` reference validation (dedicated message; does **not** cover nested compound states — see gap below).
-   4. Required-attribute walk (missing `id`, missing `target` unless internal, `<initial>` must contain a `<transition>`, etc. — `w3c-validator.ts` + `attribute-schemas.ts`).
+   4. Required-attribute walk (missing `id`, missing `target` unless internal, `<initial>` must contain a `<transition>`, a `<final>` must not contain any `<transition>` (error; reaches finals at any depth, including inside `<parallel>` regions), etc. — `w3c-validator.ts` + `attribute-schemas.ts`).
    5–6. W3C document compliance (`xmlns`, `version`, `datamodel` enum as warning, `binding` enum as error) + a largely-superseded structural pass.
    7. Semantic checks: unreachable-state BFS from initial (warning), duplicate state ids (error), duplicate `<data>` ids across every nested `<datamodel>` (error, position = **last** occurrence, deliberately), `main_`-prefix portability warning (one warning **per occurrence**, not deduplicated per identifier).
    8. Transition semantics: `type` must be internal/external; internal may only self-target; event-name syntax (comma, not space, separates multi-event lists) as warning.
