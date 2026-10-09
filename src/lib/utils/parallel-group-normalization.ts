@@ -19,9 +19,10 @@
  * - A state with <final> children is never converted (<parallel> can't hold
  *   <final>) — initial-group-validator.ts reports it instead.
  * - Any <parallel> (converted or hand-authored — no marker attributes tell
- *   them apart) with fewer than 2 regions turns back into a <state>, its
- *   sole region (if any) becoming its `initial`. Regions are kept as they
- *   are, not unwrapped.
+ *   them apart) with fewer than 2 regions turns back into a <state>. Its
+ *   sole region (if any) is unwrapped into it, the region's `initial`
+ *   becoming the state's — unless the region is a state in its own right
+ *   (liftSoleRegion), in which case it stays and becomes the `initial`.
  * - The <scxml> root can't become a <parallel>, so 2+ root-level work trees
  *   always go into an inserted `<parallel id="__root_parallel">`, loose
  *   siblings beside it, the same way (see parallel-structure.ts). These
@@ -169,7 +170,62 @@ function buildRegions(groups: Map<string, ChildEntry[]>, usedIds: IdSet): ChildE
 
 interface Ctx {
   usedIds: IdSet;
+  /** Every id some transition in the document targets. */
+  targetedIds: IdSet;
   changed: boolean;
+}
+
+/** Every id targeted by a <transition> anywhere under `node`. */
+function collectTargetedIds(node: any, allIds: IdSet, ids: IdSet = new Set()): IdSet {
+  if (!node || typeof node !== 'object') return ids;
+  if (Array.isArray(node)) {
+    node.forEach((item) => collectTargetedIds(item, allIds, ids));
+    return ids;
+  }
+  Object.entries(node).forEach(([key, value]) => {
+    if (key.startsWith('@_')) return;
+    if (key === 'transition') {
+      asArray<any>(value).forEach((t) => {
+        if (t && typeof t === 'object') {
+          parseStateIdList(String(t['@_target'] ?? ''), allIds).forEach((id) => ids.add(id));
+        }
+      });
+    }
+    collectTargetedIds(value, allIds, ids);
+  });
+  return ids;
+}
+
+/** What a region may hold and still be a plain wrapper around its work tree. */
+const REGION_WRAPPER_KEYS = new Set(['state', 'parallel', 'final', 'initial', '#text']);
+
+/**
+ * Once a <parallel> is down to one region, that region is just a wrapper
+ * around a work tree — unwrap it into `host` (which already holds it among
+ * its children), its `initial` becoming the host's. A region that is a state
+ * in its own right is kept: one with no child states, one with content of
+ * its own (transitions, actions, history, notes, ...), or one a transition
+ * targets. Returns whether it unwrapped.
+ */
+function liftSoleRegion(host: any, region: ChildEntry, ctx: Ctx): boolean {
+  const el = region.el;
+  if (region.tag !== 'state' || !el || typeof el !== 'object') return false;
+  if (getChildEntries(el).length === 0 && asArray(el.final).length === 0) return false;
+  if (Object.keys(el).some((k) => !k.startsWith('@_') && !REGION_WRAPPER_KEYS.has(k))) return false;
+  if (ctx.targetedIds.has(el['@_id'])) return false;
+
+  const states = asArray<any>(host.state).flatMap((s) => (s === el ? asArray<any>(el.state) : [s]));
+  setChildren(host, 'state', states);
+  setChildren(host, 'parallel', [...asArray<any>(host.parallel), ...asArray<any>(el.parallel)]);
+  const finals = [...asArray<any>(host.final), ...asArray<any>(el.final)];
+  if (finals.length === 0) delete host.final;
+  else host.final = finals.length === 1 ? finals[0] : finals;
+  if (el['@_initial']) host['@_initial'] = el['@_initial'];
+  else delete host['@_initial'];
+  if (el.initial) host.initial = el.initial;
+  else delete host.initial;
+  ctx.usedIds.delete(el['@_id']);
+  return true;
 }
 
 /**
@@ -257,8 +313,8 @@ function absorbLooseIntoRegions(
  *   `__root_parallel` at the root, `{id}__parallel` in a <state> — and the
  *   loose children stay beside it, unmarked, so they can be connected later
  *   (absorbLooseIntoRegions). New work trees join it as new regions; once
- *   it's down to fewer than 2 regions it's removed and its regions move back
- *   to the host as they are.
+ *   it's down to fewer than 2 regions it's removed and its region moves back
+ *   to the host (unwrapped, see liftSoleRegion).
  */
 function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | 'parallel' {
   const parallels = asArray<any>(host.parallel);
@@ -276,7 +332,7 @@ function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | '
 
   if (total < 2) {
     if (!inner) return 'state';
-    // Unwrap: the remaining region(s) go back to the host as they are.
+    // Unwrap: the remaining region goes back to the host, itself unwrapped.
     assignEntries(host, [...outside, ...existingRegions]);
     if (total === 1) {
       host['@_initial'] = existingRegions[0]?.el['@_id'] ?? [...groups.keys()][0];
@@ -284,6 +340,7 @@ function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | '
       delete host['@_initial'];
     }
     delete host.initial;
+    if (existingRegions.length === 1) liftSoleRegion(host, existingRegions[0], ctx);
     ctx.changed = true;
     return 'state';
   }
@@ -325,11 +382,15 @@ function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | '
  * Turn a <parallel> with fewer than 2 regions back into a <state>, in place.
  * Returns whether it reverted (the caller re-files it under `.state`).
  */
-function revertParallelIfNeeded(parallel: any): boolean {
+function revertParallelIfNeeded(parallel: any, ctx: Ctx): boolean {
   const regions = getChildEntries(parallel);
   if (regions.length >= 2) return false;
-  if (regions.length === 1) parallel['@_initial'] = regions[0].el['@_id'];
-  else delete parallel['@_initial'];
+  if (regions.length === 1) {
+    parallel['@_initial'] = regions[0].el['@_id'];
+    liftSoleRegion(parallel, regions[0], ctx);
+  } else {
+    delete parallel['@_initial'];
+  }
   return true;
 }
 
@@ -359,7 +420,7 @@ function normalizeChildren(el: any, kind: ContainerKind, ctx: Ctx): void {
         return;
       }
       normalizeChildren(child, 'parallel', ctx);
-      const reverted = revertParallelIfNeeded(child);
+      const reverted = revertParallelIfNeeded(child, ctx);
       if (reverted) retagged = true;
       next.push({ el: child, tag: reverted ? 'state' : 'parallel' });
     });
@@ -431,9 +492,10 @@ function isLegacyNestedParallelWrapper(state: any): boolean {
 export function normalizeParallelGroups(scxmlDoc: SCXMLDocument): { changed: boolean } {
   const scxml = scxmlDoc.scxml as any;
   if (!scxml || typeof scxml !== 'object') return { changed: false };
-  const ctx: Ctx = { usedIds: new Set(), changed: false };
+  const ctx: Ctx = { usedIds: new Set(), targetedIds: new Set(), changed: false };
   migrateLegacyStructure(scxml, ctx);
   ctx.usedIds = collectAllIds(scxml);
+  ctx.targetedIds = collectTargetedIds(scxml, ctx.usedIds);
   normalizeChildren(scxml, 'root', ctx);
   normalizeHost(scxml, 'root', ctx);
   return { changed: ctx.changed };

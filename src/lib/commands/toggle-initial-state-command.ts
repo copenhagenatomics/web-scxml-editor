@@ -7,6 +7,7 @@ import {
   isParallelRegion,
 } from '@/lib/utils/initial-group-utils';
 import { wouldNestParallelIfMarkedInitial } from '@/lib/utils/parallel-nesting-rules';
+import { innerParallelIdFor, isInnerParallel, isRootParallel } from '@/lib/utils/parallel-structure';
 import {
   clearWaypointsForTouchingTransitions,
   restoreClearedWaypoints,
@@ -55,11 +56,23 @@ import {
  * once it has 2+ Initial work trees) is left entirely to
  * normalizeParallelGroups, which every mutation path already runs through
  * downstream (useEditorStore.setContent) — this command only ever needs to
- * get the `initial` attribute's real token list right.
+ * get the `initial` attribute's real token list right — with one exception:
+ * unmarking the last Initial State of a region dissolves that region
+ * (dissolveRegion), its states going back out as loose siblings of the
+ * <parallel>. The work tree is no longer a work tree, so it must stop being
+ * a region; normalization then reverts the <parallel> to a compound <state>
+ * once fewer than 2 regions are left. That's done here, on the gesture,
+ * rather than in normalizeParallelGroups, because a hand-written <parallel>'s
+ * regions often have no `initial` at all and must not be dissolved on load.
  */
+
+/** Region children that move out with its work tree when it dissolves. */
+const REGION_MEMBER_TAGS = new Set(['state', 'parallel', 'final', 'history', 'viz:note']);
 export class ToggleInitialStateCommand extends BaseCommand {
   private previousInitialAttr?: string | null;
   private previousInitialElement?: Element | null;
+  /** Set when execute() dissolved a region — undo then restores it verbatim. */
+  private contentBeforeDissolve?: string;
   private clearedWaypoints: ClearedWaypoint[] = [];
 
   constructor(private stateId: string) {
@@ -135,6 +148,9 @@ export class ToggleInitialStateCommand extends BaseCommand {
         parent.setAttribute('initial', updated.join(' '));
       } else {
         parent.removeAttribute('initial');
+        if (containerId && isParallelRegion(scxmlDoc, containerId) && this.dissolveRegion(doc, parent)) {
+          this.contentBeforeDissolve = scxmlContent;
+        }
       }
     } else {
       const conflict = wouldConflictIfMarkedInitial(scxmlDoc, this.stateId);
@@ -163,6 +179,9 @@ export class ToggleInitialStateCommand extends BaseCommand {
   undo(scxmlContent: string): CommandResult {
     if (this.previousInitialAttr === undefined) {
       return this.createFailureResult('Nothing to undo', scxmlContent);
+    }
+    if (this.contentBeforeDissolve !== undefined) {
+      return this.createSuccessResult(this.contentBeforeDissolve, [this.stateId]);
     }
 
     const { doc, error } = this.parseXML(scxmlContent);
@@ -198,6 +217,59 @@ export class ToggleInitialStateCommand extends BaseCommand {
     restoreClearedWaypoints(doc, this.clearedWaypoints);
 
     return this.createSuccessResult(this.serializeXML(doc), [this.stateId]);
+  }
+
+  /**
+   * Move a region's states out of its <parallel> and drop the region. Under
+   * an editor-inserted `__root_parallel` / `{id}__parallel` they go beside
+   * it, in its host. Any other <parallel> can't hold loose children, so it
+   * becomes a <state> (same id, attributes and own content) holding its
+   * remaining regions in an inner `{id}__parallel`, the states beside it —
+   * the same shape addLooseStateToParallel produces. A region with content
+   * of its own (transitions, actions, ...) is left alone. Returns whether
+   * it dissolved.
+   */
+  private dissolveRegion(doc: Document, region: Element): boolean {
+    const parallel = region.parentElement;
+    const host = parallel?.parentElement;
+    if (!parallel || !host || parallel.tagName !== 'parallel') return false;
+    const children = Array.from(region.children);
+    if (children.some((el) => !REGION_MEMBER_TAGS.has(el.tagName))) return false;
+
+    const parallelId = parallel.getAttribute('id') ?? '';
+    const transparent =
+      (host === doc.documentElement && isRootParallel({ '@_id': parallelId })) ||
+      (host.tagName === 'state' && isInnerParallel({ '@_id': parallelId }));
+    if (transparent) {
+      children.forEach((el) => host.insertBefore(el, parallel.nextSibling));
+      parallel.removeChild(region);
+      return true;
+    }
+
+    const usedIds = new Set(Array.from(doc.querySelectorAll('[id]')).map((el) => el.getAttribute('id')));
+    const base = innerParallelIdFor(parallelId);
+    let innerId = base;
+    for (let n = 2; usedIds.has(innerId); n++) innerId = `${base}_${n}`;
+
+    const ns = parallel.namespaceURI;
+    const state = doc.createElementNS(ns, 'state');
+    Array.from(parallel.attributes).forEach((attr) => state.setAttributeNode(attr.cloneNode() as Attr));
+    const inner = doc.createElementNS(ns, 'parallel');
+    inner.setAttribute('id', innerId);
+    state.setAttribute('initial', innerId);
+    Array.from(parallel.childNodes).forEach((node) => {
+      if (node === region) {
+        children.forEach((el) => state.appendChild(el));
+      } else if (node instanceof Element && (node.tagName === 'state' || node.tagName === 'parallel')) {
+        if (!inner.parentNode) state.appendChild(inner);
+        inner.appendChild(node);
+      } else {
+        state.appendChild(node);
+      }
+    });
+    if (!inner.parentNode) state.appendChild(inner);
+    host.replaceChild(state, parallel);
+    return true;
   }
 
   getDescription(): string {
