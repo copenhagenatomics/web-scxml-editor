@@ -142,6 +142,9 @@ Not all of these have an automated rule yet — see `docs/invalid-event-identifi
 **6.9 — The datamodel naming conventions `conf_` (per-deployment config value), `this_` (physical channel reference), and `main_` (portability anti-pattern, flagged by validation) are load-bearing across multiple features. Do not repurpose these prefixes for anything else.** [EXPLICIT]
 See `project/terminology.md`, `decisions/naming-conventions.md` #1.
 
+**6.10 — No `<parallel>` may sit anywhere inside another `<parallel>`, whether it's hand-written or one the editor inserts (`__root_parallel` / `{id}__parallel`). Live gates (Initial toggle, connect, paste, drag-to-nest) and the static validator share `src/lib/utils/parallel-nesting-rules.ts`. That module checks a normalized copy of the document, so it stays in step with `normalizeParallelGroups`.** [EXPLICIT — user request]
+See `decisions/scxml.md` #14, `features/parallel-state-auto-grouping.md`.
+
 ---
 
 ## 7. SCXML Parsing
@@ -269,7 +272,7 @@ See `decisions/performance.md` #4.
 
 ## 14. Validation
 
-**14.1 — `SCXMLValidator.validate()`'s 16 passes run in a fixed, dependency-sensitive order. Do not reorder them or assume a pass is self-contained — later passes rely on the id set and hierarchy maps built in pass 1.** [EXPLICIT]
+**14.1 — `SCXMLValidator.validate()`'s 17 passes run in a fixed, dependency-sensitive order. Do not reorder them or assume a pass is self-contained — later passes rely on the id set and hierarchy maps built in pass 1.** [EXPLICIT]
 See `decisions/validation.md` #1, `.claude/workflows/adding-a-validation-rule.md`.
 
 **14.2 — A rule needing both live UI blocking and static (post-hoc) validation must live in one shared utility (`transition-slot-rules.ts`, `initial-group-utils.ts` are the existing examples) consumed by both — never duplicated independently in the validator and in `visual-diagram.tsx`.** [EXPLICIT]

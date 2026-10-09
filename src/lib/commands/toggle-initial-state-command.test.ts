@@ -195,18 +195,17 @@ describe('ToggleInitialStateCommand', () => {
 
     it('toggles a member inside a region normally (the region is an ordinary compound state)', () => {
       const xml = `${PAR_HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/><state id="A2"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel></scxml>`;
-      const result = new ToggleInitialStateCommand('A2').execute(xml);
+      const result = new ToggleInitialStateCommand('A').execute(xml);
       expect(result.success).toBe(true);
-      expect(result.newContent).toContain('initial="A A2"');
+      expect(result.newContent).not.toContain('initial="A"');
+    });
 
-      // Normalization then turns A_region itself into a <parallel>.
-      const parsed = new SCXMLParser().parse(result.newContent).data!;
-      normalizeParallelGroups(parsed);
-      const p = parsed.scxml.parallel as any;
-      const aRegion = (p.parallel ? (Array.isArray(p.parallel) ? p.parallel : [p.parallel]) : []).find(
-        (r: any) => r['@_id'] === 'A_region'
-      );
-      expect(aRegion).toBeDefined();
+    it('refuses a second Initial State inside a region — it would nest a <parallel> in P', () => {
+      const xml = `${PAR_HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/><state id="A2"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel></scxml>`;
+      const result = new ToggleInitialStateCommand('A2').execute(xml);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Parallel states cannot be nested');
+      expect(result.newContent).toBe(xml);
     });
 
     it('marks a root-level sibling Initial next to __root_parallel, expanding the parallel to its regions', () => {
@@ -219,6 +218,74 @@ describe('ToggleInitialStateCommand', () => {
       normalizeParallelGroups(parsed);
       const regionIds = ((parsed.scxml.parallel as any).state as any[]).map((r) => r['@_id']).sort();
       expect(regionIds).toEqual(['A_region', 'B_region', 'C_region']);
+    });
+
+    describe('unmarking the last Initial State of a region dissolves the region', () => {
+      const normalized = (content: string) => {
+        const parsed = new SCXMLParser().parse(content).data!;
+        normalizeParallelGroups(parsed);
+        return parsed.scxml as any;
+      };
+
+      it('reverts a converted <parallel> back to a compound <state> when only one region is left', () => {
+        const xml = `${PAR_HEADER} initial="P"><parallel id="P"><transition event="go" target="P"/>${TWO_REGIONS}</parallel></scxml>`;
+        const result = new ToggleInitialStateCommand('A').execute(xml);
+        expect(result.success).toBe(true);
+
+        const scxml = normalized(result.newContent);
+        expect(scxml.parallel).toBeUndefined();
+        const p = scxml.state;
+        expect(p['@_id']).toBe('P');
+        expect(p.transition['@_target']).toBe('P');
+        expect(p['@_initial']).toBe('B');
+        const childIds = (p.state as any[]).map((s) => s['@_id']).sort();
+        expect(childIds).toEqual(['A', 'B']);
+        expect(p.parallel).toBeUndefined();
+      });
+
+      it('removes __root_parallel when only one root-level region is left', () => {
+        const xml = `${PAR_HEADER} initial="__root_parallel"><parallel id="__root_parallel">${TWO_REGIONS}</parallel></scxml>`;
+        const result = new ToggleInitialStateCommand('A').execute(xml);
+        expect(result.success).toBe(true);
+
+        const scxml = normalized(result.newContent);
+        expect(scxml.parallel).toBeUndefined();
+        expect(scxml['@_initial']).toBe('B');
+        expect((scxml.state as any[]).map((s) => s['@_id']).sort()).toEqual(['A', 'B']);
+      });
+
+      it('keeps the <parallel> when 2+ regions are left, with the unmarked work tree loose beside it', () => {
+        const xml = `${PAR_HEADER} initial="P"><parallel id="P">${TWO_REGIONS}<state id="C_region" initial="C"><state id="C"><transition event="go" target="C2"/></state><state id="C2"/></state></parallel></scxml>`;
+        const result = new ToggleInitialStateCommand('C').execute(xml);
+        expect(result.success).toBe(true);
+
+        const scxml = normalized(result.newContent);
+        const p = scxml.state;
+        expect(p['@_id']).toBe('P');
+        expect(p['@_initial']).toBe('P__parallel');
+        expect((p.state as any[]).map((s) => s['@_id']).sort()).toEqual(['C', 'C2']);
+        expect((p.parallel.state as any[]).map((r) => r['@_id']).sort()).toEqual(['A_region', 'B_region']);
+      });
+
+      it("keeps the dissolved region's states in document order beside a transparent parallel", () => {
+        const xml = `${PAR_HEADER} initial="__root_parallel"><parallel id="__root_parallel">${TWO_REGIONS}<state id="C_region" initial="C"><state id="C"/><state id="C2"/><state id="C3"/></state></parallel></scxml>`;
+        const result = new ToggleInitialStateCommand('C').execute(xml);
+        expect(result.success).toBe(true);
+        const order = ['"C"', '"C2"', '"C3"'].map((id) => result.newContent.indexOf(`id=${id}`));
+        expect(order.every((i) => i >= 0)).toBe(true);
+        expect(order).toEqual([...order].sort((a, b) => a - b));
+      });
+
+      it('undo restores the original <parallel>', () => {
+        const xml = `${PAR_HEADER} initial="P"><parallel id="P">${TWO_REGIONS}</parallel></scxml>`;
+        const command = new ToggleInitialStateCommand('A');
+        const result = command.execute(xml);
+        const undone = command.undo(result.newContent);
+        expect(undone.success).toBe(true);
+        const scxml = normalized(undone.newContent);
+        expect(scxml.parallel['@_id']).toBe('P');
+        expect((scxml.parallel.state as any[]).find((r) => r['@_id'] === 'A_region')['@_initial']).toBe('A');
+      });
     });
 
     it('refuses to mark a state Initial when it is already transitively connected to the Initial member of its region', () => {

@@ -13,9 +13,9 @@ Adding a new validation check; changing an existing rule's message, severity, or
 
 ## Required investigation steps
 
-1. Read `.claude/features/scxml-validation.md` in full — it lists the exact 16-pass pipeline order and every currently-confirmed coverage gap. Check whether your task is literally one of the already-identified gaps (several are) before treating it as novel.
-2. Determine which of the 8 validator files your rule belongs in (structural/attribute → `w3c-validator.ts`; reference/target → `transition-validator.ts`/`state-validator.ts`; a rule needing live UI blocking too → a shared utility consumed by both, following the `transition-slot-rules.ts`/`initial-group-utils.ts` pattern).
-3. Determine where in the **16-pass order** the new/changed pass belongs — check what state (id sets, hierarchy maps, position index) earlier passes build that yours might depend on.
+1. Read `.claude/features/scxml-validation.md` in full — it lists the exact 17-pass pipeline order and every currently-confirmed coverage gap. Check whether your task is literally one of the already-identified gaps (several are) before treating it as novel.
+2. Determine which of the 9 validator files your rule belongs in (structural/attribute → `w3c-validator.ts`; reference/target → `transition-validator.ts`/`state-validator.ts`; a rule needing live UI blocking too → a shared utility consumed by both, following the `transition-slot-rules.ts`/`initial-group-utils.ts`/`parallel-nesting-rules.ts` pattern).
+3. Determine where in the **17-pass order** the new/changed pass belongs — check what state (id sets, hierarchy maps, position index) earlier passes build that yours might depend on.
 4. If motivated by a real generator failure, check `docs/invalid-event-identifiers.md` for whether it's one of the 7 documented pitfalls, and cite it as the rationale.
 5. **Test against a real file loaded through the actual parser**, not just a hand-constructed object — this domain has a confirmed case (`.executable[]` shape) where a check passes against synthetic test data but is dead code against real parsed files.
 
@@ -50,5 +50,5 @@ Adding a new validation check; changing an existing rule's message, severity, or
 
 - Adding the rule only to the validator when the concept also needs live UI blocking (or vice versa) — see the `state-machine-semantics` skill for the dual-enforcement pattern this applies to.
 - Assuming your new check will fire on `<parallel>`-nested content the same way it does on `<state>`-nested content — several existing checks (`validateCompoundStates`, `validateStateChildren`) confirmed do not, and a new check copying their traversal pattern would inherit the same gap.
-- Reordering the 16 passes without checking what depends on what.
+- Reordering the 17 passes without checking what depends on what.
 - Writing a check that only works against the in-memory `.executable[]` editing shape rather than the real parser's raw tag-name-property output.

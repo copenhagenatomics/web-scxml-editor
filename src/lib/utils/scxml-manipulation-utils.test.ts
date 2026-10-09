@@ -17,6 +17,7 @@ import {
   collectExistingIds,
   isFinalState,
   resolveFinalStateRegion,
+  findParallelContext,
   addLooseStateToParallel,
 } from './scxml-manipulation-utils';
 import { getInitialIds, isParallelRegion } from './initial-group-utils';
@@ -83,7 +84,7 @@ describe('<final> lookups', () => {
         },
       }) as any as SCXMLDocument;
 
-    it('refuses at the top level and inside an ordinary compound state', () => {
+    it('refuses at a top level with no __root_parallel and inside an ordinary compound state', () => {
       expect(resolveFinalStateRegion(doc(), null, ['main_region'])).toEqual({
         error: 'Final states can only be added inside a parallel state.',
       });
@@ -96,12 +97,22 @@ describe('<final> lookups', () => {
       expect(resolveFinalStateRegion(doc(), 'P', ['B'])).toEqual({ regionId: 'R2' });
     });
 
-    it("targets an existing <final>'s region when that final is selected", () => {
+    it('refuses a second final state in a region that already has one', () => {
       const d = doc();
       (d.scxml as any).parallel.state[1].final = { '@_id': 'R2Done' };
-      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual({ regionId: 'R2' });
+      const refusal = { error: 'This region already has a final state.' };
+      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual(refusal);
+      expect(resolveFinalStateRegion(d, 'P', ['B'])).toEqual(refusal);
       expect(isDescendantOf(d, 'R2Done', 'R2')).toBe(true);
       expect(isDescendantOf(d, 'R2Done', 'R1')).toBe(false);
+      // Other regions are unaffected.
+      expect(resolveFinalStateRegion(d, 'P', ['A2'])).toEqual({ regionId: 'R1' });
+    });
+
+    it('refuses adding (e.g. pasting) more than one final state into a region at once', () => {
+      expect(resolveFinalStateRegion(doc(), 'P', ['B'], 2)).toEqual({
+        error: 'This region already has a final state.',
+      });
     });
 
     it('targets an empty region shown as its own node when that node is selected', () => {
@@ -139,6 +150,46 @@ describe('<final> lookups', () => {
         },
       } as any as SCXMLDocument;
       expect(resolveFinalStateRegion(d, 'H', ['B'])).toEqual({ regionId: 'R2' });
+    });
+
+    it("finds the region through the root's transparent __root_parallel at the top level", () => {
+      const d = {
+        scxml: {
+          '@_initial': '__root_parallel',
+          state: { '@_id': 'Loose' },
+          parallel: {
+            '@_id': '__root_parallel',
+            state: [
+              { '@_id': 'R1', '@_initial': 'A', state: { '@_id': 'A' } },
+              { '@_id': 'R2', '@_initial': 'B', state: { '@_id': 'B' } },
+            ],
+          },
+        },
+      } as any as SCXMLDocument;
+      expect(resolveFinalStateRegion(d, null, ['B'])).toEqual({ regionId: 'R2' });
+      expect(resolveFinalStateRegion(d, undefined, ['A'])).toEqual({ regionId: 'R1' });
+      expect(resolveFinalStateRegion(d, null, ['Loose'])).toEqual({
+        error: 'Select a state in the region where the final state should go.',
+      });
+    });
+
+    it('findParallelContext sees explicit and transparent parallels, not ordinary views (paste guard)', () => {
+      const d = {
+        scxml: {
+          '@_initial': '__root_parallel',
+          state: { '@_id': 'H', '@_initial': 'H__parallel', state: { '@_id': 'Plain' }, parallel: { '@_id': 'H__parallel', state: [{ '@_id': 'X' }, { '@_id': 'Y' }] } },
+          parallel: [
+            { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] },
+            { '@_id': 'P', state: [{ '@_id': 'P1' }, { '@_id': 'P2' }] },
+          ],
+        },
+      } as any as SCXMLDocument;
+      expect(findParallelContext(d, null)?.['@_id']).toBe('__root_parallel');
+      expect(findParallelContext(d, 'H')?.['@_id']).toBe('H__parallel');
+      expect(findParallelContext(d, 'P')?.['@_id']).toBe('P');
+      expect(findParallelContext(d, 'Plain')).toBeNull();
+      expect(findParallelContext(doc(), null)).toBeNull();
+      expect(findParallelContext(doc(), 'main_region')).toBeNull();
     });
 
     describe('addLooseStateToParallel (canvas "Add State" inside a <parallel>)', () => {

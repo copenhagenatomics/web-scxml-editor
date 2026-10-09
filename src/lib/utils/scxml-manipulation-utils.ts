@@ -97,21 +97,39 @@ export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean 
 }
 
 /**
+ * The <parallel> whose regions are shown when viewing `parentId` (null: the
+ * top level) — `parentId` itself if it's a <parallel>, else its transparent
+ * `{id}__parallel`, or the root's `__root_parallel` at the top level. Null
+ * when the view is an ordinary compound state / top level with no regions.
+ */
+export function findParallelContext(
+  scxmlDoc: SCXMLDocument,
+  parentId: string | null | undefined
+): StateElement | null {
+  if (!parentId) return findTransparentParallel(scxmlDoc.scxml, 'root') ?? null;
+  const found = findElementById(scxmlDoc, parentId);
+  if (found?.tag === 'parallel') return found.element;
+  return findTransparentParallel(found?.element, 'state') ?? null;
+}
+
+/**
  * Where the canvas "Add Final State" button puts a new <final>. Final states
  * are only added while viewing inside a <parallel> (`parallelId`) — or a
- * compound state whose work trees live in its transparent `{id}__parallel` —
+ * compound state whose work trees live in its transparent `{id}__parallel`,
+ * or the top level (`parallelId` null) when it has a `__root_parallel` —
  * and a <parallel> can't hold a <final> directly, so it goes into the region
- * (<state> child of the <parallel>) containing the selected state(s). Returns
- * that region's id, or a user-facing reason it can't be added.
+ * (<state> child of the <parallel>) containing the selected state(s). A
+ * region holds at most one <final>, so `adding` (how many finals are about
+ * to go in, e.g. a paste) must not take it past one. Returns that region's
+ * id, or a user-facing reason it can't be added.
  */
 export function resolveFinalStateRegion(
   scxmlDoc: SCXMLDocument,
   parallelId: string | null | undefined,
-  selectedIds: Iterable<string>
+  selectedIds: Iterable<string>,
+  adding = 1
 ): { regionId: string } | { error: string } {
-  const found = parallelId ? findElementById(scxmlDoc, parallelId) : null;
-  const parallel =
-    found?.tag === 'parallel' ? found.element : findTransparentParallel(found?.element, 'state');
+  const parallel = findParallelContext(scxmlDoc, parallelId);
   if (!parallel) {
     return { error: 'Final states can only be added inside a parallel state.' };
   }
@@ -127,6 +145,10 @@ export function resolveFinalStateRegion(
   const [region] = chosen;
   if (region.tag !== 'state') {
     return { error: 'A final state cannot be added directly inside a parallel state.' };
+  }
+  // A region ends in at most one final state.
+  if (asList((region.el as any).final).length + adding > 1) {
+    return { error: 'This region already has a final state.' };
   }
   return { regionId: region.el['@_id'] };
 }

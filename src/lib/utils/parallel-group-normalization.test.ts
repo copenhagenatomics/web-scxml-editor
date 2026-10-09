@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { SCXMLDocument } from '@/types/scxml';
 import { normalizeParallelGroups, collectParallelGroups, hasAnyChildren } from './parallel-group-normalization';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
+import { DeleteNodeCommand } from '@/lib/commands/delete-node-command';
 import {
   addStateToDocument,
   cloneStateSubtreeWithFreshIds,
@@ -202,14 +203,32 @@ describe('normalizeParallelGroups — compound state becomes the <parallel>', ()
 });
 
 describe('normalizeParallelGroups — <parallel> back to <state>', () => {
-  it('turns a <parallel> with a single region back into a <state>, keeping the region as its initial child', () => {
+  it('turns a <parallel> with a single region back into a <state>, unwrapping the region into it', () => {
     const { changed, doc } = normalizeXml(
-      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/></state></parallel></scxml>`,
+      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"><transition event="go" target="A2"/></state><state id="A2"/></state></parallel></scxml>`,
     );
     expect(changed).toBe(true);
     expect(doc.scxml.parallel).toBeUndefined();
     const p = one(doc.scxml.state);
     expect(p['@_id']).toBe('P');
+    expect(p['@_initial']).toBe('A');
+    expect(ids(p.state)).toEqual(['A', 'A2']);
+  });
+
+  it('keeps the sole region as a state when a transition targets it', () => {
+    const { doc } = normalizeXml(
+      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/></state></parallel><state id="X"><transition event="go" target="A_region"/></state></scxml>`,
+    );
+    const p = (doc.scxml.state as any[]).find((s) => s['@_id'] === 'P');
+    expect(p['@_initial']).toBe('A_region');
+    expect(ids(p.state)).toEqual(['A_region']);
+  });
+
+  it('keeps the sole region as a state when it has content of its own', () => {
+    const { doc } = normalizeXml(
+      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><onentry><log expr="1"/></onentry><state id="A"/></state></parallel></scxml>`,
+    );
+    const p = one(doc.scxml.state);
     expect(p['@_initial']).toBe('A_region');
     expect(ids(p.state)).toEqual(['A_region']);
   });
@@ -262,14 +281,14 @@ describe('normalizeParallelGroups — root level (__root_parallel)', () => {
     expect(doc.scxml['@_initial']).toBe('__root_parallel');
   });
 
-  it('removes __root_parallel once only one region is left, moving the region back to the root as it is', () => {
+  it('removes __root_parallel once only one region is left, unwrapping the region into the root', () => {
     const { changed, doc } = normalizeXml(
-      `${HEADER} initial="__root_parallel"><parallel id="__root_parallel"><state id="A_region" initial="A"><state id="A"/></state></parallel></scxml>`,
+      `${HEADER} initial="__root_parallel"><parallel id="__root_parallel"><state id="A_region" initial="A"><state id="A"/></state></parallel><state id="L"/></scxml>`,
     );
     expect(changed).toBe(true);
     expect(doc.scxml.parallel).toBeUndefined();
-    expect(ids(doc.scxml.state)).toEqual(['A_region']);
-    expect(doc.scxml['@_initial']).toBe('A_region');
+    expect(ids(doc.scxml.state).sort()).toEqual(['A', 'L']);
+    expect(doc.scxml['@_initial']).toBe('A');
   });
 
   it('claims a suffixed root id when __root_parallel is already taken', () => {
@@ -550,8 +569,8 @@ describe('normalizeParallelGroups — loose states', () => {
     inner.state = (inner.state as any[]).filter((r) => r['@_id'] !== 'state_3_region');
     normalizeParallelGroups(doc);
     expect(p.parallel).toBeUndefined();
-    expect(ids(p.state).sort()).toEqual(['state_1_region', 'state_4']);
-    expect(p['@_initial']).toBe('state_1_region');
+    expect(ids(p.state).sort()).toEqual(['state_1', 'state_2', 'state_4']);
+    expect(p['@_initial']).toBe('state_1');
   });
 
   it('at the root, connecting a region member to a loose root state moves it into that region', () => {
@@ -598,5 +617,57 @@ describe('normalizeParallelGroups — loose state ids containing spaces', () => 
     expect(d.scxml.state).toBeUndefined();
     const aRegion = (one(d.scxml.parallel).state as any[]).find((r) => r['@_id'] === 'a_region');
     expect(ids(aRegion.state).sort()).toEqual(['a', 'my state']);
+  });
+});
+
+describe('normalizeParallelGroups — a region emptied by deleting its states', () => {
+  const ROOT_THREE = `${HEADER} initial="__root_parallel"><parallel id="__root_parallel"><state id="A_region" initial="A"><state id="A"><transition event="go" target="A2"/></state><state id="A2"/></state><state id="B_region" initial="B"><state id="B"/></state><state id="C_region" initial="C"><state id="C"/></state></parallel></scxml>`;
+
+  function deleteThenNormalize(xml: string, stateIds: string[]) {
+    const deleted = new DeleteNodeCommand(stateIds).execute(xml);
+    expect(deleted.success).toBe(true);
+    return normalizeXml(deleted.newContent);
+  }
+
+  it('removes the emptied region and keeps the others', () => {
+    const { doc } = deleteThenNormalize(ROOT_THREE, ['A', 'A2']);
+    const rp = one(doc.scxml.parallel);
+    expect(rp['@_id']).toBe('__root_parallel');
+    expect(ids(rp.state).sort()).toEqual(['B_region', 'C_region']);
+  });
+
+  it('removes the transparent parallel once only one region is left', () => {
+    const { doc } = deleteThenNormalize(ROOT_THREE, ['A', 'A2', 'B']);
+    expect(doc.scxml.parallel).toBeUndefined();
+    expect(ids(doc.scxml.state)).toEqual(['C']);
+    expect(doc.scxml['@_initial']).toBe('C');
+  });
+
+  it('removes the whole transparent parallel when every region is emptied at once', () => {
+    const { doc } = deleteThenNormalize(
+      `${ROOT_THREE.replace('</scxml>', '')}<state id="L"/></scxml>`,
+      ['A', 'A2', 'B', 'C'],
+    );
+    expect(doc.scxml.parallel).toBeUndefined();
+    expect(ids(doc.scxml.state)).toEqual(['L']);
+  });
+
+  it('reverts a compound state\'s <parallel> to an empty <state> when every region is emptied', () => {
+    const { doc } = deleteThenNormalize(
+      `${HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel></scxml>`,
+      ['A', 'B'],
+    );
+    expect(doc.scxml.parallel).toBeUndefined();
+    const p = one(doc.scxml.state);
+    expect(p['@_id']).toBe('P');
+    expect(p.state).toBeUndefined();
+    expect(p['@_initial']).toBeUndefined();
+  });
+
+  it('keeps an empty region that is a state in its own right (no initial, own content, or targeted)', () => {
+    const kept = normalizeXml(
+      `${HEADER}><parallel id="P"><state id="Plain"/><state id="Busy" initial="X"><onentry><log expr="1"/></onentry></state><state id="Hit" initial="Y"/><state id="Src"><transition event="go" target="Hit"/></state></parallel></scxml>`,
+    );
+    expect(kept.changed).toBe(false);
   });
 });

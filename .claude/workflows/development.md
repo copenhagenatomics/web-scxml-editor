@@ -84,7 +84,7 @@ This is the step that actually confirms or corrects everything read in steps 4�
 
 For this codebase specifically:
 - If touching a **Command**, check `.claude/project/coding-rules.md` §1–2 and confirm whether `clearWaypointsForTouchingTransitions` applies (does your change affect a state's rendered size?).
-- If touching **validation**, remember the 16 passes run in a fixed, dependency-sensitive order (`.claude/decisions/validation.md` #1) — know what your pass depends on and what depends on it.
+- If touching **validation**, remember the 17 passes run in a fixed, dependency-sensitive order (`.claude/decisions/validation.md` #1) — know what your pass depends on and what depends on it.
 - If touching the **diagram/converter**, remember validation and rendering are fully independent pipelines (`.claude/decisions/architecture.md` #3) — a change to one won't automatically affect the other, which can be either the fix or the bug depending on what's being asked.
 - If touching **state** (Zustand), identify which of the 7 stores owns the data and whether other stores/hooks read it (`.claude/decisions/state-management.md` #1).
 - If touching **`viz:` metadata**, remember two independent read/write layers exist (Commands' direct DOM access vs. `VisualMetadataManager`) — changes to one don't automatically apply to the other (`.claude/features/visual-metadata-namespace.md`).

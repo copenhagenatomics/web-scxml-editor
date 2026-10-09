@@ -24,6 +24,7 @@ import {
   validateCrossHierarchyTransitions,
 } from './transition-validator';
 import { validateInitialStateGroups } from './initial-group-validator';
+import { validateParallelNesting } from './parallel-nesting-validator';
 import { validateTransitionSlotConflicts } from './transition-slot-validator';
 import {
   validateW3CCompliance,
@@ -98,6 +99,9 @@ export class SCXMLValidator {
 
     // Multiple Initial State group validation
     validateInitialStateGroups(scxml, errors);
+
+    // No <parallel> inside another <parallel>
+    validateParallelNesting(scxml, errors);
 
     return deduplicateErrors(errors);
   }

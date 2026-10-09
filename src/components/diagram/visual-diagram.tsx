@@ -23,6 +23,7 @@ import {
   isDescendantOf,
   isFinalState,
   resolveFinalStateRegion,
+  findParallelContext,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
@@ -95,6 +96,10 @@ import {
   getInitialIds,
 } from '@/lib/utils/initial-group-utils';
 import { wouldCrossParallelRegions } from '@/lib/utils/parallel-region-connection-validation';
+import {
+  introducesNestedParallel,
+  wouldNestParallelIfConnected,
+} from '@/lib/utils/parallel-nesting-rules';
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
@@ -1064,6 +1069,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             return;
           }
 
+          const nestingCheck = wouldNestParallelIfConnected(preCheck.data, params.source, params.target);
+          if (nestingCheck.blocked) {
+            setConnectionBlockedMessage(nestingCheck.reason || 'Parallel states cannot be nested.');
+            return;
+          }
+
           const slotCheck = checkNewConnectionSlotConflict(preCheck.data, params.source, params.target);
           if (slotCheck.blocked) {
             setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
@@ -1240,6 +1251,16 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         setConnectionBlockedMessage(
           regionCheck.reason || 'Cannot connect states that belong to different regions of the same parallel state.'
         );
+        return false;
+      }
+
+      const nestingCheck = wouldNestParallelIfConnected(
+        parseResult.data,
+        connection.source,
+        connection.target
+      );
+      if (nestingCheck.blocked) {
+        setConnectionBlockedMessage(nestingCheck.reason || 'Parallel states cannot be nested.');
         return false;
       }
 
@@ -2803,18 +2824,22 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     const parseResult = parserRef.current?.parse(scxmlContent);
     if (!parseResult?.success || !parseResult.data) return;
     const scxmlDoc = parseResult.data as SCXMLDocument;
+    const docBeforePaste = JSON.parse(JSON.stringify(scxmlDoc)) as SCXMLDocument;
 
     // A <parallel> can't hold a <final> directly (its children are regions),
     // so pasted finals go into the selected state's region — the same rule as
-    // the "Add Final State" button. Checked before anything is mutated.
+    // the "Add Final State" button. That includes a view whose regions live in
+    // a transparent `__root_parallel` / `{id}__parallel`. Checked before
+    // anything is mutated.
     let finalRegionId: string | undefined;
-    const pastingFinals = copied.some((s) => copiedFinalIds.has(s['@_id']));
-    if (
-      pastingFinals &&
-      currentParentId &&
-      findElementById(scxmlDoc, currentParentId)?.tag === 'parallel'
-    ) {
-      const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
+    const pastedFinalCount = copied.filter((s) => copiedFinalIds.has(s['@_id'])).length;
+    if (pastedFinalCount > 0 && findParallelContext(scxmlDoc, currentParentId)) {
+      const resolved = resolveFinalStateRegion(
+        scxmlDoc,
+        currentParentId,
+        activeStates,
+        pastedFinalCount
+      );
       if ('error' in resolved) {
         showFeedback(resolved.error, 'warning');
         return;
@@ -2880,6 +2905,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       (targetContainer as { '@_initial'?: string })['@_initial'] = carriedInitialIds.join(' ');
     }
 
+    const nestingCheck = introducesNestedParallel(docBeforePaste, scxmlDoc);
+    if (nestingCheck.blocked) {
+      showFeedback(nestingCheck.reason || 'Parallel states cannot be nested.', 'warning');
+      return;
+    }
+
     const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
     onSCXMLChange(updatedSCXML, 'structure');
     setActiveStates(new Set(clones.map((c) => c['@_id'])));
@@ -2904,6 +2935,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       const scxmlDoc = parseResult.data as SCXMLDocument;
       // A <final> can't contain child states
       if (targetParentId && isFinalState(scxmlDoc, targetParentId)) return;
+      const docBeforeMove = JSON.parse(JSON.stringify(scxmlDoc)) as SCXMLDocument;
       const targetIsParallel =
         !!targetParentId && findElementById(scxmlDoc, targetParentId)?.tag === 'parallel';
 
@@ -2940,11 +2972,16 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       });
 
       if (!changed) return;
+      const nestingCheck = introducesNestedParallel(docBeforeMove, scxmlDoc);
+      if (nestingCheck.blocked) {
+        showFeedback(nestingCheck.reason || 'Parallel states cannot be nested.', 'warning');
+        return;
+      }
       const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
       onSCXMLChange(updatedSCXML, 'structure');
       setActiveStates(new Set());
     },
-    [scxmlContent, onSCXMLChange]
+    [scxmlContent, onSCXMLChange, showFeedback]
   );
 
   const rectsOverlap = (

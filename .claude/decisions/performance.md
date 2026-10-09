@@ -5,7 +5,7 @@
 ## 1. Debouncing is the primary strategy for taming continuous-input performance cost, not incremental computation
 
 ### Context
-Both SCXML validation (re-parse + 16-pass validate) and diagram re-conversion (re-parse + ELK layout) are relatively expensive full-document operations, but need to run in response to every keystroke/drag movement.
+Both SCXML validation (re-parse + 17-pass validate) and diagram re-conversion (re-parse + ELK layout) are relatively expensive full-document operations, but need to run in response to every keystroke/drag movement.
 
 ### Decision
 Rather than making validation or diagram conversion incremental, both are simply **debounced**: validation waits 500ms after the last content change; history-tracking debounces similarly (500ms text, 300ms position/resize) — see `state-management.md` #3. The diagram conversion itself is not separately debounced beyond whatever debouncing happens upstream in the position-commit path (`visual-diagram.tsx`'s 150ms position-commit debounce).
@@ -14,7 +14,7 @@ Rather than making validation or diagram conversion incremental, both are simply
 Not documented as an explicit "why not incremental," but debouncing is a substantially simpler engineering investment than building incremental/differential versions of parsing, validation, or ELK layout — and evidently was judged sufficient for this app's expected document sizes and interaction patterns.
 
 ### Constraints
-For a very large document, every debounce-triggered pass still does full work (full re-parse, full 16-pass validation, full ELK re-layout) — this scales with document size regardless of how small the actual edit was.
+For a very large document, every debounce-triggered pass still does full work (full re-parse, full 17-pass validation, full ELK re-layout) — this scales with document size regardless of how small the actual edit was.
 
 ### Alternatives
 None found evidenced — no sign incremental parsing/validation/layout was attempted and abandoned; this appears to be the original and only approach taken.

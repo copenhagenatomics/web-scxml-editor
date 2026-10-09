@@ -39,9 +39,9 @@ Authored as `after 2s` / `after 714ms` / `after (expr) s` in the Transition pane
 - **Transition slots**: at most one transition per (source, target, type) combination may occupy each of `event`/`timer`/`cond`/`always`. A transition may not set both `event` and `cond` (this is actually legal per some SCXML interpretations, but this product treats it as invalid — always flagged). See `.claude/features/transitions-editing.md`.
 - **`conf_` field deletion is usage-checked**: deleting a config value is refused (not just warned) if it's still referenced anywhere in the document.
 
-## Validation summary (16 ordered passes — full detail in `.claude/features/scxml-validation.md`)
+## Validation summary (17 ordered passes — full detail in `.claude/features/scxml-validation.md`)
 
-1. Position/hierarchy index build. 2. State/target reference resolution. 3. Root-level initial-state reference check. 4. Required-attribute walk. 5–6. W3C document-level compliance + structural pass. 7. Semantic checks (unreachable states, duplicate ids, `main_` prefix warning). 8. Transition semantics (type, internal self-target-only, event-name syntax). 9. Transition-slot conflicts. 10. Executable-content sanity. 11. Unknown-attribute/typo detection. 12. Cross-hierarchy rule. 13. Initial-State-group conflicts.
+1. Position/hierarchy index build. 2. State/target reference resolution. 3. Root-level initial-state reference check. 4. Required-attribute walk. 5–6. W3C document-level compliance + structural pass. 7. Semantic checks (unreachable states, duplicate ids, `main_` prefix warning). 8. Transition semantics (type, internal self-target-only, event-name syntax). 9. Transition-slot conflicts. 10. Executable-content sanity. 11. Unknown-attribute/typo detection. 12. Cross-hierarchy rule. 13. Initial-State-group conflicts. 14. Nested `<parallel>` inside `<parallel>` (`parallel-nesting-validator.ts`).
 
 **Known validation coverage gaps** (do not assume these are covered just because a sibling case is):
 - Compound states nested inside a `<parallel>` are not checked for a missing `@initial` (the recursive walk only follows `state → state`, not `state → parallel → state`).

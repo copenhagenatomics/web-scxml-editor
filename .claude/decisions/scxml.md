@@ -291,7 +291,7 @@ Under #10, a compound state with 2+ Initial work trees kept its `<state>` elemen
 ### Decision
 `normalizeParallelGroups` (`src/lib/utils/parallel-group-normalization.ts`):
 - A compound `<state>` with 2+ Initial work trees becomes a `<parallel>` in place (same object, moved from its parent's `.state` to `.parallel`): it keeps its id, transitions, onentry/onexit and `viz:` attributes, loses `@initial`/`<initial>`, and each work tree goes into its own `<state id="{initialId}_region" initial="{initialId}">` (#11). Children outside every work tree go into **one extra region** of their own (the user chose "convert anyway" over a nested fallback or blocking).
-- **Any** `<parallel>` (converted or hand-written; nothing tells them apart) with fewer than 2 regions turns back into a `<state>`, its sole region (if any) becoming `initial`. Regions are kept as they are, not unwrapped.
+- **Any** `<parallel>` (converted or hand-written; nothing tells them apart) with fewer than 2 regions turns back into a `<state>`. Its sole region is unwrapped into it, the region's `initial` becoming the state's (`liftSoleRegion`, superseding the original "regions are kept as they are" — the user found the leftover `X_region` wrapper node confusing). The region is kept, and becomes `initial`, when it's a state in its own right: no child states, content of its own (transitions, actions, history, notes), or targeted by a transition.
 - The `<scxml>` root can't be a `<parallel>`, so 2+ root-level work trees go into one inserted `<parallel id="__root_parallel">` — the only element the editor ever inserts, recognized by its reserved id (`parallel-structure.ts`'s `isRootParallel`, allowing a `_2`… clash suffix). New root-level work trees join it as regions; it's removed once fewer than 2 regions are left.
 - No `viz:auto-*` markers are written. Older documents are migrated on the next pass: markers are stripped, and an old `<state id="X" initial="X_parallel"><parallel id="X_parallel" viz:auto-parallel="true">…` is collapsed so X itself is the `<parallel>`.
 
@@ -329,9 +329,41 @@ Under #12, a compound state's unassigned children went into one extra region of 
 - Transparency is positional and kind-based: `isTransparentParallel(el, kind)` — `__root_parallel` only directly under `<scxml>` (`'root'`), `{id}__parallel` only directly under a `<state>` (`'state'`). `getChildEntries` / `getDisplayChildEntries` / `getInitialIds` / `isParallelRegion` / `collectParallelGroups` / `isInitialState` see through it. Initial-group analysis must not: `groupAnalysisKind` now maps both `'root'` and `'state'` to the new `'opaque'` kind, which counts the transparent parallel as one child.
 - A state with `<final>` children is still never converted (no inner parallel is created for it).
 - Not done: a region member that loses its last transition to the work tree is **not** moved back out to loose; it stays in its region.
+- Unmarking the last Initial State of a region (`ToggleInitialStateCommand`'s `dissolveRegion`) dissolves the region: its states go back out as loose children beside the `<parallel>` (a converted `<parallel>` becomes a `<state>` holding its remaining regions in `{id}__parallel`), so with fewer than 2 regions left the normal unwrap reverts it to a compound state. Done on the gesture, not in `normalizeParallelGroups`, so a hand-written region with no `initial` isn't dissolved on load; removing a region's `initial` by typing in the XML editor therefore doesn't dissolve it. A region with its own transitions/actions is left alone.
 
 ### Evidence
 `parallel-group-normalization.test.ts` ("loose states" block), `scxml-manipulation-utils.test.ts` (`addLooseStateToParallel`), `state-registry.test.ts` (inner parallel registration).
+
+### Status
+Accepted.
+
+---
+
+## 14. Parallel states can't be nested
+
+### Context
+Under #10–#13 a container with 2+ Initial work trees becomes a `<parallel>`. If that container is inside a parallel's region, or one of its work trees already holds a parallel, the result is a `<parallel>` inside another `<parallel>`. Connecting a loose state that holds a parallel into a region (#13) did the same. The user asked to stop nested parallels.
+
+### Decision
+No `<parallel>` (including a transparent `__root_parallel` / `{id}__parallel`) may have a `<parallel>` ancestor. `src/lib/utils/parallel-nesting-rules.ts` holds the rule:
+- `findNestedParallels` lists every nested `<parallel>`.
+- `introducesNestedParallel(before, after)` normalizes copies of both documents and blocks if `after` has a nested parallel that `before` didn't. Nesting a document already had is left to the validator so it doesn't block unrelated edits.
+- `wouldNestParallelIfMarkedInitial` and `wouldNestParallelIfConnected` apply the edit to a copy and run that check, so the rule always matches what `normalizeParallelGroups` would actually do.
+
+Live gates: `ToggleInitialStateCommand` (the Initial checkbox stays clickable on purpose, so clicking it shows the refusal in the canvas warning banner — the user asked for a visible warning instead of a disabled box with a tooltip), `onConnect` / `isValidConnection`, paste and drag-to-nest (warning toast). Static: `validateParallelNesting` (`src/lib/validators/parallel-nesting-validator.ts`) reports hand-written nesting as an error.
+
+### Reason
+The user asked for it directly ("We need to restrict having nested parallel"). They gave no further reason. Checking a normalized copy, instead of restating the normalizer's conditions, keeps the gates from drifting when the normalizer changes.
+
+### Constraints
+- `normalizeParallelGroups` itself isn't guarded. Typing 2+ Initial ids inside a region in the XML editor still produces a nested parallel, which the validator then reports.
+- Unmarking Initial is never blocked.
+
+### Alternatives
+The first version disabled the Initial checkbox, with the reason as its tooltip. The user rejected it ("instead of this can we give user a warning, so they can know"). The checkbox now stays clickable for this case, and only the "would merge two Initial State groups" case still disables it.
+
+### Evidence
+`parallel-nesting-rules.test.ts`, `parallel-nesting-validator.test.ts`, `toggle-initial-state-command.test.ts` ("refuses a second Initial State inside a region").
 
 ### Status
 Accepted.

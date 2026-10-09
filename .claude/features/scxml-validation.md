@@ -19,7 +19,7 @@ Give the user real-time, line/column-precise feedback on both XML syntax and SCX
 
 Two fully independent stages, chained but not coupled:
 1. **`SCXMLParser.parse(xmlContent)`** (`src/lib/parsers/scxml-parser.ts`) — runs a hand-rolled character-scanning XML syntax checker first (tag-stack matching, CDATA/comment/PI-aware, unescaped-`&` detection, with a heuristic to avoid false "unclosed tag" errors while the user is mid-typing), then `fast-xml-parser`'s own `XMLValidator.validate()` as a second opinion (deduped against the first), then the real parse if no hard errors.
-2. **`SCXMLValidator.validate(scxml, xmlContent)`** (`src/lib/validators/scxml-validator.ts`) — only runs if parsing succeeded. **16 ordered passes**, order matters (later passes depend on state built earlier — id sets, hierarchy maps):
+2. **`SCXMLValidator.validate(scxml, xmlContent)`** (`src/lib/validators/scxml-validator.ts`) — only runs if parsing succeeded. **17 ordered passes**, order matters (later passes depend on state built earlier — id sets, hierarchy maps):
    1. Build element-position index + state-id/hierarchy maps.
    2. State reference validation (root `@initial`, every `transition/@target` must resolve).
    3. Root-level `state/@initial` reference validation (dedicated message; does **not** cover nested compound states — see gap below).
@@ -32,6 +32,7 @@ Two fully independent stages, chained but not coupled:
    11. Unknown-attribute/typo detection against `attribute-schemas.ts` whitelists, Levenshtein "did you mean" (threshold 2).
    12. Cross-hierarchy transition rule (same-parent-only).
    13. Initial-State-group conflicts (`initial-group-validator.ts`).
+   14. Nested parallel states (`parallel-nesting-validator.ts`): an error for every `<parallel>` inside another `<parallel>`. This is the static counterpart of the live gates in `parallel-nesting-rules.ts` (`decisions/scxml.md` #14).
 3. Output: flat `deduplicateErrors(errors)` (`ValidationError[]`, deduped on `message+line+column` composite key).
 
 Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`), debounced 500ms, writing into `useEditorStore.errors`.
@@ -46,7 +47,7 @@ Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`
 
 ## Relevant utilities
 
-`src/lib/parsers/scxml-parser.ts`, `src/lib/validators/*` (8 files: `scxml-validator.ts`, `state-validator.ts`, `transition-validator.ts`, `transition-slot-validator.ts`, `initial-group-validator.ts`, `w3c-validator.ts`, `attribute-schemas.ts`, `validator-utils.ts`), `src/lib/utils/resolve-focus-target.ts` (error → diagram navigation).
+`src/lib/parsers/scxml-parser.ts`, `src/lib/validators/*` (9 files: `scxml-validator.ts`, `state-validator.ts`, `transition-validator.ts`, `transition-slot-validator.ts`, `initial-group-validator.ts`, `parallel-nesting-validator.ts`, `w3c-validator.ts`, `attribute-schemas.ts`, `validator-utils.ts`), `src/lib/utils/resolve-focus-target.ts` (error → diagram navigation).
 
 ## SCXML behavior
 
@@ -74,7 +75,7 @@ Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do no
 
 ## Tests
 
-`src/lib/validators/scxml-validator.test.ts`, `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
+`src/lib/validators/scxml-validator.test.ts`, `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`, `parallel-nesting-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
 
 ## Known limitations
 
@@ -90,8 +91,8 @@ Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do no
 
 ## Things that must NOT be changed
 
-- Do not reorder the 16 validation passes without checking dependencies — several passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular).
-- Do not duplicate transition-slot-conflict or Initial-group-conflict logic directly in `scxml-validator.ts` — always delegate to the shared utility modules (`transition-slot-rules.ts`, `initial-group-utils.ts`) that the live-blocking UI also uses.
+- Do not reorder the 17 validation passes without checking dependencies — several passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular).
+- Do not duplicate transition-slot-conflict, Initial-group-conflict or parallel-nesting logic directly in `scxml-validator.ts` — always delegate to the shared utility modules (`transition-slot-rules.ts`, `initial-group-utils.ts`, `parallel-nesting-rules.ts`) that the live-blocking UI also uses.
 
 ## Previous design decisions
 
