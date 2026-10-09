@@ -23,6 +23,7 @@ import {
   isDescendantOf,
   isFinalState,
   resolveFinalStateRegion,
+  findParallelContext,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
@@ -2827,14 +2828,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
     // A <parallel> can't hold a <final> directly (its children are regions),
     // so pasted finals go into the selected state's region — the same rule as
-    // the "Add Final State" button. Checked before anything is mutated.
+    // the "Add Final State" button. That includes a view whose regions live in
+    // a transparent `__root_parallel` / `{id}__parallel`. Checked before
+    // anything is mutated.
     let finalRegionId: string | undefined;
     const pastedFinalCount = copied.filter((s) => copiedFinalIds.has(s['@_id'])).length;
-    if (
-      pastedFinalCount > 0 &&
-      currentParentId &&
-      findElementById(scxmlDoc, currentParentId)?.tag === 'parallel'
-    ) {
+    if (pastedFinalCount > 0 && findParallelContext(scxmlDoc, currentParentId)) {
       const resolved = resolveFinalStateRegion(
         scxmlDoc,
         currentParentId,

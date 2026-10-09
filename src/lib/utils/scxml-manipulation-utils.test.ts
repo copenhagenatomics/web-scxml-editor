@@ -17,6 +17,7 @@ import {
   collectExistingIds,
   isFinalState,
   resolveFinalStateRegion,
+  findParallelContext,
   addLooseStateToParallel,
 } from './scxml-manipulation-utils';
 import { getInitialIds, isParallelRegion } from './initial-group-utils';
@@ -170,6 +171,25 @@ describe('<final> lookups', () => {
       expect(resolveFinalStateRegion(d, null, ['Loose'])).toEqual({
         error: 'Select a state in the region where the final state should go.',
       });
+    });
+
+    it('findParallelContext sees explicit and transparent parallels, not ordinary views (paste guard)', () => {
+      const d = {
+        scxml: {
+          '@_initial': '__root_parallel',
+          state: { '@_id': 'H', '@_initial': 'H__parallel', state: { '@_id': 'Plain' }, parallel: { '@_id': 'H__parallel', state: [{ '@_id': 'X' }, { '@_id': 'Y' }] } },
+          parallel: [
+            { '@_id': '__root_parallel', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] },
+            { '@_id': 'P', state: [{ '@_id': 'P1' }, { '@_id': 'P2' }] },
+          ],
+        },
+      } as any as SCXMLDocument;
+      expect(findParallelContext(d, null)?.['@_id']).toBe('__root_parallel');
+      expect(findParallelContext(d, 'H')?.['@_id']).toBe('H__parallel');
+      expect(findParallelContext(d, 'P')?.['@_id']).toBe('P');
+      expect(findParallelContext(d, 'Plain')).toBeNull();
+      expect(findParallelContext(doc(), null)).toBeNull();
+      expect(findParallelContext(doc(), 'main_region')).toBeNull();
     });
 
     describe('addLooseStateToParallel (canvas "Add State" inside a <parallel>)', () => {

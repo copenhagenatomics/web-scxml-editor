@@ -97,6 +97,22 @@ export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean 
 }
 
 /**
+ * The <parallel> whose regions are shown when viewing `parentId` (null: the
+ * top level) — `parentId` itself if it's a <parallel>, else its transparent
+ * `{id}__parallel`, or the root's `__root_parallel` at the top level. Null
+ * when the view is an ordinary compound state / top level with no regions.
+ */
+export function findParallelContext(
+  scxmlDoc: SCXMLDocument,
+  parentId: string | null | undefined
+): StateElement | null {
+  if (!parentId) return findTransparentParallel(scxmlDoc.scxml, 'root') ?? null;
+  const found = findElementById(scxmlDoc, parentId);
+  if (found?.tag === 'parallel') return found.element;
+  return findTransparentParallel(found?.element, 'state') ?? null;
+}
+
+/**
  * Where the canvas "Add Final State" button puts a new <final>. Final states
  * are only added while viewing inside a <parallel> (`parallelId`) — or a
  * compound state whose work trees live in its transparent `{id}__parallel`,
@@ -113,12 +129,7 @@ export function resolveFinalStateRegion(
   selectedIds: Iterable<string>,
   adding = 1
 ): { regionId: string } | { error: string } {
-  const found = parallelId ? findElementById(scxmlDoc, parallelId) : null;
-  const parallel = !parallelId
-    ? findTransparentParallel(scxmlDoc.scxml, 'root')
-    : found?.tag === 'parallel'
-      ? found.element
-      : findTransparentParallel(found?.element, 'state');
+  const parallel = findParallelContext(scxmlDoc, parallelId);
   if (!parallel) {
     return { error: 'Final states can only be added inside a parallel state.' };
   }
