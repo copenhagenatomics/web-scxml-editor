@@ -18,7 +18,6 @@ import {
   computeExportLevels,
   contentBounds,
   levelTitle,
-  pageSize,
   planLevelPage,
   usableArea,
   FOOTER_HEIGHT,
@@ -41,8 +40,6 @@ export interface DiagramExportSource {
   getEdgeCount: () => number;
   /** Parallel-region divider x-positions (flow coords) for the displayed level. */
   getDividerXs: () => number[];
-  /** Current theme — the PDF pages follow it (dark mode → dark pages). */
-  isDark: () => boolean;
   /** Deselects everything so selection highlights don't end up in the PDF. */
   clearSelection: () => void;
 }
@@ -68,14 +65,11 @@ const LEVEL_RENDER_TIMEOUT_MS = 4000;
 const DIAGRAM_READY_TIMEOUT_MS = 20000;
 
 /**
- * Page colors per theme: capture background, page fill (null = leave the
- * page white) and RGB colors for header/footer text and the header rule.
- * Dark values match the canvas's slate-900 background.
+ * Page colors: capture background and RGB colors for header/footer text and
+ * the header rule. The PDF is always light — the caller switches the app to
+ * light mode for the export (see use-download.ts) so the captured canvas matches.
  */
-const THEMES = {
-  light: { background: '#ffffff', fill: null, text: [100, 116, 139], rule: [203, 213, 225] },
-  dark: { background: '#0f172a', fill: [15, 23, 42], text: [148, 163, 184], rule: [51, 65, 85] },
-} as const;
+const THEME = { background: '#ffffff', text: [100, 116, 139], rule: [203, 213, 225] } as const;
 
 function nextFrame(): Promise<void> {
   // rAF doesn't fire in a background tab — fall back to a timeout.
@@ -218,7 +212,6 @@ export async function buildDiagramPdf(source: DiagramExportSource, options: Diag
     await nextFrame();
   }
 
-  const theme = source.isDark() ? THEMES.dark : THEMES.light;
   const levels = computeExportLevels(source.getAllNodes(), isNoteId);
   source.clearSelection();
 
@@ -234,11 +227,6 @@ export async function buildDiagramPdf(source: DiagramExportSource, options: Diag
       doc = new jsPDF({ orientation, unit: 'pt', format: 'a4' });
     } else {
       doc.addPage('a4', orientation);
-    }
-    if (theme.fill) {
-      const { width, height } = pageSize(orientation);
-      doc.setFillColor(theme.fill[0], theme.fill[1], theme.fill[2]);
-      doc.rect(0, 0, width, height, 'F');
     }
     pageTitles.push(title);
     return doc;
@@ -258,7 +246,7 @@ export async function buildDiagramPdf(source: DiagramExportSource, options: Diag
       const area = usableArea('portrait');
       page.setFont('helvetica', 'italic');
       page.setFontSize(11);
-      page.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
+      page.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
       page.text('This level has no states.', area.x + area.width / 2, area.y + 40, { align: 'center' });
       continue;
     }
@@ -277,7 +265,7 @@ export async function buildDiagramPdf(source: DiagramExportSource, options: Diag
         width,
         height,
         pixelRatio: capturePixelRatio(bounds, plan.scale),
-        backgroundColor: theme.background,
+        backgroundColor: THEME.background,
         fontEmbedCSS,
         filter: captureFilter,
         style: {
@@ -311,9 +299,9 @@ export async function buildDiagramPdf(source: DiagramExportSource, options: Diag
 
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8);
-    pdf.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
+    pdf.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
     pdf.text(fitText(pdf, pageTitles[i - 1], pageWidth - PAGE_MARGIN * 2), PAGE_MARGIN, PAGE_MARGIN + 8);
-    pdf.setDrawColor(theme.rule[0], theme.rule[1], theme.rule[2]);
+    pdf.setDrawColor(THEME.rule[0], THEME.rule[1], THEME.rule[2]);
     pdf.setLineWidth(0.5);
     pdf.line(PAGE_MARGIN, PAGE_MARGIN + 13, pageWidth - PAGE_MARGIN, PAGE_MARGIN + 13);
     pdf.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - PAGE_MARGIN - FOOTER_HEIGHT / 2 + 8, {
