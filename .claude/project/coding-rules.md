@@ -21,7 +21,7 @@ There are exactly two ways SCXML content gets mutated. Pick based on precedent, 
 
 ## 3. Validators
 
-- `SCXMLValidator.validate()` (`src/lib/validators/scxml-validator.ts`) runs **16 ordered passes** — order matters because later passes depend on state built by earlier ones (id sets, hierarchy maps). If you add a pass, decide deliberately where in the sequence it belongs; don't just append at the end unless it's truly independent.
+- `SCXMLValidator.validate()` (`src/lib/validators/scxml-validator.ts`) runs **17 ordered passes** — order matters because later passes depend on state built by earlier ones (id sets, hierarchy maps). If you add a pass, decide deliberately where in the sequence it belongs; don't just append at the end unless it's truly independent.
 - Attribute whitelists live in `attribute-schemas.ts` as one `Set<string>` per element type — add new legal attributes there, not inline in the validator.
 - `ValidationError.code` is defined in the type but **never populated anywhere**. Don't start relying on it for new logic without also deciding whether to actually populate it everywhere.
 - Two live-blocking modules (`transition-slot-rules.ts`, `initial-group-utils.ts`) implement the *same* business rules as two static validators (`transition-slot-validator.ts`, `initial-group-validator.ts`) for a reason: the live version blocks bad edits *before* they happen in the diagram/panels; the static version catches violations from hand-edited XML or older files. **If you change the underlying rule, change it in the shared utility both call, not in one validator alone.** `parallel-nesting-rules.ts` / `parallel-nesting-validator.ts` (no nested `<parallel>`) follow the same pairing.

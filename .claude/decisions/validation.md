@@ -2,13 +2,13 @@
 
 ---
 
-## 1. Validation is organized as 16 ordered, dependency-sensitive passes in one orchestrating method
+## 1. Validation is organized as 17 ordered, dependency-sensitive passes in one orchestrating method
 
 ### Context
 SCXML correctness spans many independent concerns: structure, references, attributes, semantics, product-specific rules.
 
 ### Decision
-`SCXMLValidator.validate()` runs 16 passes in a fixed order, where later passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular) rather than each pass being fully self-contained.
+`SCXMLValidator.validate()` runs 17 passes in a fixed order, where later passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular) rather than each pass being fully self-contained.
 
 ### Reason
 Not documented in a dedicated design note, but building shared lookups (id sets, position index, hierarchy maps) once and reusing them across passes avoids redundant tree-walking for what would otherwise be many independent full-document scans.
@@ -80,22 +80,22 @@ Accepted (motivating rationale); implementation coverage of all 7 documented pit
 ## 4. Live UI blocking and static validation for the same rule always share one implementation
 
 ### Context
-Transition-slot conflicts and Initial-State-group conflicts each need to be both prevented live (blocking an invalid connect/edit gesture before it happens) and caught statically (for hand-edited/pasted XML that bypassed the live UI).
+Transition-slot conflicts, Initial-State-group conflicts and nested `<parallel>` states each need to be both prevented live (blocking an invalid connect/edit gesture before it happens) and caught statically (for hand-edited/pasted XML that bypassed the live UI).
 
 ### Decision
-Both enforcement points call into the same shared utility module (`transition-slot-rules.ts`, `initial-group-utils.ts`) rather than each having its own independent implementation of the underlying rule.
+Both enforcement points call into the same shared utility module (`transition-slot-rules.ts`, `initial-group-utils.ts`, `parallel-nesting-rules.ts`) rather than each having its own independent implementation of the underlying rule.
 
 ### Reason
 Not documented in a single design note, but this is the only way to guarantee the two enforcement points can never silently diverge — a change to the rule made in only one place would otherwise create an inconsistency between what the UI blocks live and what static validation flags after the fact.
 
 ### Constraints
-Any change to slot/group semantics must be made in the shared utility, never duplicated inline in a validator or a diagram event handler.
+Any change to slot/group/nesting semantics must be made in the shared utility, never duplicated inline in a validator or a diagram event handler.
 
 ### Alternatives
 None found evidenced.
 
 ### Evidence
-`src/lib/utils/transition-slot-rules.ts` (used by both `visual-diagram.tsx`'s `onConnect` and `transition-slot-validator.ts`), `src/lib/utils/initial-group-utils.ts` (used by both the State Actions panel's Initial checkbox / `onConnect`, and `initial-group-validator.ts`).
+`src/lib/utils/transition-slot-rules.ts` (used by both `visual-diagram.tsx`'s `onConnect` and `transition-slot-validator.ts`), `src/lib/utils/initial-group-utils.ts` (used by both the State Actions panel's Initial checkbox / `onConnect`, and `initial-group-validator.ts`), `src/lib/utils/parallel-nesting-rules.ts` (used by both `visual-diagram.tsx` / `toggle-initial-state-command.ts` live gates and `parallel-nesting-validator.ts`).
 
 ### Status
 Accepted.

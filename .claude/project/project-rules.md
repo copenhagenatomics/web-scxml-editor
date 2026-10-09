@@ -272,7 +272,7 @@ See `decisions/performance.md` #4.
 
 ## 14. Validation
 
-**14.1 — `SCXMLValidator.validate()`'s 16 passes run in a fixed, dependency-sensitive order. Do not reorder them or assume a pass is self-contained — later passes rely on the id set and hierarchy maps built in pass 1.** [EXPLICIT]
+**14.1 — `SCXMLValidator.validate()`'s 17 passes run in a fixed, dependency-sensitive order. Do not reorder them or assume a pass is self-contained — later passes rely on the id set and hierarchy maps built in pass 1.** [EXPLICIT]
 See `decisions/validation.md` #1, `.claude/workflows/adding-a-validation-rule.md`.
 
 **14.2 — A rule needing both live UI blocking and static (post-hoc) validation must live in one shared utility (`transition-slot-rules.ts`, `initial-group-utils.ts` are the existing examples) consumed by both — never duplicated independently in the validator and in `visual-diagram.tsx`.** [EXPLICIT]
