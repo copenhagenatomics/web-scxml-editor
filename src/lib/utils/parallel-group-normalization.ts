@@ -23,6 +23,9 @@
  *   sole region (if any) is unwrapped into it, the region's `initial`
  *   becoming the state's — unless the region is a state in its own right
  *   (liftSoleRegion), in which case it stays and becomes the `initial`.
+ * - A region whose states have all been deleted (an `initial` left pointing
+ *   at nothing) is removed first (pruneHollowRegions), so the rule above
+ *   then reverts or removes its <parallel>.
  * - The <scxml> root can't become a <parallel>, so 2+ root-level work trees
  *   always go into an inserted `<parallel id="__root_parallel">`, loose
  *   siblings beside it, the same way (see parallel-structure.ts). These
@@ -229,6 +232,35 @@ function liftSoleRegion(host: any, region: ChildEntry, ctx: Ctx): boolean {
 }
 
 /**
+ * A region whose work tree has been deleted out from under it: a <state>
+ * with an `initial` but nothing left for it to point at, and nothing of its
+ * own (same test as liftSoleRegion), that no transition targets. A region
+ * without an `initial` is a hand-authored atomic region and is kept.
+ */
+function isHollowRegion(region: ChildEntry, ctx: Ctx): boolean {
+  const el = region.el;
+  if (region.tag !== 'state' || !el || typeof el !== 'object') return false;
+  if (!el['@_initial'] && !el.initial) return false;
+  if (getChildEntries(el).length > 0 || asArray(el.final).length > 0) return false;
+  if (Object.keys(el).some((k) => !k.startsWith('@_') && !REGION_WRAPPER_KEYS.has(k))) return false;
+  return !ctx.targetedIds.has(el['@_id']);
+}
+
+/**
+ * Drop hollow regions from a <parallel>, so deleting a region's states
+ * deletes the region too; the usual fewer-than-2-regions handling then
+ * reverts or removes the parallel.
+ */
+function pruneHollowRegions(parallel: any, ctx: Ctx): void {
+  const regions = getChildEntries(parallel);
+  const kept = regions.filter((r) => !isHollowRegion(r, ctx));
+  if (kept.length === regions.length) return;
+  regions.filter((r) => !kept.includes(r)).forEach((r) => ctx.usedIds.delete(r.el['@_id']));
+  assignEntries(parallel, kept);
+  ctx.changed = true;
+}
+
+/**
  * Loose children (not part of any work tree) that a transition connects —
  * directly, or through other loose children — to a direct member of exactly
  * one region join that region: drawing state_3 -> state_4 makes state_4 part
@@ -326,6 +358,7 @@ function normalizeHost(host: any, kind: 'root' | 'state', ctx: Ctx): 'state' | '
   const hasFinals = asArray(host.final).length > 0;
   if (kind === 'state' && !inner && hasFinals) return 'state';
 
+  if (inner) pruneHollowRegions(inner, ctx);
   const existingRegions = inner ? getChildEntries(inner) : [];
   const { groups, unassigned } = groupEntries(outside, getInitialIds(host, kind));
   const total = existingRegions.length + groups.size;
@@ -420,6 +453,7 @@ function normalizeChildren(el: any, kind: ContainerKind, ctx: Ctx): void {
         return;
       }
       normalizeChildren(child, 'parallel', ctx);
+      pruneHollowRegions(child, ctx);
       const reverted = revertParallelIfNeeded(child, ctx);
       if (reverted) retagged = true;
       next.push({ el: child, tag: reverted ? 'state' : 'parallel' });
