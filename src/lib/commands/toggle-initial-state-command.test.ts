@@ -195,18 +195,17 @@ describe('ToggleInitialStateCommand', () => {
 
     it('toggles a member inside a region normally (the region is an ordinary compound state)', () => {
       const xml = `${PAR_HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/><state id="A2"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel></scxml>`;
-      const result = new ToggleInitialStateCommand('A2').execute(xml);
+      const result = new ToggleInitialStateCommand('A').execute(xml);
       expect(result.success).toBe(true);
-      expect(result.newContent).toContain('initial="A A2"');
+      expect(result.newContent).not.toContain('initial="A"');
+    });
 
-      // Normalization then turns A_region itself into a <parallel>.
-      const parsed = new SCXMLParser().parse(result.newContent).data!;
-      normalizeParallelGroups(parsed);
-      const p = parsed.scxml.parallel as any;
-      const aRegion = (p.parallel ? (Array.isArray(p.parallel) ? p.parallel : [p.parallel]) : []).find(
-        (r: any) => r['@_id'] === 'A_region'
-      );
-      expect(aRegion).toBeDefined();
+    it('refuses a second Initial State inside a region — it would nest a <parallel> in P', () => {
+      const xml = `${PAR_HEADER} initial="P"><parallel id="P"><state id="A_region" initial="A"><state id="A"/><state id="A2"/></state><state id="B_region" initial="B"><state id="B"/></state></parallel></scxml>`;
+      const result = new ToggleInitialStateCommand('A2').execute(xml);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Parallel states cannot be nested');
+      expect(result.newContent).toBe(xml);
     });
 
     it('marks a root-level sibling Initial next to __root_parallel, expanding the parallel to its regions', () => {

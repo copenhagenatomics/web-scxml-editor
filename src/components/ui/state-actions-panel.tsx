@@ -902,7 +902,9 @@ export function StateActionsPanel({
         {/* Initial State toggle — markable for simple/compound/parallel
             states (not final), except a region of a parallel state, which
             is always active. Unmarking is always allowed; only marking can
-            be blocked (it would merge two Initial State groups). */}
+            be blocked (it would merge two Initial State groups). Marking
+            that would nest a parallel state stays clickable — the toggle
+            command refuses it and the canvas shows why. */}
         {(stateType === 'simple' || stateType === 'compound' || stateType === 'parallel') &&
           !isParallelRegion && (() => {
           const disabled = !isInitial && !canMarkInitial;

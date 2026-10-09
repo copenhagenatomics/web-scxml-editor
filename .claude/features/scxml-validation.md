@@ -32,6 +32,7 @@ Two fully independent stages, chained but not coupled:
    11. Unknown-attribute/typo detection against `attribute-schemas.ts` whitelists, Levenshtein "did you mean" (threshold 2).
    12. Cross-hierarchy transition rule (same-parent-only).
    13. Initial-State-group conflicts (`initial-group-validator.ts`).
+   14. Nested parallel states (`parallel-nesting-validator.ts`): an error for every `<parallel>` inside another `<parallel>`. This is the static counterpart of the live gates in `parallel-nesting-rules.ts` (`decisions/scxml.md` #14).
 3. Output: flat `deduplicateErrors(errors)` (`ValidationError[]`, deduped on `message+line+column` composite key).
 
 Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`), debounced 500ms, writing into `useEditorStore.errors`.
@@ -46,7 +47,7 @@ Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`
 
 ## Relevant utilities
 
-`src/lib/parsers/scxml-parser.ts`, `src/lib/validators/*` (8 files: `scxml-validator.ts`, `state-validator.ts`, `transition-validator.ts`, `transition-slot-validator.ts`, `initial-group-validator.ts`, `w3c-validator.ts`, `attribute-schemas.ts`, `validator-utils.ts`), `src/lib/utils/resolve-focus-target.ts` (error → diagram navigation).
+`src/lib/parsers/scxml-parser.ts`, `src/lib/validators/*` (9 files: `scxml-validator.ts`, `state-validator.ts`, `transition-validator.ts`, `transition-slot-validator.ts`, `initial-group-validator.ts`, `parallel-nesting-validator.ts`, `w3c-validator.ts`, `attribute-schemas.ts`, `validator-utils.ts`), `src/lib/utils/resolve-focus-target.ts` (error → diagram navigation).
 
 ## SCXML behavior
 
@@ -74,7 +75,7 @@ Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do no
 
 ## Tests
 
-`src/lib/validators/scxml-validator.test.ts`, `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
+`src/lib/validators/scxml-validator.test.ts`, `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`, `parallel-nesting-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
 
 ## Known limitations
 

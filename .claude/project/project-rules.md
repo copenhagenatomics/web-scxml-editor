@@ -142,6 +142,9 @@ Not all of these have an automated rule yet — see `docs/invalid-event-identifi
 **6.9 — The datamodel naming conventions `conf_` (per-deployment config value), `this_` (physical channel reference), and `main_` (portability anti-pattern, flagged by validation) are load-bearing across multiple features. Do not repurpose these prefixes for anything else.** [EXPLICIT]
 See `project/terminology.md`, `decisions/naming-conventions.md` #1.
 
+**6.10 — No `<parallel>` may sit anywhere inside another `<parallel>`, whether it's hand-written or one the editor inserts (`__root_parallel` / `{id}__parallel`). Live gates (Initial toggle, connect, paste, drag-to-nest) and the static validator share `src/lib/utils/parallel-nesting-rules.ts`. That module checks a normalized copy of the document, so it stays in step with `normalizeParallelGroups`.** [EXPLICIT — user request]
+See `decisions/scxml.md` #14, `features/parallel-state-auto-grouping.md`.
+
 ---
 
 ## 7. SCXML Parsing

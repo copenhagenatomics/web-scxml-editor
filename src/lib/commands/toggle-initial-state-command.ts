@@ -6,6 +6,7 @@ import {
   getInitialIds,
   isParallelRegion,
 } from '@/lib/utils/initial-group-utils';
+import { wouldNestParallelIfMarkedInitial } from '@/lib/utils/parallel-nesting-rules';
 import {
   clearWaypointsForTouchingTransitions,
   restoreClearedWaypoints,
@@ -140,6 +141,13 @@ export class ToggleInitialStateCommand extends BaseCommand {
       if (conflict.blocked) {
         return this.createFailureResult(
           conflict.reason || `Cannot mark '${this.stateId}' as an Initial State.`,
+          scxmlContent
+        );
+      }
+      const nesting = wouldNestParallelIfMarkedInitial(scxmlDoc, this.stateId);
+      if (nesting.blocked) {
+        return this.createFailureResult(
+          nesting.reason || `Cannot mark '${this.stateId}' as an Initial State.`,
           scxmlContent
         );
       }

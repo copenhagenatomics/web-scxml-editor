@@ -335,3 +335,34 @@ Under #12, a compound state's unassigned children went into one extra region of 
 
 ### Status
 Accepted.
+
+---
+
+## 14. Parallel states can't be nested
+
+### Context
+Under #10–#13 a container with 2+ Initial work trees becomes a `<parallel>`. If that container is inside a parallel's region, or one of its work trees already holds a parallel, the result is a `<parallel>` inside another `<parallel>`. Connecting a loose state that holds a parallel into a region (#13) did the same. The user asked to stop nested parallels.
+
+### Decision
+No `<parallel>` (including a transparent `__root_parallel` / `{id}__parallel`) may have a `<parallel>` ancestor. `src/lib/utils/parallel-nesting-rules.ts` holds the rule:
+- `findNestedParallels` lists every nested `<parallel>`.
+- `introducesNestedParallel(before, after)` normalizes copies of both documents and blocks if `after` has a nested parallel that `before` didn't. Nesting a document already had is left to the validator so it doesn't block unrelated edits.
+- `wouldNestParallelIfMarkedInitial` and `wouldNestParallelIfConnected` apply the edit to a copy and run that check, so the rule always matches what `normalizeParallelGroups` would actually do.
+
+Live gates: `ToggleInitialStateCommand` (the Initial checkbox stays clickable on purpose, so clicking it shows the refusal in the canvas warning banner — the user asked for a visible warning instead of a disabled box with a tooltip), `onConnect` / `isValidConnection`, paste and drag-to-nest (warning toast). Static: `validateParallelNesting` (`src/lib/validators/parallel-nesting-validator.ts`) reports hand-written nesting as an error.
+
+### Reason
+The user asked for it directly ("We need to restrict having nested parallel"). They gave no further reason. Checking a normalized copy, instead of restating the normalizer's conditions, keeps the gates from drifting when the normalizer changes.
+
+### Constraints
+- `normalizeParallelGroups` itself isn't guarded. Typing 2+ Initial ids inside a region in the XML editor still produces a nested parallel, which the validator then reports.
+- Unmarking Initial is never blocked.
+
+### Alternatives
+The first version disabled the Initial checkbox, with the reason as its tooltip. The user rejected it ("instead of this can we give user a warning, so they can know"). The checkbox now stays clickable for this case, and only the "would merge two Initial State groups" case still disables it.
+
+### Evidence
+`parallel-nesting-rules.test.ts`, `parallel-nesting-validator.test.ts`, `toggle-initial-state-command.test.ts` ("refuses a second Initial State inside a region").
+
+### Status
+Accepted.
