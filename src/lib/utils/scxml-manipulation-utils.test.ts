@@ -83,7 +83,7 @@ describe('<final> lookups', () => {
         },
       }) as any as SCXMLDocument;
 
-    it('refuses at the top level and inside an ordinary compound state', () => {
+    it('refuses at a top level with no __root_parallel and inside an ordinary compound state', () => {
       expect(resolveFinalStateRegion(doc(), null, ['main_region'])).toEqual({
         error: 'Final states can only be added inside a parallel state.',
       });
@@ -139,6 +139,27 @@ describe('<final> lookups', () => {
         },
       } as any as SCXMLDocument;
       expect(resolveFinalStateRegion(d, 'H', ['B'])).toEqual({ regionId: 'R2' });
+    });
+
+    it("finds the region through the root's transparent __root_parallel at the top level", () => {
+      const d = {
+        scxml: {
+          '@_initial': '__root_parallel',
+          state: { '@_id': 'Loose' },
+          parallel: {
+            '@_id': '__root_parallel',
+            state: [
+              { '@_id': 'R1', '@_initial': 'A', state: { '@_id': 'A' } },
+              { '@_id': 'R2', '@_initial': 'B', state: { '@_id': 'B' } },
+            ],
+          },
+        },
+      } as any as SCXMLDocument;
+      expect(resolveFinalStateRegion(d, null, ['B'])).toEqual({ regionId: 'R2' });
+      expect(resolveFinalStateRegion(d, undefined, ['A'])).toEqual({ regionId: 'R1' });
+      expect(resolveFinalStateRegion(d, null, ['Loose'])).toEqual({
+        error: 'Select a state in the region where the final state should go.',
+      });
     });
 
     describe('addLooseStateToParallel (canvas "Add State" inside a <parallel>)', () => {

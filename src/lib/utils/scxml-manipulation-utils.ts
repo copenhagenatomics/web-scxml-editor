@@ -99,7 +99,8 @@ export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean 
 /**
  * Where the canvas "Add Final State" button puts a new <final>. Final states
  * are only added while viewing inside a <parallel> (`parallelId`) — or a
- * compound state whose work trees live in its transparent `{id}__parallel` —
+ * compound state whose work trees live in its transparent `{id}__parallel`,
+ * or the top level (`parallelId` null) when it has a `__root_parallel` —
  * and a <parallel> can't hold a <final> directly, so it goes into the region
  * (<state> child of the <parallel>) containing the selected state(s). Returns
  * that region's id, or a user-facing reason it can't be added.
@@ -110,8 +111,11 @@ export function resolveFinalStateRegion(
   selectedIds: Iterable<string>
 ): { regionId: string } | { error: string } {
   const found = parallelId ? findElementById(scxmlDoc, parallelId) : null;
-  const parallel =
-    found?.tag === 'parallel' ? found.element : findTransparentParallel(found?.element, 'state');
+  const parallel = !parallelId
+    ? findTransparentParallel(scxmlDoc.scxml, 'root')
+    : found?.tag === 'parallel'
+      ? found.element
+      : findTransparentParallel(found?.element, 'state');
   if (!parallel) {
     return { error: 'Final states can only be added inside a parallel state.' };
   }
