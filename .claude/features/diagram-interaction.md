@@ -6,7 +6,7 @@ The full set of direct-manipulation gestures on the ReactFlow canvas that let a 
 
 ## User behavior
 
-- **Create**: toolbar "S" (New State) button adds a state at a free grid slot at the hierarchy level currently being viewed — the document root, or inside the state you've navigated into (see `state-editing.md`); "F" (Add Final State) adds a `<final>` into the selected state's region, only while viewing inside a parallel state (see `state-editing.md`); a note button adds a sticky note.
+- **Create**: toolbar "S" (New State) button adds a state at a free grid slot at the hierarchy level currently being viewed — the document root, or inside the state you've navigated into (see `state-editing.md`); "F" (Add Final State) adds a `<final>` into the selected state's region (at most one per region), only while viewing inside a parallel state — including a compound state's `{id}__parallel` or the top level's `__root_parallel` (see `state-editing.md`); a note button adds a sticky note.
 - **Select**: click selects one state and opens the State Actions panel; Ctrl/Cmd+click toggles multi-select membership; dragging a box on empty canvas while holding Ctrl/Meta marquee-selects everything inside.
 - **Move**: drag a state (or a multi-selection) to reposition; all simultaneously-dragged nodes commit as a single batched undo step.
 - **Resize**: select a single state, drag its resize handles (`NodeResizer`, min size enforced).

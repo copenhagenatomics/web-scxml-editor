@@ -96,12 +96,22 @@ describe('<final> lookups', () => {
       expect(resolveFinalStateRegion(doc(), 'P', ['B'])).toEqual({ regionId: 'R2' });
     });
 
-    it("targets an existing <final>'s region when that final is selected", () => {
+    it('refuses a second final state in a region that already has one', () => {
       const d = doc();
       (d.scxml as any).parallel.state[1].final = { '@_id': 'R2Done' };
-      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual({ regionId: 'R2' });
+      const refusal = { error: 'This region already has a final state.' };
+      expect(resolveFinalStateRegion(d, 'P', ['R2Done'])).toEqual(refusal);
+      expect(resolveFinalStateRegion(d, 'P', ['B'])).toEqual(refusal);
       expect(isDescendantOf(d, 'R2Done', 'R2')).toBe(true);
       expect(isDescendantOf(d, 'R2Done', 'R1')).toBe(false);
+      // Other regions are unaffected.
+      expect(resolveFinalStateRegion(d, 'P', ['A2'])).toEqual({ regionId: 'R1' });
+    });
+
+    it('refuses adding (e.g. pasting) more than one final state into a region at once', () => {
+      expect(resolveFinalStateRegion(doc(), 'P', ['B'], 2)).toEqual({
+        error: 'This region already has a final state.',
+      });
     });
 
     it('targets an empty region shown as its own node when that node is selected', () => {

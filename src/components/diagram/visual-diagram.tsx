@@ -2808,13 +2808,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     // so pasted finals go into the selected state's region — the same rule as
     // the "Add Final State" button. Checked before anything is mutated.
     let finalRegionId: string | undefined;
-    const pastingFinals = copied.some((s) => copiedFinalIds.has(s['@_id']));
+    const pastedFinalCount = copied.filter((s) => copiedFinalIds.has(s['@_id'])).length;
     if (
-      pastingFinals &&
+      pastedFinalCount > 0 &&
       currentParentId &&
       findElementById(scxmlDoc, currentParentId)?.tag === 'parallel'
     ) {
-      const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
+      const resolved = resolveFinalStateRegion(
+        scxmlDoc,
+        currentParentId,
+        activeStates,
+        pastedFinalCount
+      );
       if ('error' in resolved) {
         showFeedback(resolved.error, 'warning');
         return;

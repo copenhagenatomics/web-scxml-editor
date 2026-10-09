@@ -102,13 +102,16 @@ export function isFinalState(scxmlDoc: SCXMLDocument, stateId: string): boolean 
  * compound state whose work trees live in its transparent `{id}__parallel`,
  * or the top level (`parallelId` null) when it has a `__root_parallel` —
  * and a <parallel> can't hold a <final> directly, so it goes into the region
- * (<state> child of the <parallel>) containing the selected state(s). Returns
- * that region's id, or a user-facing reason it can't be added.
+ * (<state> child of the <parallel>) containing the selected state(s). A
+ * region holds at most one <final>, so `adding` (how many finals are about
+ * to go in, e.g. a paste) must not take it past one. Returns that region's
+ * id, or a user-facing reason it can't be added.
  */
 export function resolveFinalStateRegion(
   scxmlDoc: SCXMLDocument,
   parallelId: string | null | undefined,
-  selectedIds: Iterable<string>
+  selectedIds: Iterable<string>,
+  adding = 1
 ): { regionId: string } | { error: string } {
   const found = parallelId ? findElementById(scxmlDoc, parallelId) : null;
   const parallel = !parallelId
@@ -131,6 +134,10 @@ export function resolveFinalStateRegion(
   const [region] = chosen;
   if (region.tag !== 'state') {
     return { error: 'A final state cannot be added directly inside a parallel state.' };
+  }
+  // A region ends in at most one final state.
+  if (asList((region.el as any).final).length + adding > 1) {
+    return { error: 'This region already has a final state.' };
   }
   return { regionId: region.el['@_id'] };
 }
