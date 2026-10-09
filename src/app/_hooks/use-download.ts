@@ -83,6 +83,15 @@ export function useDownload() {
     // Show the overlay right away (0 of 0 = "preparing"), before the tab switch.
     setProgress({ current: 0, total: 0 });
 
+    // The PDF is always light, regardless of the user's theme. The capture
+    // copies live computed styles, so the canvas itself must render light:
+    // drop the `dark` class for the duration (hidden behind the overlay).
+    // Toggled directly rather than via applyTheme so the saved preference is
+    // left untouched.
+    const root = document.documentElement;
+    const wasDark = root.classList.contains('dark');
+    root.classList.remove('dark');
+
     const savedHierarchy = useEditorStore.getState().hierarchyState;
     if (activeTab !== 'visual') setActiveTab('visual');
 
@@ -114,6 +123,7 @@ export function useDownload() {
     } finally {
       useEditorStore.setState({ hierarchyState: savedHierarchy });
       if (activeTab !== 'visual') setActiveTab(activeTab);
+      if (wasDark) root.classList.add('dark');
       setProgress(null);
       isExportingPdfRef.current = false;
     }

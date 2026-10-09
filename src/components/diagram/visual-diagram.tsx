@@ -3151,8 +3151,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   // through hierarchy levels (which re-renders this component).
   const parallelDividerXsRef = React.useRef(parallelDividerXs);
   parallelDividerXsRef.current = parallelDividerXs;
-  const canvasDarkRef = React.useRef(canvasDark);
-  canvasDarkRef.current = canvasDark;
   const setDiagramExportSource = useDiagramExportStore((state) => state.setSource);
   React.useEffect(() => {
     setDiagramExportSource({
@@ -3162,7 +3160,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       getAllNodes: () => allNodesRef.current,
       getEdgeCount: () => getEdges().length,
       getDividerXs: () => parallelDividerXsRef.current,
-      isDark: () => canvasDarkRef.current,
       clearSelection: () => {
         setActiveStates(new Set());
         setSelectedTransitions(new Set());
