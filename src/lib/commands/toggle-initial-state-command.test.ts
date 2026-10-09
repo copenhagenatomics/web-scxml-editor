@@ -267,6 +267,15 @@ describe('ToggleInitialStateCommand', () => {
         expect((p.parallel.state as any[]).map((r) => r['@_id']).sort()).toEqual(['A_region', 'B_region']);
       });
 
+      it("keeps the dissolved region's states in document order beside a transparent parallel", () => {
+        const xml = `${PAR_HEADER} initial="__root_parallel"><parallel id="__root_parallel">${TWO_REGIONS}<state id="C_region" initial="C"><state id="C"/><state id="C2"/><state id="C3"/></state></parallel></scxml>`;
+        const result = new ToggleInitialStateCommand('C').execute(xml);
+        expect(result.success).toBe(true);
+        const order = ['"C"', '"C2"', '"C3"'].map((id) => result.newContent.indexOf(`id=${id}`));
+        expect(order.every((i) => i >= 0)).toBe(true);
+        expect(order).toEqual([...order].sort((a, b) => a - b));
+      });
+
       it('undo restores the original <parallel>', () => {
         const xml = `${PAR_HEADER} initial="P"><parallel id="P">${TWO_REGIONS}</parallel></scxml>`;
         const command = new ToggleInitialStateCommand('A');

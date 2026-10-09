@@ -241,7 +241,10 @@ export class ToggleInitialStateCommand extends BaseCommand {
       (host === doc.documentElement && isRootParallel({ '@_id': parallelId })) ||
       (host.tagName === 'state' && isInnerParallel({ '@_id': parallelId }));
     if (transparent) {
-      children.forEach((el) => host.insertBefore(el, parallel.nextSibling));
+      // Captured once: each insert would otherwise become the next one's
+      // anchor, reversing the children.
+      const insertionPoint = parallel.nextSibling;
+      children.forEach((el) => host.insertBefore(el, insertionPoint));
       parallel.removeChild(region);
       return true;
     }
