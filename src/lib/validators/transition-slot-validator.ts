@@ -1,12 +1,13 @@
 import type { SCXMLElement, StateElement, ParallelElement, TransitionElement } from '@/types/scxml';
 import type { ValidationError } from '@/types/common';
 import { findTransitionPosition } from './validator-utils';
-import { classifyTransitionSlot } from '@/lib/utils/transition-slot-rules';
+import { classifyTransitionSlot, getDoneStateEvents } from '@/lib/utils/transition-slot-rules';
 
 /**
  * Flags, per (source state, target, type) family, any transition with both event and
  * cond set (always invalid), and any slot ('event', 'timer', 'cond', or 'always'/eventless)
- * occupied by more than one transition. This is the code-editor-visible counterpart to the live blocking already
+ * occupied by more than one transition — plus, per source state across all targets, any
+ * second transition on the same done.state.<id> event (findDoneStateConflict). This is the code-editor-visible counterpart to the live blocking already
  * done in the diagram connect gesture and the transition panel — it only ever fires on
  * violations introduced after load, since legacy duplicates are silently merged away by
  * transition-merge-utils.ts before this validator ever sees the content.
@@ -92,6 +93,43 @@ export function validateTransitionSlotConflicts(
               column: position?.column,
             });
           }
+        }
+      }
+
+      // At most one transition per done.state.<id> event on this state, across all targets
+      // (see findDoneStateConflict). Every one after the first in document order can never
+      // fire, so those are flagged — except ones sharing the first's target+type, which the
+      // per-slot check above already reports.
+      const firstByDoneEvent = new Map<string, TransitionElement>();
+      for (const t of transitions) {
+        for (const event of getDoneStateEvents(t)) {
+          const first = firstByDoneEvent.get(event);
+          if (!first) {
+            firstByDoneEvent.set(event, t);
+            continue;
+          }
+          const sameFamily =
+            first['@_target'] === t['@_target'] &&
+            (first['@_type'] || 'external') === (t['@_type'] || 'external');
+          if (sameFamily && t['@_target']) continue;
+          const position = findTransitionPosition(
+            sourceId,
+            t['@_target'] ?? '',
+            xmlContent,
+            t['@_event'],
+            t['@_cond'],
+            usedLines
+          );
+          if (position) usedLines.add(position.line);
+          const to = t['@_target'] ? ` to '${t['@_target']}'` : '';
+          const firstTo = first['@_target'] ? ` (to '${first['@_target']}')` : '';
+          errors.push({
+            message: `Transition from '${sourceId}'${to} on ${event} can never fire: an earlier ${event} transition${firstTo} is always taken first. Keep one, or branch through a decision state with conditional transitions.`,
+            severity: 'error',
+            line: position?.line,
+            column: position?.column,
+          });
+          break; // one error per transition, even if it lists several done events
         }
       }
     }

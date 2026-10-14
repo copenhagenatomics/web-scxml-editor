@@ -24,6 +24,7 @@ import {
   isFinalState,
   resolveFinalStateRegion,
   findParallelContext,
+  getDefaultNewTransitionEvent,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
@@ -1041,9 +1042,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const onConnect = useCallback(
     (params: Connection) => {
+      // Usually eventless; `done.state.<source>` out of a compound state with
+      // a <final> inside a parallel region (getDefaultNewTransitionEvent).
+      let defaultEvent: string | undefined;
       if (params.source && params.target && parserRef.current && scxmlContent) {
         const preCheck = parserRef.current.parse(scxmlContent);
         if (preCheck.success && preCheck.data) {
+          defaultEvent = getDefaultNewTransitionEvent(preCheck.data, params.source);
           if (isFinalState(preCheck.data, params.source)) {
             setConnectionBlockedMessage(FINAL_STATE_SOURCE_MESSAGE);
             return;
@@ -1101,7 +1106,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         //   color: '#6b7280',
         // },
         data: {
-          event: undefined,
+          event: defaultEvent,
           condition: undefined,
           actions: [],
           sourceHandle: sourceHandle,
@@ -1110,7 +1115,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         style: {
           strokeWidth: 2,
           zIndex: 1,
-          stroke: ALWAYS_TRANSITION_COLOR,
+          stroke: defaultEvent ? EVENT_TRANSITION_COLOR : ALWAYS_TRANSITION_COLOR,
         },
         zIndex: 1,
         animated: false,
@@ -1126,7 +1131,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         id: newEdge.id,
         source: newEdge.source,
         target: newEdge.target,
-        event: undefined,
+        event: defaultEvent,
         cond: undefined,
       });
 
@@ -1141,6 +1146,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const newTransition: TransitionElement = {
                 '@_target': params.target!,
               };
+              if (defaultEvent) newTransition['@_event'] = defaultEvent;
 
               if (!sourceState.transition) {
                 sourceState.transition = newTransition;
@@ -1162,7 +1168,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const handleCommand = new UpdateTransitionHandlesCommand(
                 params.source!,
                 params.target!,
-                undefined, // No event — eventless by default
+                defaultEvent, // Eventless unless a done.state.<id> default applies
                 undefined, // No condition
                 sourceHandle,
                 targetHandle
@@ -1266,19 +1272,23 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       const reconnecting = reconnectingEdgeRef.current;
       const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
-      const slotCheck =
-        reconnecting && reconnecting.source === connection.source
-          ? checkTransitionEditSlotConflict(
-              parseResult.data,
-              connection.source,
-              parseTransitionIndexFromEdgeId(reconnecting.id),
-              {
-                '@_event': reconnecting.data?.event,
-                '@_cond': reconnecting.data?.condition,
-                '@_target': connection.target,
-              }
-            )
-          : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
+      // A reconnected transition keeps its event/cond (ReconnectTransitionCommand), so
+      // check that rather than a fresh connection's default. Moved onto a different
+      // source, none of that source's transitions is itself — nothing to exclude.
+      const slotCheck = reconnecting
+        ? checkTransitionEditSlotConflict(
+            parseResult.data,
+            connection.source,
+            reconnecting.source === connection.source
+              ? parseTransitionIndexFromEdgeId(reconnecting.id)
+              : undefined,
+            {
+              '@_event': reconnecting.data?.event,
+              '@_cond': reconnecting.data?.condition,
+              '@_target': connection.target,
+            }
+          )
+        : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
       if (slotCheck.blocked) {
         setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
         return false;
@@ -2594,8 +2604,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   // ==================== ADD ROOT STATE HANDLER ====================
   // Adds a <state> (kind 'state') at the current hierarchy level, or a
-  // <final> (kind 'final') into the region of the selected state — final
-  // states are only added while viewing inside a <parallel> (see
+  // <final> (kind 'final') into the region of the selected state, or into
+  // the viewed compound state when that state is inside a parallel region —
+  // final states are only added within a <parallel> (see
   // resolveFinalStateRegion).
   const handleAddRootState = React.useCallback((kind: 'state' | 'final' = 'state') => {
     if (!onSCXMLChange || !scxmlContent) {
@@ -2644,9 +2655,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         let x = 100;
         let y = 100;
 
-        if (finalRegionId) {
+        if (finalRegionId && finalRegionId !== currentParentId) {
           // Goes into the selected state's region, placed just below the
-          // selected node so it lands in that region's column.
+          // selected node so it lands in that region's column. (A final
+          // going straight into the viewed compound state takes the
+          // ordinary free grid slot below instead.)
           parentId = finalRegionId;
           const anchor = nodes.find((n) => activeStates.has(n.id));
           if (anchor) {

@@ -122,6 +122,10 @@ export function findParallelContext(
  * region holds at most one <final>, so `adding` (how many finals are about
  * to go in, e.g. a paste) must not take it past one. Returns that region's
  * id, or a user-facing reason it can't be added.
+ *
+ * Viewing a compound <state> nested (at any depth) inside a <parallel>'s
+ * region, with no regions of its own, the <final> goes straight into that
+ * state — no selection needed — under the same one-final limit.
  */
 export function resolveFinalStateRegion(
   scxmlDoc: SCXMLDocument,
@@ -131,6 +135,13 @@ export function resolveFinalStateRegion(
 ): { regionId: string } | { error: string } {
   const parallel = findParallelContext(scxmlDoc, parallelId);
   if (!parallel) {
+    const viewed = parallelId ? findElementById(scxmlDoc, parallelId) : null;
+    if (viewed?.tag === 'state' && hasParallelAncestor(scxmlDoc, parallelId!)) {
+      if (asList((viewed.element as any).final).length + adding > 1) {
+        return { error: 'This state already has a final state.' };
+      }
+      return { regionId: parallelId! };
+    }
     return { error: 'Final states can only be added inside a parallel state.' };
   }
 
@@ -204,6 +215,62 @@ export function addLooseStateToParallel(
   else holder.parallel = rest.length === 1 ? rest[0] : rest;
   appendChild(holder, 'state', parallel);
   return true;
+}
+
+/**
+ * The event a freshly drawn transition out of `sourceId` starts with:
+ * `done.state.<sourceId>` when the source is
+ * - a compound <state> inside a parallel region that holds a <final> child
+ *   (the transition then fires once that state reaches its final state), or
+ * - a <parallel> every region of which can end in a final state (W3C SCXML
+ *   §3.7: done.state.<parallelId> is raised once all its regions are in final
+ *   states),
+ * else undefined — an eventless transition. Shared by the canvas's onConnect
+ * and the new-connection slot check (checkNewConnectionSlotConflict) so both
+ * agree on the slot.
+ */
+export function getDefaultNewTransitionEvent(
+  scxmlDoc: SCXMLDocument,
+  sourceId: string
+): string | undefined {
+  const source = findElementById(scxmlDoc, sourceId);
+  if (source?.tag === 'parallel') {
+    return allRegionsCanFinish(source.element) ? `done.state.${sourceId}` : undefined;
+  }
+  if (source?.tag !== 'state') return undefined;
+  if (asList((source.element as any).final).length === 0) return undefined;
+  if (!hasParallelAncestor(scxmlDoc, sourceId)) return undefined;
+  return `done.state.${sourceId}`;
+}
+
+/**
+ * Whether every region of `parallel` can reach a final state: a <state>
+ * region needs a direct <final> child, a nested <parallel> region needs the
+ * same of all its own regions. A <parallel> with no regions never finishes.
+ */
+function allRegionsCanFinish(parallel: any): boolean {
+  const regions = getChildEntries(parallel, 'parallel');
+  return (
+    regions.length > 0 &&
+    regions.every((r) =>
+      r.tag === 'parallel' ? allRegionsCanFinish(r.el) : asList(r.el.final).length > 0
+    )
+  );
+}
+
+/** Whether `stateId` sits anywhere inside a <parallel> (explicit or transparent). */
+function hasParallelAncestor(scxmlDoc: SCXMLDocument, stateId: string): boolean {
+  function search(container: any, insideParallel: boolean): boolean | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) return insideParallel;
+        const found = search(child, insideParallel || tag === 'parallel');
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml, false) ?? false;
 }
 
 /** The regions of `parallel` containing any of `selectedIds` (as the region itself or a descendant). */

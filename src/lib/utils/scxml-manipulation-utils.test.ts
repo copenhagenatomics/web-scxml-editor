@@ -19,6 +19,7 @@ import {
   resolveFinalStateRegion,
   findParallelContext,
   addLooseStateToParallel,
+  getDefaultNewTransitionEvent,
 } from './scxml-manipulation-utils';
 import { getInitialIds, isParallelRegion } from './initial-group-utils';
 import { normalizeParallelGroups } from './parallel-group-normalization';
@@ -125,6 +126,109 @@ describe('<final> lookups', () => {
       });
       expect(resolveFinalStateRegion(doc(), 'P', ['A', 'B'])).toEqual({
         error: 'Select states from a single region to add a final state.',
+      });
+    });
+
+    it('adds straight into a viewed compound state nested inside a parallel region, no selection needed', () => {
+      // R1 → A (compound) → A1; viewing A, or a region viewed on its own.
+      expect(resolveFinalStateRegion(doc(), 'A', [])).toEqual({ regionId: 'A' });
+      expect(resolveFinalStateRegion(doc(), 'A', ['A1'])).toEqual({ regionId: 'A' });
+      expect(resolveFinalStateRegion(doc(), 'R1', [])).toEqual({ regionId: 'R1' });
+      // ...but not a compound state that isn't inside any <parallel>.
+      expect(resolveFinalStateRegion(doc(), 'main_region', [])).toEqual({
+        error: 'Final states can only be added inside a parallel state.',
+      });
+    });
+
+    it('finds compound states deeper inside a region, and through a transparent __root_parallel', () => {
+      const d = doc();
+      (d.scxml as any).parallel.state[0].state[0].state = { '@_id': 'A1', state: { '@_id': 'Deep' } };
+      expect(resolveFinalStateRegion(d, 'A1', [])).toEqual({ regionId: 'A1' });
+
+      const root = {
+        scxml: {
+          '@_initial': '__root_parallel',
+          parallel: {
+            '@_id': '__root_parallel',
+            state: [
+              { '@_id': 'R1', state: { '@_id': 'C', state: { '@_id': 'C1' } } },
+              { '@_id': 'R2', state: { '@_id': 'B' } },
+            ],
+          },
+        },
+      } as any as SCXMLDocument;
+      expect(resolveFinalStateRegion(root, 'C', [])).toEqual({ regionId: 'C' });
+    });
+
+    it('refuses a second final state in such a compound state', () => {
+      const d = doc();
+      (d.scxml as any).parallel.state[0].state[0].final = { '@_id': 'ADone' };
+      expect(resolveFinalStateRegion(d, 'A', [])).toEqual({
+        error: 'This state already has a final state.',
+      });
+      expect(resolveFinalStateRegion(doc(), 'A', [], 2)).toEqual({
+        error: 'This state already has a final state.',
+      });
+    });
+
+    describe('getDefaultNewTransitionEvent (canvas onConnect)', () => {
+      const withFinals = () => {
+        const d = doc();
+        const r1 = (d.scxml as any).parallel.state[0];
+        r1.state[0].final = { '@_id': 'ADone' }; // compound A in region R1
+        r1.final = { '@_id': 'R1Done' }; // the region itself
+        (d.scxml as any).state.final = { '@_id': 'MainDone' }; // outside any <parallel>
+        return d;
+      };
+
+      it('is done.state.<id> out of a compound state with a <final> inside a parallel region', () => {
+        expect(getDefaultNewTransitionEvent(withFinals(), 'A')).toBe('done.state.A');
+        expect(getDefaultNewTransitionEvent(withFinals(), 'R1')).toBe('done.state.R1');
+      });
+
+      it('is done.state.<id> out of a <parallel> once every region (nested parallels included) has a <final>', () => {
+        const d = withFinals();
+        const p = (d.scxml as any).parallel;
+        p.state[1].final = { '@_id': 'R2Done' };
+        p.state[2].final = { '@_id': 'EmptyDone' };
+        // Still one region short: the nested <parallel> Q's regions have no finals.
+        expect(getDefaultNewTransitionEvent(d, 'P')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'Q')).toBeUndefined();
+
+        p.parallel.state[0].final = { '@_id': 'Q1Done' };
+        expect(getDefaultNewTransitionEvent(d, 'Q')).toBeUndefined();
+        p.parallel.state[1].final = { '@_id': 'Q2Done' };
+        expect(getDefaultNewTransitionEvent(d, 'Q')).toBe('done.state.Q');
+        expect(getDefaultNewTransitionEvent(d, 'P')).toBe('done.state.P');
+      });
+
+      it('is undefined out of a <parallel> with no regions, or whose finals are only nested deeper in a region', () => {
+        const empty = { scxml: { parallel: { '@_id': 'P' } } } as any as SCXMLDocument;
+        expect(getDefaultNewTransitionEvent(empty, 'P')).toBeUndefined();
+
+        // R2's only <final> is inside compound B, not a direct child of the region.
+        const deep = {
+          scxml: {
+            parallel: {
+              '@_id': 'P',
+              state: [
+                { '@_id': 'R1', final: { '@_id': 'R1Done' } },
+                { '@_id': 'R2', state: { '@_id': 'B', final: { '@_id': 'BDone' } } },
+              ],
+            },
+          },
+        } as any as SCXMLDocument;
+        expect(getDefaultNewTransitionEvent(deep, 'P')).toBeUndefined();
+      });
+
+      it('is undefined without a direct <final> child, outside any <parallel>, from a <parallel> with a region lacking one, or from a <final>', () => {
+        const d = withFinals();
+        expect(getDefaultNewTransitionEvent(doc(), 'A')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'A1')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'main_region')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'P')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'ADone')).toBeUndefined();
+        expect(getDefaultNewTransitionEvent(d, 'missing')).toBeUndefined();
       });
     });
 
