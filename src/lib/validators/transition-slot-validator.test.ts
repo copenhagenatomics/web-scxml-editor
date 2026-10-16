@@ -298,6 +298,31 @@ describe('validateTransitionSlotConflicts — one transition per done.state.<id>
     expect(errors[0].message).toMatch(/'S2' to 'S7'/);
     expect(errors[0].line).toBe(8);
   });
+
+  it('locates a shadowed targetless transition at its line (no target attribute to match)', () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="P">
+  <parallel id="P">
+    <state id="R1" initial="S2">
+      <state id="S2" initial="S5">
+        <state id="S5"><transition target="F1"/></state>
+        <final id="F1"/>
+        <transition target="F2" event="done.state.S2"/>
+        <transition event="done.state.S2"/>
+      </state>
+      <final id="F2"/>
+    </state>
+    <state id="R2"/>
+  </parallel>
+</scxml>`;
+    const parsed = new SCXMLParser().parse(xml);
+    const errors = new SCXMLValidator()
+      .validate(parsed.data!.scxml, xml)
+      .filter((e) => /can never fire/.test(e.message));
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toMatch(/from 'S2' on done\.state\.S2/);
+    expect(errors[0].line).toBe(8);
+    expect(errors[0].column).toBe(9);
+  });
 });
 
 describe('validateTransitionSlotConflicts via the full SCXMLValidator pipeline', () => {
