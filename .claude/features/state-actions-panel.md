@@ -46,7 +46,7 @@ Let a user edit a state's behavioral content — what happens on entry, what hap
 
 ## Validation rules
 
-None enforced *within* this panel beyond basic required-field disabling (`isApplyDisabled`) — full SCXML validation (unreachable states, slot conflicts, etc.) runs independently against whatever content results. The Initial-State checkbox's disabled state is the one exception: it proactively consults `initial-group-utils.ts` (`canMarkInitial`, passed down from the parent) to block a would-be-invalid mark before the user can even attempt it.
+None enforced *within* this panel beyond basic required-field disabling (`isApplyDisabled`) — full SCXML validation (unreachable states, slot conflicts, etc.) runs independently against whatever content results. The Initial-State and Final-State checkboxes are the exceptions: Initial proactively consults `initial-group-utils.ts` (`canMarkInitial`, passed down from the parent), and Final consults `checkCanMarkFinal` in `scxml-manipulation-utils.ts` (`canMarkFinal` + `finalBlockedReason` as the tooltip, recomputed from the live document while the panel is open) to block a would-be-invalid mark before the user can even attempt it. Final states open this panel too (onentry/onexit only, checked Final State checkbox, no Initial checkbox) — see `state-editing.md`.
 
 ## Related features
 

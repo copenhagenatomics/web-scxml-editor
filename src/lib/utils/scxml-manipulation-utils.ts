@@ -8,6 +8,7 @@ import type {
   OnExitElement,
 } from '@/types/scxml';
 import { collectStateIds } from '@/lib/validators/state-validator';
+import { isMarkedInitial } from '@/lib/utils/initial-group-utils';
 import {
   findTransparentParallel,
   getChildEntries,
@@ -112,8 +113,83 @@ export function findParallelContext(
   return findTransparentParallel(found?.element, 'state') ?? null;
 }
 
+/** Child elements a <state> can't keep when it becomes a <final>, with how to name them. */
+const NON_FINAL_CHILDREN: ReadonlyArray<[key: string, reason: string]> = [
+  ['state', 'Remove its child states first — a final state cannot contain states.'],
+  ['parallel', 'Remove its child states first — a final state cannot contain states.'],
+  ['final', 'Remove its child states first — a final state cannot contain states.'],
+  ['history', 'Remove its history state first — a final state cannot contain one.'],
+  ['transition', 'Remove its outgoing transitions and event reactions first — a final state cannot have any.'],
+  ['invoke', 'Remove its <invoke> first — a final state cannot have one.'],
+  ['datamodel', 'Remove its <datamodel> first — a final state cannot have one.'],
+];
+
 /**
- * Where the canvas "Add Final State" button puts a new <final>. Final states
+ * Whether the State Actions panel's "Final State" checkbox may turn the
+ * <state> `stateId` into a <final> — and if not, the user-facing reason.
+ * Same placement rules as the old canvas "Add Final State" button
+ * (resolveFinalStateRegion): only inside a <parallel> — directly in one of
+ * its regions, or in a compound state nested inside one — never a region
+ * itself, and at most one <final> per container. On top of that, nothing a
+ * <final> can't hold may be silently dropped (ChangeStateTypeCommand would
+ * discard it), and it can't be its container's Initial State (a <final> has
+ * no Initial toggle to undo that with). Unmarking a <final> is always allowed.
+ */
+export function checkCanMarkFinal(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): { allowed: true } | { allowed: false; reason: string } {
+  const found = findParentOf(scxmlDoc, stateId);
+  if (!found || found.tag !== 'state') {
+    return { allowed: false, reason: 'Only a state can be made a final state.' };
+  }
+  const { element, parent, parentTag } = found;
+
+  if (parentTag === 'parallel') {
+    return { allowed: false, reason: 'A region of a parallel state cannot be a final state.' };
+  }
+  if (!hasParallelAncestor(scxmlDoc, stateId)) {
+    return { allowed: false, reason: 'Final states can only be used inside a parallel state.' };
+  }
+  if (asList(parent.final).length > 0) {
+    const where = parent['@_id'] ? `'${parent['@_id']}'` : 'This container';
+    return { allowed: false, reason: `${where} already has a final state.` };
+  }
+  for (const [key, reason] of NON_FINAL_CHILDREN) {
+    if (asList((element as any)[key]).length > 0) return { allowed: false, reason };
+  }
+  if (isMarkedInitial(scxmlDoc, stateId)) {
+    return {
+      allowed: false,
+      reason: 'Unmark it as the Initial State first — a final state cannot be where its container starts.',
+    };
+  }
+  return { allowed: true };
+}
+
+/** `stateId`'s element and the container it's filed under (`parentTag` 'scxml' at the top level). */
+type ParentLookup = { element: StateElement; tag: StateTag; parent: any; parentTag: StateTag | 'scxml' };
+
+function findParentOf(scxmlDoc: SCXMLDocument, stateId: string): ParentLookup | null {
+  function search(container: any, containerTag: StateTag | 'scxml'): ParentLookup | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) {
+          return { element: child, tag, parent: container, parentTag: containerTag };
+        }
+        const found = search(child, tag);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml, 'scxml');
+}
+
+/**
+ * Where a pasted <final> goes while viewing inside a parallel (this once also
+ * backed a canvas "Add Final State" button, since replaced by the State
+ * Actions panel's Final State checkbox — checkCanMarkFinal). Final states
  * are only added while viewing inside a <parallel> (`parallelId`) — or a
  * compound state whose work trees live in its transparent `{id}__parallel`,
  * or the top level (`parallelId` null) when it has a `__root_parallel` —

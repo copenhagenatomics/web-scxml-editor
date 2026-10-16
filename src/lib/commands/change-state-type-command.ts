@@ -162,8 +162,12 @@ export class ChangeStateTypeCommand extends BaseCommand {
 
     // Known limitation: this and collectTargetableIds use document-wide
     // selectors, so XML embedded in data payloads (<content>, inline <data>)
-    // isn't excluded. No UI calls this command yet — scope both to the real
-    // state hierarchy before wiring one up (see .claude/features/state-node-types.md).
+    // isn't excluded. The State Actions panel's Final State checkbox is the
+    // only UI caller, and it never reaches this: it only marks a state final
+    // once checkCanMarkFinal confirms nothing would be dropped, and a <final>'s
+    // children are all valid on a <state>. Scope both to the real state
+    // hierarchy before adding a caller that can drop children
+    // (see .claude/features/state-node-types.md).
     //
     // Targets pointing at a dropped descendant would dangle. A transition can
     // list several targets ("A B"), so only the dropped ones are removed from

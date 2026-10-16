@@ -152,6 +152,54 @@ describe('StateActionsPanel event reactions tab for final states', () => {
   });
 });
 
+describe('StateActionsPanel Final State checkbox', () => {
+  const finalBox = () => screen.getByRole('checkbox', { name: 'Final State' });
+
+  it('sits beside Initial State, and ticking it calls onToggleFinal when allowed', () => {
+    const onToggleFinal = vi.fn();
+    renderPanel({ canMarkFinal: true, onToggleFinal });
+    expect(screen.getByRole('checkbox', { name: 'Initial State' })).toBeInTheDocument();
+    expect(finalBox()).not.toBeChecked();
+    expect(finalBox()).not.toBeDisabled();
+    fireEvent.click(finalBox());
+    expect(onToggleFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled with the blocking reason as its tooltip when not allowed', () => {
+    renderPanel({
+      canMarkFinal: false,
+      finalBlockedReason: 'Final states can only be used inside a parallel state.',
+      onToggleFinal: noop,
+    });
+    expect(finalBox()).toBeDisabled();
+    expect(finalBox().closest('label')).toHaveAttribute(
+      'title',
+      'Final states can only be used inside a parallel state.'
+    );
+  });
+
+  it('for a final state: checked and always untickable, with no Initial State checkbox', () => {
+    const onToggleFinal = vi.fn();
+    renderPanel({ stateType: 'final', canMarkFinal: false, onToggleFinal });
+    expect(finalBox()).toBeChecked();
+    expect(finalBox()).not.toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: 'Initial State' })).not.toBeInTheDocument();
+    fireEvent.click(finalBox());
+    expect(onToggleFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered for a parallel state or a region of one', () => {
+    renderPanel({ stateType: 'parallel', canMarkFinal: true, onToggleFinal: noop });
+    expect(screen.queryByRole('checkbox', { name: 'Final State' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Initial State' })).toBeInTheDocument();
+  });
+
+  it('is not offered for a region of a parallel state', () => {
+    renderPanel({ isParallelRegion: true, canMarkFinal: true, onToggleFinal: noop });
+    expect(screen.queryByRole('checkbox', { name: 'Final State' })).not.toBeInTheDocument();
+  });
+});
+
 describe('StateActionsPanel onexit tab visibility', () => {
   it('hides the onexit tab when the state has no onexit actions', () => {
     renderPanel();

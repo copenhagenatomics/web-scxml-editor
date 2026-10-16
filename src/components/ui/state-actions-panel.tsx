@@ -57,6 +57,11 @@ interface StateActionsPanelProps {
   /** A region of a <parallel> is always active, so it has no Initial toggle. */
   isParallelRegion?: boolean;
   onToggleInitial: () => void;
+  /** Whether "Final State" may be ticked (checkCanMarkFinal). Unticking is always allowed. */
+  canMarkFinal?: boolean;
+  /** Why "Final State" can't be ticked — shown as the disabled checkbox's tooltip. */
+  finalBlockedReason?: string;
+  onToggleFinal?: () => void;
   onApply: (entryActions: string[], exitActions: string[]) => void;
   onApplyReactions: (actions: InternalEventActionRow[]) => void;
   onNewChannel?: (
@@ -280,6 +285,9 @@ export function StateActionsPanel({
   canMarkInitial,
   isParallelRegion = false,
   onToggleInitial,
+  canMarkFinal = false,
+  finalBlockedReason,
+  onToggleFinal,
   onApply,
   onApplyReactions,
   onNewChannel,
@@ -899,36 +907,63 @@ export function StateActionsPanel({
           </div>
         </div>
 
-        {/* Initial State toggle — markable for simple/compound/parallel
-            states (not final), except a region of a parallel state, which
-            is always active. Unmarking is always allowed; only marking can
-            be blocked (it would merge two Initial State groups). Marking
-            that would nest a parallel state stays clickable — the toggle
-            command refuses it and the canvas shows why. */}
-        {(stateType === 'simple' || stateType === 'compound' || stateType === 'parallel') &&
-          !isParallelRegion && (() => {
-          const disabled = !isInitial && !canMarkInitial;
-          const title = !isInitial && !canMarkInitial
+        {/* Initial State / Final State toggles. Neither is offered for a
+            region of a parallel state (always active, never final).
+            - Initial: simple/compound/parallel states (not final). Unmarking
+              is always allowed; only marking can be blocked (it would merge
+              two Initial State groups). Marking that would nest a parallel
+              state stays clickable — the toggle command refuses it and the
+              canvas shows why.
+            - Final: simple/compound states and finals (not a parallel).
+              Unmarking is always allowed; marking is blocked, with the
+              reason as the tooltip, per checkCanMarkFinal. */}
+        {!isParallelRegion && (() => {
+          const showInitial = stateType !== 'final';
+          const initialDisabled = !isInitial && !canMarkInitial;
+          const initialTitle = initialDisabled
             ? 'This state is already connected (directly or indirectly) to another Initial State — marking it would merge two Initial State groups'
             : undefined;
 
+          const showFinal = stateType !== 'parallel' && !!onToggleFinal;
+          const finalDisabled = !isFinal && !canMarkFinal;
+          if (!showInitial && !showFinal) return null;
+
           return (
-            <div className='flex items-center px-3 py-1 border-b border-default bg-muted flex-shrink-0'>
-              <label
-                className={`flex items-center gap-1.5 text-[10px] ${
-                  disabled ? 'text-dimmed cursor-not-allowed' : 'text-muted cursor-pointer'
-                }`}
-                title={title}
-              >
-                <input
-                  type='checkbox'
-                  checked={isInitial}
-                  disabled={disabled}
-                  onChange={onToggleInitial}
-                  className='h-3 w-3'
-                />
-                Initial State
-              </label>
+            <div className='flex items-center gap-4 px-3 py-1 border-b border-default bg-muted flex-shrink-0'>
+              {showInitial && (
+                <label
+                  className={`flex items-center gap-1.5 text-[10px] ${
+                    initialDisabled ? 'text-dimmed cursor-not-allowed' : 'text-muted cursor-pointer'
+                  }`}
+                  title={initialTitle}
+                >
+                  <input
+                    type='checkbox'
+                    checked={isInitial}
+                    disabled={initialDisabled}
+                    onChange={onToggleInitial}
+                    className='h-3 w-3'
+                  />
+                  Initial State
+                </label>
+              )}
+              {showFinal && (
+                <label
+                  className={`flex items-center gap-1.5 text-[10px] ${
+                    finalDisabled ? 'text-dimmed cursor-not-allowed' : 'text-muted cursor-pointer'
+                  }`}
+                  title={finalDisabled ? finalBlockedReason : undefined}
+                >
+                  <input
+                    type='checkbox'
+                    checked={isFinal}
+                    disabled={finalDisabled}
+                    onChange={onToggleFinal}
+                    className='h-3 w-3'
+                  />
+                  Final State
+                </label>
+              )}
             </div>
           );
         })()}

@@ -20,6 +20,7 @@ import {
   findParallelContext,
   addLooseStateToParallel,
   getDefaultNewTransitionEvent,
+  checkCanMarkFinal,
 } from './scxml-manipulation-utils';
 import { getInitialIds, isParallelRegion } from './initial-group-utils';
 import { normalizeParallelGroups } from './parallel-group-normalization';
@@ -927,3 +928,85 @@ describe('collectExistingIds', () => {
   });
 });
 
+
+describe('checkCanMarkFinal (State Actions panel "Final State" checkbox)', () => {
+  // P (parallel) → R1 (region): Start (Initial) → Work → Job (compound: J1, Initial) ;
+  //                R2 (region): B, Done (already a <final>)
+  // Outside: Plain (top level), Top (compound) → Inner
+  const doc = () =>
+    ({
+      scxml: {
+        state: [{ '@_id': 'Plain' }, { '@_id': 'Top', state: { '@_id': 'Inner' } }],
+        parallel: {
+          '@_id': 'P',
+          state: [
+            {
+              '@_id': 'R1',
+              '@_initial': 'Start',
+              state: [
+                { '@_id': 'Start', transition: { '@_target': 'Work' } },
+                { '@_id': 'Work' },
+                { '@_id': 'Job', '@_initial': 'J1', state: [{ '@_id': 'J1' }, { '@_id': 'J2' }] },
+              ],
+            },
+            { '@_id': 'R2', state: { '@_id': 'B' }, final: { '@_id': 'Done' } },
+          ],
+        },
+      },
+    }) as any as SCXMLDocument;
+
+  const reason = (d: SCXMLDocument, id: string) => {
+    const r = checkCanMarkFinal(d, id);
+    return r.allowed ? null : r.reason;
+  };
+
+  it('allows a plain state directly in a region, or in a compound state nested in one', () => {
+    expect(checkCanMarkFinal(doc(), 'Work')).toEqual({ allowed: true });
+    expect(checkCanMarkFinal(doc(), 'J2')).toEqual({ allowed: true });
+  });
+
+  it('refuses outside any parallel state', () => {
+    expect(reason(doc(), 'Plain')).toBe('Final states can only be used inside a parallel state.');
+    expect(reason(doc(), 'Inner')).toBe('Final states can only be used inside a parallel state.');
+  });
+
+  it('refuses a region, a <parallel>, a <final>, or an unknown id', () => {
+    expect(reason(doc(), 'R1')).toBe('A region of a parallel state cannot be a final state.');
+    expect(reason(doc(), 'P')).toBe('Only a state can be made a final state.');
+    expect(reason(doc(), 'Done')).toBe('Only a state can be made a final state.');
+    expect(reason(doc(), 'missing')).toBe('Only a state can be made a final state.');
+  });
+
+  it('refuses a second final state in the same container', () => {
+    expect(reason(doc(), 'B')).toBe("'R2' already has a final state.");
+  });
+
+  it('refuses anything a <final> would have to drop: child states, transitions, history, invoke, datamodel', () => {
+    expect(reason(doc(), 'Job')).toMatch(/Remove its child states first/);
+    expect(reason(doc(), 'Start')).toMatch(/Unmark it as the Initial State first|outgoing transitions/);
+
+    const d = doc();
+    const work = (d.scxml as any).parallel.state[0].state[1];
+    work.transition = { '@_event': 'go' }; // a targetless event reaction
+    expect(reason(d, 'Work')).toMatch(/Remove its outgoing transitions and event reactions first/);
+    delete work.transition;
+    work.history = { '@_id': 'H' };
+    expect(reason(d, 'Work')).toMatch(/history state/);
+    delete work.history;
+    work.invoke = { '@_type': 'x' };
+    expect(reason(d, 'Work')).toMatch(/<invoke>/);
+    delete work.invoke;
+    work.datamodel = { data: { '@_id': 'v' } };
+    expect(reason(d, 'Work')).toMatch(/<datamodel>/);
+  });
+
+  it('refuses its container’s Initial State, but allows it once unmarked', () => {
+    const d = doc();
+    const start = (d.scxml as any).parallel.state[0].state[0];
+    delete start.transition;
+    expect(reason(d, 'Start')).toMatch(/Unmark it as the Initial State first/);
+    expect(reason(d, 'J1')).toMatch(/Unmark it as the Initial State first/);
+    delete (d.scxml as any).parallel.state[0]['@_initial'];
+    expect(checkCanMarkFinal(d, 'Start')).toEqual({ allowed: true });
+  });
+});
