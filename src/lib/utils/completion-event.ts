@@ -1,13 +1,10 @@
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * Rewrites the completion event `done.state.<oldId>` to `done.state.<newId>`
- * inside an event list, matching whole tokens only (separated by commas
- * and/or whitespace) so `done.state.CC` or `done.state.C.sub` aren't touched
- * when renaming `C`. Separators are preserved; the input is returned as-is
- * when nothing matched.
+ * inside a comma-separated event list, matching whole items only — so
+ * `done.state.CC` isn't touched when renaming `C`. A space is part of a name,
+ * not a separator (project rule 6.7): renaming `Motor` leaves
+ * `done.state.Motor left` alone. The input is returned as-is when nothing
+ * matched (same contract as renameTimeEventTokensInEventList).
  *
  * The event name bakes the state id in as a literal string (see
  * getDefaultNewTransitionEvent), so anything that changes a state's id —
@@ -20,6 +17,8 @@ export function renameCompletionEventTokens(
   newId: string
 ): string | undefined {
   if (!value) return value;
-  const pattern = new RegExp(`(^|[\\s,])done\\.state\\.${escapeRegExp(oldId)}(?=$|[\\s,])`, 'g');
-  return value.replace(pattern, (_match, sep: string) => `${sep}done.state.${newId}`);
+  const oldEvent = `done.state.${oldId}`;
+  const tokens = value.split(',').map((t) => t.trim());
+  const renamed = tokens.map((t) => (t === oldEvent ? `done.state.${newId}` : t));
+  return renamed.some((t, i) => t !== tokens[i]) ? renamed.join(', ') : value;
 }

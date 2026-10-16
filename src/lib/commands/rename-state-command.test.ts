@@ -94,6 +94,13 @@ describe('RenameStateCommand', () => {
       expect(result.success).toBe(true);
       expect(result.newContent).toContain('event="done.state.CC"');
     });
+
+    it('keeps space-containing ids whole: renaming Motor leaves done.state.Motor left alone', () => {
+      const xml = `${SCXML_HEADER}><state id="Motor"/><state id="Motor left"><final id="F"/><transition event="done.state.Motor left" target="Motor"/></state></scxml>`;
+      const result = new RenameStateCommand('Motor', 'Pump').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="done.state.Motor left"');
+    });
   });
 
   describe('waypoint invalidation', () => {

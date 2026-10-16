@@ -5,6 +5,7 @@ import {
   findTransitionSlotConflict,
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
+  getDoneStateEvents,
 } from './transition-slot-rules';
 
 describe('classifyTransitionSlot', () => {
@@ -562,6 +563,37 @@ describe('one transition per done.state.<id> event (checkTransitionEditSlotConfl
     });
     expect(
       checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'done.state.CDone', '@_target': 'D' })
+    ).toEqual({ blocked: false });
+  });
+});
+
+describe('getDoneStateEvents', () => {
+  it('splits on commas only, keeping a space-containing state id whole (project rule 6.7)', () => {
+    expect(getDoneStateEvents({ '@_event': 'done.state.Motor left' })).toEqual(['done.state.Motor left']);
+    expect(getDoneStateEvents({ '@_event': 'go, done.state.Motor left ,done.state.B' })).toEqual([
+      'done.state.Motor left',
+      'done.state.B',
+    ]);
+  });
+
+  it('does not treat done.state.Motor left and done.state.Motor right as the same event', () => {
+    const doc = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'S',
+            transition: [
+              { '@_event': 'done.state.Motor left', '@_target': 'A' },
+              { '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'A' },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    } as SCXMLDocument;
+    expect(
+      checkTransitionEditSlotConflict(doc, 'S', 1, { '@_event': 'done.state.Motor right', '@_target': 'B' })
     ).toEqual({ blocked: false });
   });
 });

@@ -6,9 +6,18 @@ describe('renameCompletionEventTokens', () => {
     expect(renameCompletionEventTokens('done.state.C', 'C', 'Work')).toBe('done.state.Work');
   });
 
-  it('renames only the matching token in a comma- or space-separated list, preserving separators', () => {
+  it('renames only the matching item in a comma-separated list', () => {
     expect(renameCompletionEventTokens('done.state.C, clicked', 'C', 'Work')).toBe('done.state.Work, clicked');
-    expect(renameCompletionEventTokens('clicked done.state.C', 'C', 'Work')).toBe('clicked done.state.Work');
+    expect(renameCompletionEventTokens('clicked,done.state.C', 'C', 'Work')).toBe('clicked, done.state.Work');
+  });
+
+  it('treats spaces as part of the state id, not a separator (project rule 6.7)', () => {
+    // Renaming Motor must not touch Motor left's completion event...
+    expect(renameCompletionEventTokens('done.state.Motor left', 'Motor', 'Pump')).toBe('done.state.Motor left');
+    // ...and a space-containing id is renamed as a whole.
+    expect(renameCompletionEventTokens('done.state.Motor left, go', 'Motor left', 'Motor right')).toBe(
+      'done.state.Motor right, go'
+    );
   });
 
   it('does not touch a different state\'s completion event that merely starts with the old id', () => {

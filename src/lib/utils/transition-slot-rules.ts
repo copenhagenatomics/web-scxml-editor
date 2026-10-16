@@ -108,12 +108,14 @@ export function findTransitionSlotConflict(
 const DONE_STATE_PREFIX = 'done.state.';
 
 /**
- * The `done.state.<id>` event names a transition triggers on. Its event attribute may be
- * a space-separated SCXML list or this editor's comma-merged list (transition-merge-utils).
+ * The `done.state.<id>` event names a transition triggers on. Its event attribute is a
+ * comma-separated list; a space is part of a name, not a separator (project rule 6.7),
+ * so `done.state.Motor left` is one event, distinct from `done.state.Motor right`.
  */
 export function getDoneStateEvents(t: TransitionElement): string[] {
   return (t['@_event'] ?? '')
-    .split(/[\s,]+/)
+    .split(',')
+    .map((token) => token.trim())
     .filter((token) => token.startsWith(DONE_STATE_PREFIX) && token.length > DONE_STATE_PREFIX.length);
 }
 

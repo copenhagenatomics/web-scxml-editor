@@ -224,13 +224,24 @@ describe('validateTransitionSlotConflicts — one transition per done.state.<id>
     expect(errors[1].message).toMatch(/from 'C' on done\.state\.C can never fire/);
   });
 
-  it('matches a done.state event inside a comma- or space-separated event list', () => {
+  it('matches a done.state event inside a comma-separated event list', () => {
     expect(
       run([
         { '@_event': 'go, done.state.C', '@_target': 'B' },
-        { '@_event': 'stop done.state.C', '@_target': 'D' },
+        { '@_event': 'stop,done.state.C', '@_target': 'D' },
       ]).length
     ).toBe(1);
+  });
+
+  it('treats a space as part of the event name, not a separator (project rule 6.7)', () => {
+    expect(
+      run([
+        { '@_event': 'done.state.Motor left', '@_target': 'B' },
+        { '@_event': 'done.state.Motor right', '@_target': 'D' },
+        { '@_event': 'stop done.state.C', '@_target': 'C1' },
+        { '@_event': 'done.state.C', '@_target': 'CDone' },
+      ])
+    ).toEqual([]);
   });
 
   it('allows one transition per distinct done.state event, and ordinary duplicate events', () => {
