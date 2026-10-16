@@ -98,8 +98,10 @@ export function validateTransitionSlotConflicts(
 
       // At most one transition per done.state.<id> event on this state, across all targets
       // (see findDoneStateConflict). Every one after the first in document order can never
-      // fire, so those are flagged — except ones sharing the first's target+type, which the
-      // per-slot check above already reports.
+      // fire, so those are flagged — except ones sharing the first's target+type+slot, which
+      // the per-slot check above already reports. Same target alone isn't enough: e.g.
+      // 'done.state.C' (event slot) and 'C_t_0_timeEvent_0, done.state.C' (timer slot) pass
+      // the slot check, so they must be reported here.
       const firstByDoneEvent = new Map<string, TransitionElement>();
       for (const t of transitions) {
         for (const event of getDoneStateEvents(t)) {
@@ -111,7 +113,11 @@ export function validateTransitionSlotConflicts(
           const sameFamily =
             first['@_target'] === t['@_target'] &&
             (first['@_type'] || 'external') === (t['@_type'] || 'external');
-          if (sameFamily && t['@_target']) continue;
+          if (
+            sameFamily &&
+            t['@_target'] &&
+            classifyTransitionSlot(first) === classifyTransitionSlot(t)
+          ) continue;
           const position = findTransitionPosition(
             sourceId,
             t['@_target'] ?? '',

@@ -263,6 +263,17 @@ describe('validateTransitionSlotConflicts — one transition per done.state.<id>
     expect(errors.every((e) => /only one event-based transition/i.test(e.message))).toBe(true);
   });
 
+  it('flags a same-target done.state duplicate in a different slot (event vs timer), which the slot check misses', () => {
+    // Same target and type, but 'event' vs 'timer' slots — the slot check accepts
+    // the pair, so this check must not assume it was already reported.
+    const errors = run([
+      { '@_event': 'done.state.C', '@_target': 'B' },
+      { '@_event': 'C_t_0_timeEvent_0, done.state.C', '@_target': 'B' },
+    ]);
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toMatch(/'C' to 'B' on done\.state\.C can never fire.*\(to 'B'\)/);
+  });
+
   it('flags the shadowed transition in a real document, at its line', () => {
     const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="P">
   <parallel id="P">
