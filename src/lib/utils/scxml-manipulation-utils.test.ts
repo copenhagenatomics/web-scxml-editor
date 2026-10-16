@@ -808,6 +808,27 @@ describe('rewriteOrDropTransitions', () => {
     rewriteOrDropTransitions(state, new Map([['Sibling', 'Sibling_copy']]));
     expect(child.transition['@_target']).toBe('Sibling_copy');
   });
+
+  it('rewrites a done.state.<id> event to the copied state\'s completion event', () => {
+    // C → B copied together: the copied transition must listen for C_copy
+    // finishing, not the original C.
+    const state = {
+      '@_id': 'C_copy',
+      transition: { '@_event': 'done.state.C', '@_target': 'B' },
+    } as any;
+    rewriteOrDropTransitions(state, new Map([['C', 'C_copy'], ['B', 'B_copy']]));
+    expect(state.transition['@_event']).toBe('done.state.C_copy');
+    expect(state.transition['@_target']).toBe('B_copy');
+  });
+
+  it('leaves a done.state event alone when its state was not part of the copy', () => {
+    const state = {
+      '@_id': 'A_copy',
+      transition: { '@_event': 'done.state.Elsewhere', '@_target': 'B' },
+    } as any;
+    rewriteOrDropTransitions(state, new Map([['A', 'A_copy'], ['B', 'B_copy']]));
+    expect(state.transition['@_event']).toBe('done.state.Elsewhere');
+  });
 });
 
 describe('<parallel> elements keep their tag through lookup, add, detach and clone', () => {

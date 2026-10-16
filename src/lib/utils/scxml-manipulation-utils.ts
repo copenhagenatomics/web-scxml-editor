@@ -9,6 +9,7 @@ import type {
 } from '@/types/scxml';
 import { collectStateIds } from '@/lib/validators/state-validator';
 import { isMarkedInitial } from '@/lib/utils/initial-group-utils';
+import { renameCompletionEventTokens } from '@/lib/utils/completion-event';
 import {
   findTransparentParallel,
   getChildEntries,
@@ -1170,22 +1171,34 @@ export function resolveCarriedOverInitialIds(
  * transition whose @_target is in idMap is rewritten to the mapped id; one
  * whose @_target is present but NOT in idMap (points outside the copied
  * set) is dropped entirely; a targetless transition is always kept.
+ * A kept transition's done.state.<id> event is remapped too, so it listens
+ * for the copied state's completion rather than the original's.
  * Mutates the given clone in place.
  */
 export function rewriteOrDropTransitions(
   state: StateElement,
   idMap: Map<string, string>
 ): void {
+  const remapEvent = (event: string | undefined): string | undefined => {
+    let result = event;
+    idMap.forEach((newId, oldId) => {
+      result = renameCompletionEventTokens(result, oldId, newId);
+    });
+    return result;
+  };
+
   function walk(s: StateElement): void {
     if (s.transition) {
       const arr = Array.isArray(s.transition) ? s.transition : [s.transition];
       const kept = arr
         .filter((t) => !t['@_target'] || idMap.has(t['@_target']))
-        .map((t) =>
-          t['@_target'] && idMap.has(t['@_target'])
-            ? { ...t, '@_target': idMap.get(t['@_target'])! }
-            : t
-        );
+        .map((t) => {
+          const next = { ...t };
+          if (t['@_target'] && idMap.has(t['@_target'])) next['@_target'] = idMap.get(t['@_target'])!;
+          const event = remapEvent(t['@_event']);
+          if (event !== t['@_event']) next['@_event'] = event;
+          return next;
+        });
       s.transition = kept.length === 0 ? undefined : kept.length === 1 ? kept[0] : kept;
     }
 

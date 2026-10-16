@@ -1,6 +1,7 @@
 import { BaseCommand, type CommandResult } from './base-command';
 import { clearWaypointsForTouchingTransitions } from './waypoint-invalidation';
 import { renameTimeEventTokensInEventList } from '../utils/time-transition';
+import { renameCompletionEventTokens } from '../utils/completion-event';
 
 /**
  * RenameStateCommand
@@ -12,6 +13,8 @@ import { renameTimeEventTokensInEventList } from '../utils/time-transition';
  * - Updates auto-generated time-event tokens ({oldId}_t_N_timeEvent_N) that
  *   this state's own transitions/send/cancel elements carry, since that
  *   naming bakes the id in as a literal string rather than deriving it live
+ * - Updates every transition listening for this state's completion event
+ *   (done.state.{oldId}), anywhere in the document, for the same reason
  *
  * A longer/shorter id also changes the node's rendered width (see
  * NodeDimensionCalculator, which sizes by label length — the label is the
@@ -92,6 +95,16 @@ export class RenameStateCommand extends BaseCommand {
     const transitions = doc.querySelectorAll(`transition[target="${this.stateId}"]`);
     transitions.forEach((transition) => {
       transition.setAttribute('target', this.newId);
+    });
+
+    // Update transitions listening for this state's completion event. Ids are
+    // unique document-wide, so done.state.{oldId} can only mean this state.
+    doc.querySelectorAll('transition[event]').forEach((transition) => {
+      const eventAttr = transition.getAttribute('event');
+      const renamed = renameCompletionEventTokens(eventAttr ?? undefined, this.stateId, this.newId);
+      if (renamed !== undefined && renamed !== eventAttr) {
+        transition.setAttribute('event', renamed);
+      }
     });
 
     // Update parent's initial attribute if it references this state — token-aware

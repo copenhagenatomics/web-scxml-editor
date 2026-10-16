@@ -72,6 +72,30 @@ describe('RenameStateCommand', () => {
     });
   });
 
+  describe('completion-event (done.state.<id>) renaming', () => {
+    it('rewrites the done.state event on the renamed state\'s own outgoing transition', () => {
+      const xml = `${SCXML_HEADER}><parallel id="P"><state id="C"><state id="C1"/><final id="F"/><transition event="done.state.C" target="B"/></state><state id="B"/></parallel></scxml>`;
+      const result = new RenameStateCommand('C', 'Work').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="done.state.Work"');
+      expect(result.newContent).not.toContain('done.state.C"');
+    });
+
+    it('rewrites a done.state event that listens for the renamed state from elsewhere', () => {
+      const xml = `${SCXML_HEADER}><state id="Outer"><state id="C"><final id="F"/></state><transition event="done.state.C, clicked" target="X"/></state><state id="X"/></scxml>`;
+      const result = new RenameStateCommand('C', 'Work').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="done.state.Work, clicked"');
+    });
+
+    it('does not touch the completion event of a state whose id only starts with the old id', () => {
+      const xml = `${SCXML_HEADER}><state id="C"/><state id="CC"><final id="F"/><transition event="done.state.CC" target="C"/></state></scxml>`;
+      const result = new RenameStateCommand('C', 'Work').execute(xml);
+      expect(result.success).toBe(true);
+      expect(result.newContent).toContain('event="done.state.CC"');
+    });
+  });
+
   describe('waypoint invalidation', () => {
     // A longer/shorter id changes the node's rendered width (label length),
     // so stale persisted viz:waypoints on transitions touching it must be

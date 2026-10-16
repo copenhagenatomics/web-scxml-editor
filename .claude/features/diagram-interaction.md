@@ -46,7 +46,7 @@ All of this lives in `src/components/diagram/visual-diagram.tsx` (3,347 lines â€
 
 ## Relevant utilities
 
-`src/lib/utils/scxml-manipulation-utils.ts` (`findStateById`, `addStateToDocument`, `createStateElement`, `cloneStateSubtreeWithFreshIds`, `rewriteOrDropTransitions`, `detachStateFromParent`, `isDescendantOf`), `src/lib/utils/initial-group-utils.ts` and `src/lib/utils/transition-slot-rules.ts` (both consulted by `onConnect` to block invalid new connections before they're created).
+`src/lib/utils/scxml-manipulation-utils.ts` (`findStateById`, `addStateToDocument`, `createStateElement`, `cloneStateSubtreeWithFreshIds`, `rewriteOrDropTransitions` â€” also remaps `done.state.<id>` events through the paste-wide id map, `detachStateFromParent`, `isDescendantOf`), `src/lib/utils/initial-group-utils.ts` and `src/lib/utils/transition-slot-rules.ts` (both consulted by `onConnect` to block invalid new connections before they're created).
 
 ## SCXML behavior
 
