@@ -31,17 +31,27 @@ const TARGETABLE_TAGS = ['state', 'parallel', 'final', 'history'];
 const TARGETABLE_SELECTOR = TARGETABLE_TAGS.map((tag) => `${tag}[id]`).join(', ');
 
 /**
+ * Elements whose contents are data payload, not part of the state hierarchy.
+ * XML inside them (e.g. `<donedata><content><state id="X"/></content>`) only
+ * looks like states/transitions and must be ignored.
+ */
+const PAYLOAD_SELECTOR = 'donedata, content, data';
+
+const isInPayload = (el: Element): boolean => el.closest(PAYLOAD_SELECTOR) !== null;
+
+/**
  * Ids of the transition-targetable elements that disappear along with
  * `removed` (each one itself + its descendants). Only state-like elements
  * count: other elements' ids (e.g. `<data id="X">`) live in a different
  * namespace and must not cause transitions targeting a state `X` to be removed.
+ * State-like XML inside a data payload isn't a real state, so it's skipped too.
  */
 function collectTargetableIds(removed: Element[]): Set<string> {
   const ids = new Set<string>();
   removed.forEach((el) => {
     const candidates = TARGETABLE_TAGS.includes(el.localName) ? [el] : [];
     candidates.push(...Array.from(el.querySelectorAll(TARGETABLE_SELECTOR)));
-    candidates.forEach((e) => {
+    candidates.filter((e) => !isInPayload(e)).forEach((e) => {
       const id = e.getAttribute('id');
       if (id) ids.add(id);
     });
@@ -160,21 +170,14 @@ export class ChangeStateTypeCommand extends BaseCommand {
 
     element.parentNode?.replaceChild(replacement, element);
 
-    // Known limitation: this and collectTargetableIds use document-wide
-    // selectors, so XML embedded in data payloads (<content>, inline <data>)
-    // isn't excluded. The State Actions panel's Final State checkbox is the
-    // only UI caller, and it never reaches this: it only marks a state final
-    // once checkCanMarkFinal confirms nothing would be dropped, and a <final>'s
-    // children are all valid on a <state>. Scope both to the real state
-    // hierarchy before adding a caller that can drop children
-    // (see .claude/features/state-node-types.md).
-    //
     // Targets pointing at a dropped descendant would dangle. A transition can
     // list several targets ("A B"), so only the dropped ones are removed from
     // the list; the transition itself goes only once no target is left.
+    // Transitions inside data payloads aren't real edges and are left alone.
     const droppedIds = collectTargetableIds(dropped);
     if (droppedIds.size > 0) {
       doc.querySelectorAll('transition[target]').forEach((transition) => {
+        if (isInPayload(transition)) return;
         const targets = (transition.getAttribute('target') || '').split(/\s+/).filter(Boolean);
         const remaining = targets.filter((t) => !droppedIds.has(t));
         if (remaining.length === targets.length) return;
