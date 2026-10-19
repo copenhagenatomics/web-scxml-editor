@@ -418,6 +418,10 @@ export function findIdentifierPositions(
 /**
  * Find the line/column position of a specific transition in the XML
  */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function findTransitionPosition(
   sourceStateId: string,
   targetStateId: string,
@@ -430,15 +434,53 @@ export function findTransitionPosition(
 
   const lines = xmlContent.split('\n');
 
+  // Scope the search to transitions that are direct children of the source state, so an
+  // identical transition on another state (e.g. an earlier `<transition target="x">`) is never matched.
+  const sourceIdPattern = new RegExp(
+    `<(?:state|parallel|final)\\b[^>]*\\bid="${escapeRegExp(sourceStateId)}"`
+  );
+  const sourceStartIndex = lines.findIndex((l) => sourceIdPattern.test(l));
+  const scoped = sourceStartIndex !== -1;
+  // Depth relative to the source state: 1 means directly inside it
+  let depth = 0;
+
   // Search for the transition element
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+  for (
+    let lineIndex = scoped ? sourceStartIndex : 0;
+    lineIndex < lines.length;
+    lineIndex++
+  ) {
     const line = lines[lineIndex];
     const lineNumber = lineIndex + 1;
+
+    let inSourceDirectly = true;
+    if (scoped) {
+      // Transition tags on this line belong to the depth before any state tags that open on it
+      // (state tags precede their own transitions on separate lines in formatted XML).
+      const tagRegex = /<(state|parallel|final)\b[^>]*?(\/?)>|<\/(state|parallel|final)>/g;
+      let match: RegExpExecArray | null;
+      const transitionIndex = line.indexOf('<transition');
+      let depthAtTransition: number | undefined;
+      while ((match = tagRegex.exec(line)) !== null) {
+        // Tags after the transition on the same line don't affect its scope
+        if (transitionIndex !== -1 && match.index > transitionIndex) {
+          depthAtTransition = depth;
+          break;
+        }
+        if (match[3]) {
+          depth--;
+        } else if (!match[2]) {
+          depth++;
+        }
+      }
+      inSourceDirectly = (depthAtTransition ?? depth) === 1;
+      if (depth <= 0 && (transitionIndex === -1 || !inSourceDirectly)) break; // Left the source state
+    }
 
     if (excludeLines?.has(lineNumber)) continue;
 
     // Look for transition tags
-    if (line.includes('<transition')) {
+    if (inSourceDirectly && line.includes('<transition')) {
       // Check if this transition matches our criteria
       const hasTarget = line.includes(`target="${targetStateId}"`);
       const hasEvent = event ? line.includes(`event="${event}"`) : !line.includes('event=');

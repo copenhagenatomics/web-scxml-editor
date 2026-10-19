@@ -128,3 +128,37 @@ describe('validateCrossHierarchyTransitions stateId attachment', () => {
     expect(errors[0].targetStateId).toBe('B');
   });
 });
+
+describe('validateCrossHierarchyTransitions line location', () => {
+  it('points at the offending state\'s own transition, not an identical one elsewhere', () => {
+    const xml = [
+      '<scxml>',
+      '  <initial>',
+      '    <transition target="standby"></transition>',
+      '  </initial>',
+      '  <state id="standby"></state>',
+      '  <state id="group">',
+      '    <state id="inner">',
+      '      <transition target="standby">',
+      '      </transition>',
+      '    </state>',
+      '  </state>',
+      '</scxml>',
+    ].join('\n');
+    const scxml: SCXMLElement = {
+      state: [
+        { '@_id': 'standby' },
+        { '@_id': 'group', state: [{ '@_id': 'inner', transition: { '@_target': 'standby' } }] },
+      ],
+    } as any;
+    const stateParentMap = new Map<string, string | null>([
+      ['standby', null],
+      ['group', null],
+      ['inner', 'group'],
+    ]);
+    const errors: ValidationError[] = [];
+    validateCrossHierarchyTransitions(scxml, stateParentMap, xml, errors);
+    expect(errors.length).toBe(1);
+    expect(errors[0].line).toBe(8);
+  });
+});
