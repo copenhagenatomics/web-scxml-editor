@@ -92,6 +92,7 @@ import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
 import { inferChannelInitialExpr } from '@/lib/utils/datamodel-extractor';
+import { parseAssignActionString } from '@/lib/utils/action-string';
 
 // ==================== TYPES & INTERFACES ====================
 interface VisualDiagramProps {
@@ -894,9 +895,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const assignedValue = apply.kind === 'reactions'
           ? apply.actions.find((a) => a.location === channelName)?.expr
           : [...apply.entryActions, ...apply.exitActions]
-              .map((a) => a.split('|'))
-              .find((parts) => parts[0] === 'assign' && parts[1] === channelName)
-              ?.slice(2).join('|');
+              .map(parseAssignActionString)
+              .find((assign) => assign?.location === channelName)
+              ?.expr;
         const addResult = new AddDataCommand(channelName, inferChannelInitialExpr(assignedValue)).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
@@ -1345,9 +1346,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     // raw onentry/onexit rows. They remain in the underlying
                     // SCXML and are visible in the code editor.
                     return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
-                      if (a.startsWith('assign|')) {
-                        const parts = a.split('|');
-                        return [{ type: 'assign', location: parts[1] || '', expr: parts[2] || '' }];
+                      const assign = parseAssignActionString(a);
+                      if (assign) {
+                        return [{ type: 'assign', ...assign }];
                       }
                       if (a.startsWith('send|')) {
                         const parts = a.split('|');

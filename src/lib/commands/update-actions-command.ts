@@ -1,5 +1,6 @@
 import { BaseCommand, type CommandResult } from './base-command';
 import { clearWaypointsForTouchingTransitions } from './waypoint-invalidation';
+import { parseAssignActionString } from '@/lib/utils/action-string';
 
 /**
  * UpdateActionsCommand
@@ -63,10 +64,9 @@ export class UpdateActionsCommand extends BaseCommand {
       const onentry = doc.createElementNS(scxmlNamespace, 'onentry');
 
       this.entryActions.forEach((action) => {
-        if (action.startsWith('assign|')) {
-          const parts = action.split('|');
-          const location = parts[1] || '';
-          const expr = parts[2] || '';
+        const assign = parseAssignActionString(action);
+        if (assign) {
+          const { location, expr } = assign;
           const assignElement = doc.createElementNS(scxmlNamespace, 'assign');
           if (location) assignElement.setAttribute('location', location);
           if (expr) assignElement.setAttribute('expr', expr);
@@ -103,10 +103,9 @@ export class UpdateActionsCommand extends BaseCommand {
       const onexit = doc.createElementNS(scxmlNamespace, 'onexit');
 
       this.exitActions.forEach((action) => {
-        if (action.startsWith('assign|')) {
-          const parts = action.split('|');
-          const location = parts[1] || '';
-          const expr = parts[2] || '';
+        const assign = parseAssignActionString(action);
+        if (assign) {
+          const { location, expr } = assign;
           const assignElement = doc.createElementNS(scxmlNamespace, 'assign');
           if (location) assignElement.setAttribute('location', location);
           if (expr) assignElement.setAttribute('expr', expr);
