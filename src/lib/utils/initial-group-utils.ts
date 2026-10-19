@@ -127,8 +127,11 @@ function getInitialElementTargetIds(
  * Initial — `@_initial` naming real ids is authoritative over it.
  */
 export function getInitialIds(container: ContainerElement): Set<string> {
+  // Skip id-less children (e.g. a typo like idd="...") — they can't be Initial.
   const childIds = new Set(
-    getDirectChildStates(container).map((c) => c["@_id"]),
+    getDirectChildStates(container)
+      .map((c) => c["@_id"])
+      .filter((id): id is string => typeof id === "string" && id !== ""),
   );
 
   const result = new Set<string>();

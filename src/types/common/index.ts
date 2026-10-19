@@ -2,6 +2,9 @@ export interface ValidationError {
   message: string;
   line?: number;
   column?: number;
+  /** Optional end of the offending source range (1-based, exclusive column). */
+  endLine?: number;
+  endColumn?: number;
   severity: 'error' | 'warning';
   code?: string;
   stateId?: string;

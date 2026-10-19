@@ -54,7 +54,9 @@ export function getValidDatamodelAttributes(): Set<string> {
 }
 
 export function getValidDataAttributes(): Set<string> {
-  return new Set(['id', 'src', 'expr']);
+  // confType is this editor's own (non-W3C) type tag on conf_ fields, written
+  // by the Config panel — see datamodel-extractor.ts.
+  return new Set(['id', 'src', 'expr', 'confType']);
 }
 
 export function getValidInvokeAttributes(): Set<string> {
@@ -120,4 +122,55 @@ export function getValidElseAttributes(): Set<string> {
 
 export function getValidForeachAttributes(): Set<string> {
   return new Set(['array', 'item', 'index']);
+}
+
+export function getValidParamAttributes(): Set<string> {
+  return new Set(['name', 'expr', 'location']);
+}
+
+export function getValidContentAttributes(): Set<string> {
+  return new Set(['expr']);
+}
+
+export function getValidDonedataAttributes(): Set<string> {
+  return new Set([]);
+}
+
+export function getValidFinalizeAttributes(): Set<string> {
+  return new Set([]);
+}
+
+/**
+ * Attribute schema per SCXML element name. Elements not listed here (foreign or
+ * namespaced elements, and <content>'s arbitrary payload) are never checked.
+ */
+export function getElementAttributeSchemas(): Map<string, Set<string>> {
+  return new Map([
+    ['scxml', getValidScxmlAttributes()],
+    ['state', getValidStateAttributes()],
+    ['parallel', getValidParallelAttributes()],
+    ['final', getValidFinalAttributes()],
+    ['history', getValidHistoryAttributes()],
+    ['transition', getValidTransitionAttributes()],
+    ['onentry', getValidOnentryAttributes()],
+    ['onexit', getValidOnexitAttributes()],
+    ['initial', getValidInitialAttributes()],
+    ['datamodel', getValidDatamodelAttributes()],
+    ['data', getValidDataAttributes()],
+    ['invoke', getValidInvokeAttributes()],
+    ['script', getValidScriptAttributes()],
+    ['assign', getValidAssignAttributes()],
+    ['send', getValidSendAttributes()],
+    ['raise', getValidRaiseAttributes()],
+    ['log', getValidLogAttributes()],
+    ['cancel', getValidCancelAttributes()],
+    ['if', getValidIfAttributes()],
+    ['elseif', getValidElseifAttributes()],
+    ['else', getValidElseAttributes()],
+    ['foreach', getValidForeachAttributes()],
+    ['param', getValidParamAttributes()],
+    ['content', getValidContentAttributes()],
+    ['donedata', getValidDonedataAttributes()],
+    ['finalize', getValidFinalizeAttributes()],
+  ]);
 }

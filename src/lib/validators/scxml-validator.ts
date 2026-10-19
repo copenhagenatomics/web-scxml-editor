@@ -2,6 +2,7 @@ import type { SCXMLElement } from '@/types/scxml';
 import type { ValidationError } from '@/types/common';
 import {
   parseElementPositions,
+  buildSourceElementIndex,
   deduplicateErrors,
   findDataIdPositions,
   findIdentifierPositions,
@@ -62,42 +63,67 @@ export class SCXMLValidator {
     if (xmlContent) {
       parseElementPositions(xmlContent, this.elementPositions);
     }
+    const sourceIndex = xmlContent ? buildSourceElementIndex(xmlContent) : undefined;
 
     const errors: ValidationError[] = [];
     const stateIds = new Set<string>();
 
-    // Collect all state IDs first
-    collectStateIds(scxml, stateIds);
+    // Each pass runs isolated: a pass that throws on a half-edited document
+    // (e.g. a state whose id is misspelled) must not wipe out the diagnostics
+    // every other pass produced — especially the attribute errors that explain it.
+    const run = (passName: string, pass: () => void) => {
+      try {
+        pass();
+      } catch (error) {
+        console.error(`SCXML validation pass '${passName}' failed:`, error);
+        errors.push({
+          message: `Some checks (${passName}) could not run on this document: ${
+            error instanceof Error ? error.message : String(error)
+          }. Fix the other reported problems first; the remaining results are still valid.`,
+          severity: 'warning',
+        });
+      }
+    };
 
-    // Build parent-child hierarchy map
-    buildStateHierarchy(scxml, this.stateParentMap);
+    run('state ids', () => {
+      collectStateIds(scxml, stateIds);
+      buildStateHierarchy(scxml, this.stateParentMap);
+    });
 
-    // Perform all validation checks
-    validateStateReferences(scxml, stateIds, errors);
-    validateInitialStates(scxml, stateIds, errors);
-    validateRequiredAttributes(scxml, this.reportedErrors, this.elementPositions, errors);
-    this.validateStateStructure(scxml, errors);
+    run('state references', () => validateStateReferences(scxml, stateIds, errors));
+    run('initial states', () => validateInitialStates(scxml, stateIds, errors));
+    run('required attributes', () =>
+      validateRequiredAttributes(
+        scxml,
+        this.reportedErrors,
+        this.elementPositions,
+        errors,
+        sourceIndex
+      )
+    );
+    run('state structure', () => this.validateStateStructure(scxml, errors));
 
     // Enhanced W3C compliance checks
-    validateW3CCompliance(scxml, errors);
-    this.validateStateMachineSemanticsInternal(scxml, stateIds, errors);
-    validateTransitionSemantics(scxml, stateIds, errors);
-    validateTransitionSlotConflicts(scxml, this.xmlContent, errors);
-    validateExecutableElements(scxml, errors);
+    run('W3C compliance', () => validateW3CCompliance(scxml, errors));
+    run('state machine semantics', () =>
+      this.validateStateMachineSemanticsInternal(scxml, stateIds, errors)
+    );
+    run('transition semantics', () => validateTransitionSemantics(scxml, stateIds, errors));
+    run('transition slots', () =>
+      validateTransitionSlotConflicts(scxml, this.xmlContent, errors)
+    );
+    run('executable content', () => validateExecutableElements(scxml, errors));
 
     // Comprehensive attribute validation
-    validateAllElementAttributes(scxml, errors);
+    run('attributes', () => validateAllElementAttributes(scxml, errors, sourceIndex));
 
     // Cross-hierarchy transition validation (1C requirement)
-    validateCrossHierarchyTransitions(
-      scxml,
-      this.stateParentMap,
-      this.xmlContent,
-      errors
+    run('cross-hierarchy transitions', () =>
+      validateCrossHierarchyTransitions(scxml, this.stateParentMap, this.xmlContent, errors)
     );
 
     // Multiple Initial State group validation
-    validateInitialStateGroups(scxml, errors);
+    run('initial state groups', () => validateInitialStateGroups(scxml, errors));
 
     return deduplicateErrors(errors);
   }

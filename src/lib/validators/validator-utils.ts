@@ -80,6 +80,149 @@ export function deduplicateErrors(errors: ValidationError[]): ValidationError[] 
 }
 
 /**
+ * A 1-based source range; endColumn is exclusive (Monaco marker convention).
+ */
+export interface SourceRange {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+}
+
+/**
+ * Source location of one element: `range` covers the `<name` token, and each
+ * attribute's range covers `name="value"`.
+ */
+export interface SourceElement {
+  name: string;
+  range: SourceRange;
+  attributes: Map<string, SourceRange>;
+}
+
+/**
+ * Index every element in the XML by the same path the validators build while
+ * walking the fast-xml-parser tree: the root is its tag name (`scxml`), and each
+ * child is `${parentPath}.${tag}[${n}]`, where n counts same-named siblings.
+ * fast-xml-parser groups same-named children into arrays in document order, so
+ * a path identifies exactly one parsed element — unlike the type-and-line
+ * lookup in parseElementPositions.
+ *
+ * Only meant for documents that already parsed; on malformed XML it returns a
+ * best-effort index.
+ */
+export function buildSourceElementIndex(xmlContent: string): Map<string, SourceElement> {
+  const index = new Map<string, SourceElement>();
+  const lineStarts = [0];
+  for (let i = 0; i < xmlContent.length; i++) {
+    if (xmlContent[i] === '\n') lineStarts.push(i + 1);
+  }
+
+  const toLineColumn = (offset: number) => {
+    let low = 0;
+    let high = lineStarts.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (lineStarts[mid] <= offset) low = mid;
+      else high = mid - 1;
+    }
+    return { line: low + 1, column: offset - lineStarts[low] + 1 };
+  };
+  const toRange = (start: number, end: number): SourceRange => {
+    const from = toLineColumn(start);
+    const to = toLineColumn(end);
+    return { line: from.line, column: from.column, endLine: to.line, endColumn: to.column };
+  };
+
+  const rootCounts = new Map<string, number>();
+  const stack: Array<{ path: string; childCounts: Map<string, number> }> = [];
+  const skipTo = (from: number, terminator: string) => {
+    const end = xmlContent.indexOf(terminator, from);
+    return end === -1 ? xmlContent.length : end + terminator.length;
+  };
+
+  let i = 0;
+  while (i < xmlContent.length) {
+    const lt = xmlContent.indexOf('<', i);
+    if (lt === -1) break;
+
+    if (xmlContent.startsWith('<!--', lt)) {
+      i = skipTo(lt + 4, '-->');
+      continue;
+    }
+    if (xmlContent.startsWith('<![CDATA[', lt)) {
+      i = skipTo(lt + 9, ']]>');
+      continue;
+    }
+    if (xmlContent.startsWith('<?', lt)) {
+      i = skipTo(lt + 2, '?>');
+      continue;
+    }
+    if (xmlContent.startsWith('<!', lt)) {
+      i = skipTo(lt + 2, '>');
+      continue;
+    }
+    if (xmlContent[lt + 1] === '/') {
+      stack.pop();
+      i = skipTo(lt + 2, '>');
+      continue;
+    }
+
+    const nameMatch = /^[A-Za-z_][\w:.-]*/.exec(xmlContent.slice(lt + 1, lt + 257));
+    if (!nameMatch) {
+      i = lt + 1;
+      continue;
+    }
+    const name = nameMatch[0];
+
+    // Find the closing '>' of the start tag, ignoring any inside quoted values.
+    let end = lt + 1 + name.length;
+    let quote: string | null = null;
+    for (; end < xmlContent.length; end++) {
+      const ch = xmlContent[end];
+      if (quote) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        break;
+      }
+    }
+    const selfClosing = xmlContent[end - 1] === '/';
+
+    const attributes = new Map<string, SourceRange>();
+    const attrStart = lt + 1 + name.length;
+    const attrRegex = /([A-Za-z_][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g;
+    const attrText = xmlContent.slice(attrStart, end);
+    let attrMatch: RegExpExecArray | null;
+    while ((attrMatch = attrRegex.exec(attrText)) !== null) {
+      const start = attrStart + attrMatch.index;
+      if (!attributes.has(attrMatch[1])) {
+        attributes.set(attrMatch[1], toRange(start, start + attrMatch[0].length));
+      }
+    }
+
+    const parent = stack[stack.length - 1];
+    const counts = parent ? parent.childCounts : rootCounts;
+    const n = counts.get(name) ?? 0;
+    counts.set(name, n + 1);
+    const path = parent ? `${parent.path}.${name}[${n}]` : name;
+
+    index.set(path, {
+      name,
+      range: toRange(lt, lt + 1 + name.length),
+      attributes,
+    });
+
+    if (!selfClosing) {
+      stack.push({ path, childCounts: new Map() });
+    }
+    i = end + 1;
+  }
+
+  return index;
+}
+
+/**
  * Parse XML content and extract element positions
  * Stores positions for common SCXML elements to provide better error messages
  */
@@ -139,22 +282,6 @@ function storePositionForPattern(
 }
 
 /**
- * Get element position from the position map
- */
-export function getElementPosition(
-  element: any,
-  positionMap: Map<any, { line: number; column: number }>
-): { line: number; column: number } | undefined {
-  // Try to find position by looking for stored positions
-  for (const [key, position] of positionMap.entries()) {
-    if (key.toString().includes('log_line_')) {
-      return position;
-    }
-  }
-  return undefined;
-}
-
-/**
  * Find element position by element type and path
  */
 export function findElementPosition(
@@ -181,12 +308,10 @@ export function findElementPosition(
 export function createFriendlyLogErrorMessage(
   log: LogElement,
   path: string,
-  positionMap: Map<any, { line: number; column: number }>
+  lineInfo: { line: number; column: number } | undefined
 ): string {
   const label = log['@_label'];
   const contextInfo = label ? ` (with label "${label}")` : '';
-  const pathParts = path.split('.');
-  const lineInfo = getElementPosition(log, positionMap);
   const locationInfo = lineInfo
     ? `at line ${lineInfo.line}, column ${lineInfo.column}`
     : `at ${path}`;
@@ -207,10 +332,12 @@ export function parseStateIdList(value: string, stateIds: Set<string>): string[]
   const trimmed = value.trim();
   if (!trimmed) return [];
 
-  const hasSpacedIds = [...stateIds].some((id) => id.includes(' '));
+  // Guard against callers passing ids from id-less elements (undefined).
+  const knownIds = [...stateIds].filter((id) => typeof id === 'string');
+  const hasSpacedIds = knownIds.some((id) => id.includes(' '));
   if (!hasSpacedIds) return trimmed.split(/\s+/);
 
-  const sortedIds = [...stateIds].sort((a, b) => b.length - a.length);
+  const sortedIds = knownIds.sort((a, b) => b.length - a.length);
   const result: string[] = [];
   let remaining = trimmed;
 
