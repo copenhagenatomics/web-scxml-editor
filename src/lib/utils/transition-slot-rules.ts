@@ -139,9 +139,7 @@ export function findDoneStateConflict(
       const to = existing['@_target'] ? ` (to '${existing['@_target']}')` : '';
       return {
         blocked: true,
-        reason:
-          `'${sourceId}' already has a ${event} transition${to}. Only the first one would ever fire — ` +
-          'to branch, send it to a decision state with conditional transitions.',
+        reason: `'${sourceId}' already has a ${event} transition${to}. A second one would never run.`,
       };
     }
   }
@@ -199,4 +197,36 @@ export function checkTransitionEditSlotConflict(
 
   const slotConflict = findTransitionSlotConflict(sameTarget, candidate);
   return slotConflict.blocked ? slotConflict : findDoneStateConflict(sourceId, others, candidate);
+}
+
+/**
+ * The State Actions panel's event-reaction list, checked against the one-transition-per-
+ * done.state.<id> rule (findDoneStateConflict) before UpdateInternalEventsCommand commits it.
+ * That command replaces every existing reaction (targetless, type internal/external) with one
+ * transition per distinct event, inserted before the state's targeted transitions — so a
+ * done.state reaction would silently shadow an existing done.state edge. The old reactions
+ * are excluded (they're being replaced); each new reaction is checked against the state's
+ * remaining transitions and the reactions before it.
+ */
+export function checkReactionsDoneStateConflict(
+  scxmlDoc: SCXMLDocument,
+  stateId: string,
+  reactions: { event: string; type: 'internal' | 'external' }[]
+): { blocked: boolean; reason?: string } {
+  const state = findTransitionSourceElement(scxmlDoc, stateId);
+  const all = !state?.transition ? [] : Array.isArray(state.transition) ? state.transition : [state.transition];
+  const isReaction = (t: TransitionElement) =>
+    !t['@_target'] && (t['@_type'] === 'internal' || t['@_type'] === 'external');
+  const checked = all.filter((t) => !isReaction(t));
+
+  const seenEvents = new Set<string>();
+  for (const { event, type } of reactions) {
+    if (seenEvents.has(event)) continue; // same event → same <transition> (rows are grouped)
+    seenEvents.add(event);
+    const candidate: TransitionElement = { '@_event': event, '@_type': type };
+    const conflict = findDoneStateConflict(stateId, checked, candidate);
+    if (conflict.blocked) return conflict;
+    checked.push(candidate);
+  }
+  return { blocked: false };
 }

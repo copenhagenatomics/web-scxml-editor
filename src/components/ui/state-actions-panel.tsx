@@ -64,6 +64,12 @@ interface StateActionsPanelProps {
   onToggleFinal?: () => void;
   onApply: (entryActions: string[], exitActions: string[]) => void;
   onApplyReactions: (actions: InternalEventActionRow[]) => void;
+  /**
+   * Checks a reaction list before it's saved by adding/editing or pasting a row
+   * (checkReactionsDoneStateConflict); a blocked list isn't saved and its reason is
+   * shown as a warning. Deleting and reordering never add an event, so they skip it.
+   */
+  validateReactions?: (actions: InternalEventActionRow[]) => { blocked: boolean; reason?: string };
   onNewChannel?: (
     channelName: string,
     apply:
@@ -290,6 +296,7 @@ export function StateActionsPanel({
   onToggleFinal,
   onApply,
   onApplyReactions,
+  validateReactions,
   onNewChannel,
 }: StateActionsPanelProps) {
   const [activeTab, setActiveTab] = React.useState<Tab>('onentry');
@@ -472,6 +479,14 @@ export function StateActionsPanel({
     }
   };
 
+  /** Runs validateReactions; on a block, warns with its reason and returns true. */
+  const reactionsBlocked = (list: InternalEventActionRow[]): boolean => {
+    const check = validateReactions?.(list);
+    if (!check?.blocked) return false;
+    showFeedback(check.reason ?? 'This reaction is not allowed.', 'warning');
+    return true;
+  };
+
   const handleApply = () => {
     if (formMode === 'idle') return;
     const isNewChannel = suggestions.length === 1 && suggestions[0].kind === 'new-channel';
@@ -491,6 +506,8 @@ export function StateActionsPanel({
         formMode === 'adding'
           ? [...localReactions, newRow]
           : localReactions.map((r, i) => (i === editingRowIndex ? newRow : r));
+      // Blocked: keep the form open with the user's input so they can change the event.
+      if (reactionsBlocked(updatedList)) return;
       setLocalReactions(updatedList);
       if (isNewChannel && onNewChannel) {
         onNewChannel(formLocation, { kind: 'reactions', actions: updatedList });
@@ -583,6 +600,7 @@ export function StateActionsPanel({
           : { event: 'vector', location: copied.row.location, expr: copied.row.expr, type: 'internal' };
       const newRow: WithRowId<InternalEventActionRow> = { ...reaction, _rowId: uuidv4() };
       const updated = [...localReactions, newRow];
+      if (reactionsBlocked(updated)) return;
       setLocalReactions(updated);
       onApplyReactions(updated);
       showFeedback('Action pasted.', 'info');

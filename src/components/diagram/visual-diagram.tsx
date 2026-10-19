@@ -30,6 +30,7 @@ import {
 import {
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
+  checkReactionsDoneStateConflict,
 } from '@/lib/utils/transition-slot-rules';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
@@ -560,6 +561,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
     },
     [scxmlContent, onSCXMLChange]
+  );
+
+  // Pre-check for the State Actions panel: a done.state.<id> reaction would be inserted
+  // before the state's targeted transitions and silently shadow an existing done.state edge.
+  const validateNodeInternalEvents = React.useCallback(
+    (nodeId: string, actions: Array<{ event: string; type: 'internal' | 'external' }>) => {
+      if (!scxmlContent || !parserRef.current) return { blocked: false };
+      const parsed = parserRef.current.parse(scxmlContent);
+      if (!parsed.success || !parsed.data) return { blocked: false };
+      return checkReactionsDoneStateConflict(parsed.data, nodeId, actions);
+    },
+    [scxmlContent]
   );
 
   const handleToggleInitialState = React.useCallback(
@@ -3861,6 +3874,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             handleNodeInternalEventsChange(selectedStateForActions.id, actions);
           }
         }}
+        validateReactions={(actions) =>
+          selectedStateForActions
+            ? validateNodeInternalEvents(selectedStateForActions.id, actions)
+            : { blocked: false }
+        }
         onNewChannel={handleNewChannelForStateActions}
       />
     </div>

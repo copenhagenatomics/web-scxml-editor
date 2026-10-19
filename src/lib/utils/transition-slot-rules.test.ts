@@ -5,6 +5,7 @@ import {
   findTransitionSlotConflict,
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
+  checkReactionsDoneStateConflict,
   getDoneStateEvents,
 } from './transition-slot-rules';
 
@@ -563,6 +564,76 @@ describe('one transition per done.state.<id> event (checkTransitionEditSlotConfl
     });
     expect(
       checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'done.state.CDone', '@_target': 'D' })
+    ).toEqual({ blocked: false });
+  });
+});
+
+describe('checkReactionsDoneStateConflict (State Actions panel event reactions)', () => {
+  // C (compound, has a <final>) → B on done.state.C, plus an existing go reaction.
+  const doc = (): SCXMLDocument =>
+    ({
+      scxml: {
+        state: [
+          {
+            '@_id': 'C',
+            final: { '@_id': 'CDone' },
+            transition: [
+              { '@_event': 'go', '@_type': 'internal' },
+              { '@_event': 'done.state.C', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    });
+
+  it('blocks a reaction on a done.state event the state already has an edge for', () => {
+    // The reaction would be inserted before C → B and silently shadow it.
+    const result = checkReactionsDoneStateConflict(doc(), 'C', [
+      { event: 'go', type: 'internal' },
+      { event: 'done.state.C', type: 'internal' },
+    ]);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/already has a done\.state\.C transition \(to 'B'\)/);
+  });
+
+  it('also catches the done event inside a merged reaction event list', () => {
+    expect(
+      checkReactionsDoneStateConflict(doc(), 'C', [{ event: 'go, done.state.C', type: 'external' }]).blocked
+    ).toBe(true);
+  });
+
+  it('blocks two reactions that share a done.state event', () => {
+    const noEdge = (): SCXMLDocument =>
+      ({ scxml: { state: [{ '@_id': 'C', final: { '@_id': 'CDone' } }] } as any });
+    expect(
+      checkReactionsDoneStateConflict(noEdge(), 'C', [
+        { event: 'done.state.C', type: 'internal' },
+        { event: 'done.state.C, go', type: 'internal' },
+      ]).blocked
+    ).toBe(true);
+  });
+
+  it('allows ordinary reactions, and excludes the reactions being replaced', () => {
+    expect(checkReactionsDoneStateConflict(doc(), 'C', [{ event: 'go', type: 'internal' }])).toEqual({
+      blocked: false,
+    });
+    // An existing done.state.C reaction (no edge) can be kept/edited: the old
+    // reactions are replaced wholesale, so it isn't compared against itself.
+    const withReaction = (): SCXMLDocument =>
+      ({
+        scxml: {
+          state: [
+            {
+              '@_id': 'C',
+              final: { '@_id': 'CDone' },
+              transition: { '@_event': 'done.state.C', '@_type': 'internal' },
+            },
+          ],
+        } as any,
+      });
+    expect(
+      checkReactionsDoneStateConflict(withReaction(), 'C', [{ event: 'done.state.C', type: 'internal' }])
     ).toEqual({ blocked: false });
   });
 });

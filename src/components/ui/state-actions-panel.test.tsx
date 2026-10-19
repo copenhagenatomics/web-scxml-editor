@@ -361,6 +361,50 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(onApplyReactions).not.toHaveBeenCalled();
   });
 
+  it('blocks saving a reaction that validateReactions rejects, keeping the form open and warning', () => {
+    const onApplyReactions = vi.fn();
+    useHostAPIStore.setState({ feedbackQueue: [] });
+    const validateReactions = vi.fn(() => ({ blocked: true, reason: 'conflict reason' }));
+    renderPanel({ onApplyReactions, validateReactions });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('vector'), { target: { value: 'done.state.StateA' } });
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    expect(validateReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'done.state.StateA', location: 'x', expr: '1', type: 'internal' }),
+    ]);
+    expect(onApplyReactions).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => [f.message, f.level])).toEqual([
+      ['conflict reason', 'warning'],
+    ]);
+    // The form stays open with the user's input so they can fix the event.
+    expect(screen.getByPlaceholderText('vector')).toHaveValue('done.state.StateA');
+  });
+
+  it('blocks pasting a reaction that validateReactions rejects', () => {
+    const onApplyReactions = vi.fn();
+    useHostAPIStore.setState({ feedbackQueue: [] });
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: 'done.state.StateA', location: 'x', expr: '1', type: 'internal' },
+    });
+    renderPanel({ onApplyReactions, validateReactions: () => ({ blocked: true, reason: 'conflict reason' }) });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApplyReactions).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => [f.message, f.level])).toEqual([
+      ['conflict reason', 'warning'],
+    ]);
+    expect(screen.getByText('No reactions yet.')).toBeInTheDocument();
+    useActionClipboardStore.setState({ copied: null });
+  });
+
   it('still calls onApply for a plain literal location, even when onNewChannel is provided', () => {
     const onApply = vi.fn();
     const onNewChannel = vi.fn();
