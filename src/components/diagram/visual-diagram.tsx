@@ -91,6 +91,7 @@ import { wouldCrossParallelRegions } from '@/lib/utils/parallel-region-connectio
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
+import { inferChannelInitialExpr } from '@/lib/utils/datamodel-extractor';
 
 // ==================== TYPES & INTERFACES ====================
 interface VisualDiagramProps {
@@ -853,8 +854,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const { AddDataCommand, UpdateTransitionCommand } = require('@/lib/commands');
         const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
 
-        // Step 1: insert <data> element
-        const addResult = new AddDataCommand(channelName).execute(scxmlContent);
+        // Step 1: insert <data> element — a channel used as the whole cond is a bool
+        const initialExpr = editingField === 'cond' ? 'false' : '0';
+        const addResult = new AddDataCommand(channelName, initialExpr).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
         // Step 2: update the transition cond/event on the already-modified content
@@ -887,8 +889,15 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       try {
         const { AddDataCommand, UpdateActionsCommand, UpdateInternalEventsCommand } = require('@/lib/commands');
 
-        // Step 1: insert the data element for the new channel
-        const addResult = new AddDataCommand(channelName).execute(scxmlContent);
+        // Step 1: insert the data element for the new channel, typed from the value assigned to it
+        // (no matching assign, e.g. a channel picked inside an expression, falls back to int)
+        const assignedValue = apply.kind === 'reactions'
+          ? apply.actions.find((a) => a.location === channelName)?.expr
+          : [...apply.entryActions, ...apply.exitActions]
+              .map((a) => a.split('|'))
+              .find((parts) => parts[0] === 'assign' && parts[1] === channelName)
+              ?.slice(2).join('|');
+        const addResult = new AddDataCommand(channelName, inferChannelInitialExpr(assignedValue)).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
         // Step 2: apply the actions/reactions change on the already-patched content

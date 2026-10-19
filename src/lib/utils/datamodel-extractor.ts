@@ -52,7 +52,22 @@ function inferType(value: string): ConfigField['type'] {
   return 'int';
 }
 
-const VALID_CONF_TYPES: ReadonlySet<string> = new Set(['int', 'double', 'bool', 'string']);
+/**
+ * Picks the <data expr> for a newly created (non-conf) channel from the value being assigned to
+ * it (the <assign expr>) — the assigned expression itself never goes into <data expr>. The
+ * LoopCode C# generator (GetFieldAndType) infers the field type from this literal and only
+ * accepts the zero value per type for non-config fields: "false" -> bool, "0.0" -> double,
+ * "0" -> int. Non-config string fields are rejected by the generator, so anything else is int.
+ */
+export function inferChannelInitialExpr(assignedValue: string | undefined): string {
+  const value = (assignedValue ?? '').trim();
+  if (value === 'true' || value === 'false') return 'false';
+  if (/==|!=|<|>|&&|\|\||^!/.test(value)) return 'false';
+  if (/^-?\d*\.\d+$/.test(value)) return '0.0';
+  return '0';
+}
+
+const VALID_CONF_TYPES:ReadonlySet<string> = new Set(['int', 'double', 'bool', 'string']);
 
 export function extractConfigFields(xmlContent: string): ConfigField[] {
   const res =  parseDataNodes(xmlContent)

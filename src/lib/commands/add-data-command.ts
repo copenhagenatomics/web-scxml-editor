@@ -1,7 +1,7 @@
 import { BaseCommand, type CommandResult } from './base-command';
 
 export class AddDataCommand extends BaseCommand {
-  constructor(private id: string) {
+  constructor(private id: string, private initialExpr: string = '0') {
     super();
   }
 
@@ -23,7 +23,7 @@ export class AddDataCommand extends BaseCommand {
 
     const dataEl = doc.createElementNS(ns, 'data');
     dataEl.setAttribute('id', this.id);
-    dataEl.setAttribute('expr', '0');
+    dataEl.setAttribute('expr', this.initialExpr);
     datamodel.appendChild(dataEl);
 
     return this.createSuccessResult(this.serializeXML(doc));
