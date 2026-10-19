@@ -313,7 +313,11 @@ export function findTransitionPosition(
     // Look for transition tags
     if (line.includes('<transition')) {
       // Check if this transition matches our criteria
-      const hasTarget = line.includes(`target="${targetStateId}"`);
+      // An empty targetStateId means a targetless transition: match a line with
+      // no target attribute at all (same convention as event/cond below).
+      const hasTarget = targetStateId
+        ? line.includes(`target="${targetStateId}"`)
+        : !line.includes('target=');
       const hasEvent = event ? line.includes(`event="${event}"`) : !line.includes('event=');
       const hasCond = cond
         ? line.includes(`cond="${cond}"`)

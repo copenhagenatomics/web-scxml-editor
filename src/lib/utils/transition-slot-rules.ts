@@ -1,5 +1,6 @@
 import type { TransitionElement, SCXMLDocument, ParallelElement } from '@/types/scxml';
 import { findTimeEventToken } from './time-transition';
+import { getDefaultNewTransitionEvent } from './scxml-manipulation-utils';
 
 export type TransitionSlot = 'event' | 'timer' | 'cond' | 'always' | 'invalid-both';
 
@@ -104,10 +105,52 @@ export function findTransitionSlotConflict(
   return { blocked: false };
 }
 
+const DONE_STATE_PREFIX = 'done.state.';
+
 /**
- * A freshly-drawn diagram connection is always constructed as a bare/eventless candidate
- * (no event, no cond — see onConnect in visual-diagram.tsx), so this only ever needs to
- * check the 'always' slot.
+ * The `done.state.<id>` event names a transition triggers on. Its event attribute is a
+ * comma-separated list; a space is part of a name, not a separator (project rule 6.7),
+ * so `done.state.Motor left` is one event, distinct from `done.state.Motor right`.
+ */
+export function getDoneStateEvents(t: TransitionElement): string[] {
+  return (t['@_event'] ?? '')
+    .split(',')
+    .map((token) => token.trim())
+    .filter((token) => token.startsWith(DONE_STATE_PREFIX) && token.length > DONE_STATE_PREFIX.length);
+}
+
+/**
+ * At most one transition per `done.state.<id>` event on a source state, whatever their
+ * targets. SCXML takes the first matching transition in document order (W3C SCXML §3.13),
+ * and only a `cond` could let a later one fire — which this editor doesn't allow alongside
+ * an event (the 'invalid-both' slot) — so any second one could never fire.
+ *
+ * otherTransitions: every OTHER transition on the source state (any target, type, or none),
+ * excluding the one being edited, if any.
+ */
+export function findDoneStateConflict(
+  sourceId: string,
+  otherTransitions: TransitionElement[],
+  candidate: TransitionElement
+): { blocked: boolean; reason?: string } {
+  for (const event of getDoneStateEvents(candidate)) {
+    const existing = otherTransitions.find((t) => getDoneStateEvents(t).includes(event));
+    if (existing) {
+      const to = existing['@_target'] ? ` (to '${existing['@_target']}')` : '';
+      return {
+        blocked: true,
+        reason: `'${sourceId}' already has a ${event} transition${to}. A second one would never run.`,
+      };
+    }
+  }
+  return { blocked: false };
+}
+
+/**
+ * A freshly-drawn diagram connection is constructed with no cond and the event from
+ * getDefaultNewTransitionEvent (see onConnect in visual-diagram.tsx) — usually none, so
+ * the 'always' slot; `done.state.<id>` (the 'event' slot) out of a compound state with a
+ * <final> inside a parallel region.
  */
 export function checkNewConnectionSlotConflict(
   scxmlDoc: SCXMLDocument,
@@ -125,7 +168,10 @@ export function checkNewConnectionSlotConflict(
   );
 
   const candidate: TransitionElement = { '@_target': targetId };
-  return findTransitionSlotConflict(sameTarget, candidate);
+  const event = getDefaultNewTransitionEvent(scxmlDoc, sourceId);
+  if (event) candidate['@_event'] = event;
+  const slotConflict = findTransitionSlotConflict(sameTarget, candidate);
+  return slotConflict.blocked ? slotConflict : findDoneStateConflict(sourceId, existing, candidate);
 }
 
 /**
@@ -143,13 +189,44 @@ export function checkTransitionEditSlotConflict(
   if (!sourceState || !sourceState.transition) return findTransitionSlotConflict([], candidate);
 
   const all = Array.isArray(sourceState.transition) ? sourceState.transition : [sourceState.transition];
+  const others = all.filter((_, i) => i !== transitionIndex);
   const candidateType = candidate['@_type'] || 'external';
-  const sameTarget = all.filter(
-    (t, i) =>
-      i !== transitionIndex &&
-      t['@_target'] === candidate['@_target'] &&
-      (t['@_type'] || 'external') === candidateType
+  const sameTarget = others.filter(
+    (t) => t['@_target'] === candidate['@_target'] && (t['@_type'] || 'external') === candidateType
   );
 
-  return findTransitionSlotConflict(sameTarget, candidate);
+  const slotConflict = findTransitionSlotConflict(sameTarget, candidate);
+  return slotConflict.blocked ? slotConflict : findDoneStateConflict(sourceId, others, candidate);
+}
+
+/**
+ * The State Actions panel's event-reaction list, checked against the one-transition-per-
+ * done.state.<id> rule (findDoneStateConflict) before UpdateInternalEventsCommand commits it.
+ * That command replaces every existing reaction (targetless, type internal/external) with one
+ * transition per distinct event, inserted before the state's targeted transitions — so a
+ * done.state reaction would silently shadow an existing done.state edge. The old reactions
+ * are excluded (they're being replaced); each new reaction is checked against the state's
+ * remaining transitions and the reactions before it.
+ */
+export function checkReactionsDoneStateConflict(
+  scxmlDoc: SCXMLDocument,
+  stateId: string,
+  reactions: { event: string; type: 'internal' | 'external' }[]
+): { blocked: boolean; reason?: string } {
+  const state = findTransitionSourceElement(scxmlDoc, stateId);
+  const all = !state?.transition ? [] : Array.isArray(state.transition) ? state.transition : [state.transition];
+  const isReaction = (t: TransitionElement) =>
+    !t['@_target'] && (t['@_type'] === 'internal' || t['@_type'] === 'external');
+  const checked = all.filter((t) => !isReaction(t));
+
+  const seenEvents = new Set<string>();
+  for (const { event, type } of reactions) {
+    if (seenEvents.has(event)) continue; // same event → same <transition> (rows are grouped)
+    seenEvents.add(event);
+    const candidate: TransitionElement = { '@_event': event, '@_type': type };
+    const conflict = findDoneStateConflict(stateId, checked, candidate);
+    if (conflict.blocked) return conflict;
+    checked.push(candidate);
+  }
+  return { blocked: false };
 }

@@ -24,10 +24,13 @@ import {
   isFinalState,
   resolveFinalStateRegion,
   findParallelContext,
+  getDefaultNewTransitionEvent,
+  checkCanMarkFinal,
 } from '@/lib/utils/scxml-manipulation-utils';
 import {
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
+  checkReactionsDoneStateConflict,
 } from '@/lib/utils/transition-slot-rules';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
@@ -560,6 +563,18 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [scxmlContent, onSCXMLChange]
   );
 
+  // Pre-check for the State Actions panel: a done.state.<id> reaction would be inserted
+  // before the state's targeted transitions and silently shadow an existing done.state edge.
+  const validateNodeInternalEvents = React.useCallback(
+    (nodeId: string, actions: Array<{ event: string; type: 'internal' | 'external' }>) => {
+      if (!scxmlContent || !parserRef.current) return { blocked: false };
+      const parsed = parserRef.current.parse(scxmlContent);
+      if (!parsed.success || !parsed.data) return { blocked: false };
+      return checkReactionsDoneStateConflict(parsed.data, nodeId, actions);
+    },
+    [scxmlContent]
+  );
+
   const handleToggleInitialState = React.useCallback(
     (stateId: string) => {
       if (!onSCXMLChange || !scxmlContent) return;
@@ -586,6 +601,46 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
       } catch (error) {
         console.error('Failed to toggle initial state:', error);
+      }
+    },
+    [scxmlContent, onSCXMLChange]
+  );
+
+  // State Actions panel "Final State" checkbox: <state> ⇄ <final>. Marking is
+  // gated by checkCanMarkFinal (also used for the checkbox's disabled state);
+  // unmarking is always allowed, like the Initial State checkbox.
+  const handleToggleFinalState = React.useCallback(
+    (stateId: string) => {
+      if (!onSCXMLChange || !scxmlContent || !parserRef.current) return;
+      try {
+        const parseResult = parserRef.current.parse(scxmlContent);
+        if (!parseResult.success || !parseResult.data) return;
+        const makeFinal = !isFinalState(parseResult.data, stateId);
+        if (makeFinal) {
+          const check = checkCanMarkFinal(parseResult.data, stateId);
+          if (!check.allowed) {
+            setConnectionBlockedMessage(check.reason);
+            return;
+          }
+        }
+
+        const { ChangeStateTypeCommand } = require('@/lib/commands');
+        const result = new ChangeStateTypeCommand(stateId, makeFinal ? 'final' : 'simple').execute(
+          scxmlContent
+        );
+        if (result.success) {
+          onSCXMLChange(result.newContent, 'structure');
+          setSelectedStateForActions((prev) =>
+            prev && prev.id === stateId
+              ? { ...prev, stateType: makeFinal ? 'final' : 'simple', isInitial: false }
+              : prev
+          );
+        } else {
+          console.error('Failed to toggle final state:', result.error);
+          setConnectionBlockedMessage(result.error || 'Failed to toggle Final State.');
+        }
+      } catch (error) {
+        console.error('Failed to toggle final state:', error);
       }
     },
     [scxmlContent, onSCXMLChange]
@@ -1041,9 +1096,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
   const onConnect = useCallback(
     (params: Connection) => {
+      // Usually eventless; `done.state.<source>` out of a compound state with
+      // a <final> inside a parallel region (getDefaultNewTransitionEvent).
+      let defaultEvent: string | undefined;
       if (params.source && params.target && parserRef.current && scxmlContent) {
         const preCheck = parserRef.current.parse(scxmlContent);
         if (preCheck.success && preCheck.data) {
+          defaultEvent = getDefaultNewTransitionEvent(preCheck.data, params.source);
           if (isFinalState(preCheck.data, params.source)) {
             setConnectionBlockedMessage(FINAL_STATE_SOURCE_MESSAGE);
             return;
@@ -1101,7 +1160,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         //   color: '#6b7280',
         // },
         data: {
-          event: undefined,
+          event: defaultEvent,
           condition: undefined,
           actions: [],
           sourceHandle: sourceHandle,
@@ -1110,7 +1169,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         style: {
           strokeWidth: 2,
           zIndex: 1,
-          stroke: ALWAYS_TRANSITION_COLOR,
+          stroke: defaultEvent ? EVENT_TRANSITION_COLOR : ALWAYS_TRANSITION_COLOR,
         },
         zIndex: 1,
         animated: false,
@@ -1126,7 +1185,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         id: newEdge.id,
         source: newEdge.source,
         target: newEdge.target,
-        event: undefined,
+        event: defaultEvent,
         cond: undefined,
       });
 
@@ -1141,6 +1200,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const newTransition: TransitionElement = {
                 '@_target': params.target!,
               };
+              if (defaultEvent) newTransition['@_event'] = defaultEvent;
 
               if (!sourceState.transition) {
                 sourceState.transition = newTransition;
@@ -1162,7 +1222,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               const handleCommand = new UpdateTransitionHandlesCommand(
                 params.source!,
                 params.target!,
-                undefined, // No event — eventless by default
+                defaultEvent, // Eventless unless a done.state.<id> default applies
                 undefined, // No condition
                 sourceHandle,
                 targetHandle
@@ -1266,19 +1326,23 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       const reconnecting = reconnectingEdgeRef.current;
       const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
-      const slotCheck =
-        reconnecting && reconnecting.source === connection.source
-          ? checkTransitionEditSlotConflict(
-              parseResult.data,
-              connection.source,
-              parseTransitionIndexFromEdgeId(reconnecting.id),
-              {
-                '@_event': reconnecting.data?.event,
-                '@_cond': reconnecting.data?.condition,
-                '@_target': connection.target,
-              }
-            )
-          : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
+      // A reconnected transition keeps its event/cond (ReconnectTransitionCommand), so
+      // check that rather than a fresh connection's default. Moved onto a different
+      // source, none of that source's transitions is itself — nothing to exclude.
+      const slotCheck = reconnecting
+        ? checkTransitionEditSlotConflict(
+            parseResult.data,
+            connection.source,
+            reconnecting.source === connection.source
+              ? parseTransitionIndexFromEdgeId(reconnecting.id)
+              : undefined,
+            {
+              '@_event': reconnecting.data?.event,
+              '@_cond': reconnecting.data?.condition,
+              '@_target': connection.target,
+            }
+          )
+        : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
       if (slotCheck.blocked) {
         setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
         return false;
@@ -1370,13 +1434,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                 newStates.add(stateId);
 
                 // Show actions editor for single selected state
-                // (notes are annotations - they select but have no actions panel;
-                // final states select too, but don't get the panel either — close
-                // it so a previously selected state's actions aren't left showing)
+                // (notes are annotations - they select but have no actions panel.
+                // Final states get it too: onentry/onexit plus the Final State
+                // checkbox to turn them back into ordinary states.)
                 const node = nodes.find((n) => n.id === stateId);
-                if (node?.data?.stateType === 'final') {
-                  setSelectedStateForActions(null);
-                } else if (node && node.data && nodeType !== 'scxmlNote') {
+                if (node && node.data && nodeType !== 'scxmlNote') {
                   const parseActions = (actions: string[]): ParsedActionRow[] => {
                     // Timer-generated send/cancel rows (the "after X" delay's
                     // implementation) are hidden here — the user authors/edits
@@ -1449,16 +1511,27 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [nodes, scxmlContent]
   );
 
-  // Final states never get the State Actions panel (see handleStateClick). If
-  // the state whose panel is open becomes a <final> (e.g. edited in the XML),
-  // close the panel.
+  // Keep the open panel's state type in step with the document — e.g. a
+  // <state> retagged to <final> in the XML editor (or back) while its panel
+  // is open, so the Final State checkbox and reactions tab follow.
   React.useEffect(() => {
     if (!selectedStateForActions) return;
     const node = nodes.find((n) => n.id === selectedStateForActions.id);
-    if (node?.data?.stateType === 'final') {
-      setSelectedStateForActions(null);
+    const stateType = node?.data?.stateType;
+    if (stateType && stateType !== selectedStateForActions.stateType) {
+      setSelectedStateForActions((prev) => (prev ? { ...prev, stateType } : prev));
     }
   }, [nodes, selectedStateForActions]);
+
+  // Whether the open panel's "Final State" checkbox may be ticked — derived
+  // from the live document, since adding/removing a transition, child state
+  // or the Initial marker changes the answer while the panel stays open.
+  const finalCheck = React.useMemo(() => {
+    if (!selectedStateForActions || !parserRef.current || !scxmlContent) return null;
+    const parseResult = parserRef.current.parse(scxmlContent);
+    if (!parseResult.success || !parseResult.data) return null;
+    return checkCanMarkFinal(parseResult.data, selectedStateForActions.id);
+  }, [selectedStateForActions?.id, scxmlContent]);
 
   // ==================== MARQUEE (CTRL/CMD+DRAG) SELECTION HANDLER ====================
   // Triggered via selectionKeyCode={['Control', 'Meta']} on <ReactFlow> below.
@@ -2593,11 +2666,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
   ]);
 
   // ==================== ADD ROOT STATE HANDLER ====================
-  // Adds a <state> (kind 'state') at the current hierarchy level, or a
-  // <final> (kind 'final') into the region of the selected state — final
-  // states are only added while viewing inside a <parallel> (see
-  // resolveFinalStateRegion).
-  const handleAddRootState = React.useCallback((kind: 'state' | 'final' = 'state') => {
+  // Adds a <state> at the current hierarchy level. (A <final> is made by
+  // ticking "Final State" in the State Actions panel — see checkCanMarkFinal.)
+  const handleAddRootState = React.useCallback(() => {
     if (!onSCXMLChange || !scxmlContent) {
       console.error('Cannot add state: SCXML not available');
       return;
@@ -2608,30 +2679,19 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       if (parseResult?.success && parseResult.data) {
         const scxmlDoc = parseResult.data;
 
-        let finalRegionId: string | undefined;
-        if (kind === 'final') {
-          const resolved = resolveFinalStateRegion(scxmlDoc, currentParentId, activeStates);
-          if ('error' in resolved) {
-            showFeedback(resolved.error, 'warning');
-            return;
-          }
-          finalRegionId = resolved.regionId;
-        }
         // Every direct child of a <parallel> is a region, so a state added
         // directly to it would become a new region column of its own — it's
         // added as a loose state instead (addLooseStateToParallel).
         const addLoose =
-          kind === 'state' &&
           !!currentParentId &&
           findElementById(scxmlDoc, currentParentId)?.tag === 'parallel';
 
-        const idPrefix = kind === 'final' ? 'final' : 'state';
-        let newStateId = `${idPrefix}_1`;
+        let newStateId = 'state_1';
         let counter = 1;
         const existingIds = collectExistingIds(scxmlDoc, parsedData.nodes);
         while (existingIds.has(newStateId)) {
           counter++;
-          newStateId = `${idPrefix}_${counter}`;
+          newStateId = `state_${counter}`;
         }
         let parentId: string | undefined = undefined;
 
@@ -2644,16 +2704,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         let x = 100;
         let y = 100;
 
-        if (finalRegionId) {
-          // Goes into the selected state's region, placed just below the
-          // selected node so it lands in that region's column.
-          parentId = finalRegionId;
-          const anchor = nodes.find((n) => activeStates.has(n.id));
-          if (anchor) {
-            x = anchor.position.x;
-            y = anchor.position.y + (anchor.height || (anchor.data as any)?.height || 80) + 60;
-          }
-        } else if (parentId) {
+        if (parentId) {
           const childNodes = nodes.length;
 
           if (childNodes) {
@@ -2696,11 +2747,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // `!parentState.state` check alone would treat the root as empty
         // once its children have moved into __root_parallel, and would
         // spuriously mark this new sibling Initial too.
-        // A final state is never auto-marked Initial (it's an end point, and
-        // the Initial toggle isn't offered for it) — the next ordinary state
-        // added to this container gets the marker instead.
         let isInitial = false;
-        if (parentId && kind === 'state') {
+        if (parentId) {
           const parentState = findStateById(scxmlDoc, parentId);
           if (parentState && !hasAnyChildren(parentState)) {
             isInitial = true;
@@ -2711,7 +2759,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         // This accounts for the "Initial" tag width when isInitial is true
         const dimensions = nodeDimensionCalculator.calculateDimensions(
           newStateId,
-          kind === 'final' ? 'final' : 'simple',
+          'simple',
           0,
           0,
           isInitial
@@ -2733,7 +2781,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         if (addLoose && parentId) {
           addLooseStateToParallel(scxmlDoc, parentId, newState);
         } else {
-          addStateToDocument(scxmlDoc, newState, parentId, kind);
+          addStateToDocument(scxmlDoc, newState, parentId);
         }
 
         const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
@@ -2759,8 +2807,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     currentParentId,
     nodes,
     fitView,
-    showFeedback,
-    activeStates,
   ]);
 
   // ==================== COPY / PASTE SELECTION HANDLERS ====================
@@ -3719,20 +3765,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               showInteractive={true}
             >
               <ControlButton
-                onClick={() => handleAddRootState('state')}
+                onClick={() => handleAddRootState()}
                 title='Add State'
                 aria-label='Add State'
                 className='text-muted hover:text-default'
               >
                 S
-              </ControlButton>
-              <ControlButton
-                onClick={() => handleAddRootState('final')}
-                title='Add Final State'
-                aria-label='Add Final State'
-                className='text-muted hover:text-default'
-              >
-                F
               </ControlButton>
               <ControlButton
                 onClick={handleAddNote}
@@ -3815,6 +3853,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             handleToggleInitialState(selectedStateForActions.id);
           }
         }}
+        canMarkFinal={finalCheck?.allowed ?? false}
+        finalBlockedReason={finalCheck && !finalCheck.allowed ? finalCheck.reason : undefined}
+        onToggleFinal={() => {
+          if (selectedStateForActions) {
+            handleToggleFinalState(selectedStateForActions.id);
+          }
+        }}
         onApply={(entryActions, exitActions) => {
           if (selectedStateForActions) {
             handleNodeActionsChange(
@@ -3829,6 +3874,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             handleNodeInternalEventsChange(selectedStateForActions.id, actions);
           }
         }}
+        validateReactions={(actions) =>
+          selectedStateForActions
+            ? validateNodeInternalEvents(selectedStateForActions.id, actions)
+            : { blocked: false }
+        }
         onNewChannel={handleNewChannelForStateActions}
       />
     </div>

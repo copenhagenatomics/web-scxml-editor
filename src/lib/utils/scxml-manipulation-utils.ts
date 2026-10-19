@@ -8,6 +8,8 @@ import type {
   OnExitElement,
 } from '@/types/scxml';
 import { collectStateIds } from '@/lib/validators/state-validator';
+import { isMarkedInitial } from '@/lib/utils/initial-group-utils';
+import { renameCompletionEventTokens } from '@/lib/utils/completion-event';
 import {
   findTransparentParallel,
   getChildEntries,
@@ -112,8 +114,83 @@ export function findParallelContext(
   return findTransparentParallel(found?.element, 'state') ?? null;
 }
 
+/** Child elements a <state> can't keep when it becomes a <final>, with how to name them. */
+const NON_FINAL_CHILDREN: ReadonlyArray<[key: string, reason: string]> = [
+  ['state', 'Remove its child states first — a final state cannot contain states.'],
+  ['parallel', 'Remove its child states first — a final state cannot contain states.'],
+  ['final', 'Remove its child states first — a final state cannot contain states.'],
+  ['history', 'Remove its history state first — a final state cannot contain one.'],
+  ['transition', 'Remove its outgoing transitions and event reactions first — a final state cannot have any.'],
+  ['invoke', 'Remove its <invoke> first — a final state cannot have one.'],
+  ['datamodel', 'Remove its <datamodel> first — a final state cannot have one.'],
+];
+
 /**
- * Where the canvas "Add Final State" button puts a new <final>. Final states
+ * Whether the State Actions panel's "Final State" checkbox may turn the
+ * <state> `stateId` into a <final> — and if not, the user-facing reason.
+ * Same placement rules as the old canvas "Add Final State" button
+ * (resolveFinalStateRegion): only inside a <parallel> — directly in one of
+ * its regions, or in a compound state nested inside one — never a region
+ * itself, and at most one <final> per container. On top of that, nothing a
+ * <final> can't hold may be silently dropped (ChangeStateTypeCommand would
+ * discard it), and it can't be its container's Initial State (a <final> has
+ * no Initial toggle to undo that with). Unmarking a <final> is always allowed.
+ */
+export function checkCanMarkFinal(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): { allowed: true } | { allowed: false; reason: string } {
+  const found = findParentOf(scxmlDoc, stateId);
+  if (!found || found.tag !== 'state') {
+    return { allowed: false, reason: 'Only a state can be made a final state.' };
+  }
+  const { element, parent, parentTag } = found;
+
+  if (parentTag === 'parallel') {
+    return { allowed: false, reason: 'A region of a parallel state cannot be a final state.' };
+  }
+  if (!hasParallelAncestor(scxmlDoc, stateId)) {
+    return { allowed: false, reason: 'Final states can only be used inside a parallel state.' };
+  }
+  if (asList(parent.final).length > 0) {
+    const where = parent['@_id'] ? `'${parent['@_id']}'` : 'This container';
+    return { allowed: false, reason: `${where} already has a final state.` };
+  }
+  for (const [key, reason] of NON_FINAL_CHILDREN) {
+    if (asList((element as any)[key]).length > 0) return { allowed: false, reason };
+  }
+  if (isMarkedInitial(scxmlDoc, stateId)) {
+    return {
+      allowed: false,
+      reason: 'Unmark it as the Initial State first — a final state cannot be where its container starts.',
+    };
+  }
+  return { allowed: true };
+}
+
+/** `stateId`'s element and the container it's filed under (`parentTag` 'scxml' at the top level). */
+type ParentLookup = { element: StateElement; tag: StateTag; parent: any; parentTag: StateTag | 'scxml' };
+
+function findParentOf(scxmlDoc: SCXMLDocument, stateId: string): ParentLookup | null {
+  function search(container: any, containerTag: StateTag | 'scxml'): ParentLookup | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) {
+          return { element: child, tag, parent: container, parentTag: containerTag };
+        }
+        const found = search(child, tag);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml, 'scxml');
+}
+
+/**
+ * Where a pasted <final> goes while viewing inside a parallel (this once also
+ * backed a canvas "Add Final State" button, since replaced by the State
+ * Actions panel's Final State checkbox — checkCanMarkFinal). Final states
  * are only added while viewing inside a <parallel> (`parallelId`) — or a
  * compound state whose work trees live in its transparent `{id}__parallel`,
  * or the top level (`parallelId` null) when it has a `__root_parallel` —
@@ -122,6 +199,10 @@ export function findParallelContext(
  * region holds at most one <final>, so `adding` (how many finals are about
  * to go in, e.g. a paste) must not take it past one. Returns that region's
  * id, or a user-facing reason it can't be added.
+ *
+ * Viewing a compound <state> nested (at any depth) inside a <parallel>'s
+ * region, with no regions of its own, the <final> goes straight into that
+ * state — no selection needed — under the same one-final limit.
  */
 export function resolveFinalStateRegion(
   scxmlDoc: SCXMLDocument,
@@ -131,6 +212,13 @@ export function resolveFinalStateRegion(
 ): { regionId: string } | { error: string } {
   const parallel = findParallelContext(scxmlDoc, parallelId);
   if (!parallel) {
+    const viewed = parallelId ? findElementById(scxmlDoc, parallelId) : null;
+    if (viewed?.tag === 'state' && hasParallelAncestor(scxmlDoc, parallelId!)) {
+      if (asList((viewed.element as any).final).length + adding > 1) {
+        return { error: 'This state already has a final state.' };
+      }
+      return { regionId: parallelId! };
+    }
     return { error: 'Final states can only be added inside a parallel state.' };
   }
 
@@ -204,6 +292,62 @@ export function addLooseStateToParallel(
   else holder.parallel = rest.length === 1 ? rest[0] : rest;
   appendChild(holder, 'state', parallel);
   return true;
+}
+
+/**
+ * The event a freshly drawn transition out of `sourceId` starts with:
+ * `done.state.<sourceId>` when the source is
+ * - a compound <state> inside a parallel region that holds a <final> child
+ *   (the transition then fires once that state reaches its final state), or
+ * - a <parallel> every region of which can end in a final state (W3C SCXML
+ *   §3.7: done.state.<parallelId> is raised once all its regions are in final
+ *   states),
+ * else undefined — an eventless transition. Shared by the canvas's onConnect
+ * and the new-connection slot check (checkNewConnectionSlotConflict) so both
+ * agree on the slot.
+ */
+export function getDefaultNewTransitionEvent(
+  scxmlDoc: SCXMLDocument,
+  sourceId: string
+): string | undefined {
+  const source = findElementById(scxmlDoc, sourceId);
+  if (source?.tag === 'parallel') {
+    return allRegionsCanFinish(source.element) ? `done.state.${sourceId}` : undefined;
+  }
+  if (source?.tag !== 'state') return undefined;
+  if (asList((source.element as any).final).length === 0) return undefined;
+  if (!hasParallelAncestor(scxmlDoc, sourceId)) return undefined;
+  return `done.state.${sourceId}`;
+}
+
+/**
+ * Whether every region of `parallel` can reach a final state: a <state>
+ * region needs a direct <final> child, a nested <parallel> region needs the
+ * same of all its own regions. A <parallel> with no regions never finishes.
+ */
+function allRegionsCanFinish(parallel: any): boolean {
+  const regions = getChildEntries(parallel, 'parallel');
+  return (
+    regions.length > 0 &&
+    regions.every((r) =>
+      r.tag === 'parallel' ? allRegionsCanFinish(r.el) : asList(r.el.final).length > 0
+    )
+  );
+}
+
+/** Whether `stateId` sits anywhere inside a <parallel> (explicit or transparent). */
+function hasParallelAncestor(scxmlDoc: SCXMLDocument, stateId: string): boolean {
+  function search(container: any, insideParallel: boolean): boolean | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) return insideParallel;
+        const found = search(child, insideParallel || tag === 'parallel');
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml, false) ?? false;
 }
 
 /** The regions of `parallel` containing any of `selectedIds` (as the region itself or a descendant). */
@@ -1027,22 +1171,34 @@ export function resolveCarriedOverInitialIds(
  * transition whose @_target is in idMap is rewritten to the mapped id; one
  * whose @_target is present but NOT in idMap (points outside the copied
  * set) is dropped entirely; a targetless transition is always kept.
+ * A kept transition's done.state.<id> event is remapped too, so it listens
+ * for the copied state's completion rather than the original's.
  * Mutates the given clone in place.
  */
 export function rewriteOrDropTransitions(
   state: StateElement,
   idMap: Map<string, string>
 ): void {
+  const remapEvent = (event: string | undefined): string | undefined => {
+    let result = event;
+    idMap.forEach((newId, oldId) => {
+      result = renameCompletionEventTokens(result, oldId, newId);
+    });
+    return result;
+  };
+
   function walk(s: StateElement): void {
     if (s.transition) {
       const arr = Array.isArray(s.transition) ? s.transition : [s.transition];
       const kept = arr
         .filter((t) => !t['@_target'] || idMap.has(t['@_target']))
-        .map((t) =>
-          t['@_target'] && idMap.has(t['@_target'])
-            ? { ...t, '@_target': idMap.get(t['@_target'])! }
-            : t
-        );
+        .map((t) => {
+          const next = { ...t };
+          if (t['@_target'] && idMap.has(t['@_target'])) next['@_target'] = idMap.get(t['@_target'])!;
+          const event = remapEvent(t['@_event']);
+          if (event !== t['@_event']) next['@_event'] = event;
+          return next;
+        });
       s.transition = kept.length === 0 ? undefined : kept.length === 1 ? kept[0] : kept;
     }
 

@@ -90,6 +90,25 @@ describe('ChangeStateTypeCommand <state> ↔ <final>', () => {
     expect(result.newContent).not.toContain('C1');
   });
 
+  it('final → state does not remove transitions to a real state that shares an id with XML in the dropped <donedata>', () => {
+    // The <state id="X"> inside <content> is payload, not a real state; the
+    // real X survives, so A's transition to it must be kept.
+    const xml = `${VIZ_HEADER}><state id="A"><transition event="go" target="X"/></state><state id="X"/><final id="Done"><donedata><content><state id="X"/></content></donedata></final></scxml>`;
+    const result = new ChangeStateTypeCommand('Done', 'simple').execute(xml);
+    expect(result.success).toBe(true);
+    expect(result.newContent).not.toContain('<donedata');
+    expect(result.newContent).toMatch(/<transition event="go" target="X"/);
+  });
+
+  it('leaves transitions inside data payloads untouched when dropping a target', () => {
+    // C1 is dropped with C, but the <transition> inside <content> is payload,
+    // not a real edge, so it must not be edited or removed.
+    const xml = `${VIZ_HEADER}><state id="C" initial="C1"><state id="C1"/></state><state id="B"><onentry><send event="e"><content><transition target="C1"/></content></send></onentry></state></scxml>`;
+    const result = new ChangeStateTypeCommand('C', 'final').execute(xml);
+    expect(result.success).toBe(true);
+    expect(parse(result.newContent).querySelector('content > transition')?.getAttribute('target')).toBe('C1');
+  });
+
   it('final → state replaces the <final> element with a real <state> element', () => {
     const xml = `${VIZ_HEADER}><state id="A"><transition target="Done"/></state><final id="Done" viz:xywh="1,2,3,4"><onexit><log expr="1"/></onexit><donedata><param name="status" expr="1"/></donedata></final></scxml>`;
     const result = new ChangeStateTypeCommand('Done', 'simple').execute(xml);

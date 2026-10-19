@@ -6,7 +6,7 @@ The full set of direct-manipulation gestures on the ReactFlow canvas that let a 
 
 ## User behavior
 
-- **Create**: toolbar "S" (New State) button adds a state at a free grid slot at the hierarchy level currently being viewed — the document root, or inside the state you've navigated into (see `state-editing.md`); "F" (Add Final State) adds a `<final>` into the selected state's region (at most one per region), only while viewing inside a parallel state — including a compound state's `{id}__parallel` or the top level's `__root_parallel` (see `state-editing.md`); a note button adds a sticky note.
+- **Create**: toolbar "S" (New State) button adds a state at a free grid slot at the hierarchy level currently being viewed — the document root, or inside the state you've navigated into (see `state-editing.md`); a note button adds a sticky note. There is no toolbar button for final states (the old "F" button was removed, October 2026) — a state is made final with the State Actions panel's "Final State" checkbox (see `state-editing.md`).
 - **Select**: click selects one state and opens the State Actions panel; Ctrl/Cmd+click toggles multi-select membership; dragging a box on empty canvas while holding Ctrl/Meta marquee-selects everything inside.
 - **Move**: drag a state (or a multi-selection) to reposition; all simultaneously-dragged nodes commit as a single batched undo step.
 - **Resize**: select a single state, drag its resize handles (`NodeResizer`, min size enforced).
@@ -46,7 +46,7 @@ All of this lives in `src/components/diagram/visual-diagram.tsx` (3,347 lines �
 
 ## Relevant utilities
 
-`src/lib/utils/scxml-manipulation-utils.ts` (`findStateById`, `addStateToDocument`, `createStateElement`, `cloneStateSubtreeWithFreshIds`, `rewriteOrDropTransitions`, `detachStateFromParent`, `isDescendantOf`), `src/lib/utils/initial-group-utils.ts` and `src/lib/utils/transition-slot-rules.ts` (both consulted by `onConnect` to block invalid new connections before they're created).
+`src/lib/utils/scxml-manipulation-utils.ts` (`findStateById`, `addStateToDocument`, `createStateElement`, `cloneStateSubtreeWithFreshIds`, `rewriteOrDropTransitions` — also remaps `done.state.<id>` events through the paste-wide id map, `detachStateFromParent`, `isDescendantOf`), `src/lib/utils/initial-group-utils.ts` and `src/lib/utils/transition-slot-rules.ts` (both consulted by `onConnect` to block invalid new connections before they're created).
 
 ## SCXML behavior
 

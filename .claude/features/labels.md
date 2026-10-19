@@ -8,7 +8,7 @@ Give every diagram element a human-readable label, and — for states specifical
 
 - **State label** = the state's SCXML `id` itself (this app has no separate "display name" distinct from the id — renaming the label *is* renaming the id).
 - Double-click a state → its label becomes an inline editable text field → type a new value → **Enter commits, Escape cancels, blur also commits** (matching `README.md`'s documented "Press Enter to save (or Esc to cancel)").
-- Committing a rename updates **every reference** to that id throughout the document automatically (transition targets, `initial` attributes, time-event tokens) — see `.claude/features/state-node-types.md` and the `RenameStateCommand` details below.
+- Committing a rename updates **every reference** to that id throughout the document automatically (transition targets, `initial` attributes, time-event tokens, `done.state.<id>` completion events) — see `.claude/features/state-node-types.md` and the `RenameStateCommand` details below.
 - **Edge (transition) labels** are not directly text-editable by clicking them — they're a computed display string (event name + `[condition]` + action count) driven by the Transition panel's structured fields, not free text (see `.claude/features/transitions-editing.md`).
 - **Sticky notes** have no separate "label" — the note's entire body is its content (see `.claude/features/sticky-notes.md`); double-clicking a note also enters the same `isEditing` inline-edit mode as a state label, but edits the free-text body rather than an id.
 
@@ -22,7 +22,7 @@ Give every diagram element a human-readable label, and — for states specifical
 - Shared `isEditing: boolean` flag on node `data`, set by `visual-diagram.tsx`'s `onNodeDoubleClick` handler (checks `nodeElement?.data?.onLabelChange || nodeElement?.type === 'scxmlNote'` before entering edit mode — i.e. only nodes that actually have a rename/edit callback wired up respond to double-click; the `HistoryWrapperNode`, being purely decorative, presumably has neither).
 - `scxml-state-node.tsx` responds to `isEditing` by rendering an inline `<input>` seeded from `tempLabel` local state; on commit it calls the node's `onLabelChange(newLabel)` prop (wired by `visual-diagram.tsx`'s per-node callback construction during its "enhancement pass" — see `.claude/project/architecture.md`) and then clears the parent's `isEditing` flag back to `false` via a `setNodes` update.
 - `onLabelChange` → (lazily required) `RenameStateCommand(nodeId, newLabel)` → `.execute(scxmlContent)` → `onSCXMLChange(result.newContent, 'property')`.
-- `RenameStateCommand` (see `.claude/features/state-node-types.md`, `.claude/project/coding-rules.md`) is the single most cascading command in the codebase: rewrites the state's own `id`, every `transition[target]` referencing the old id anywhere in the document, every `initial` attribute (token-aware, preserving multi-value lists), and any embedded time-event tokens (`{oldId}_t_N_timeEvent_N` — see `.claude/features/time-transition-syntax.md`) — then clears stale waypoints on any transition touching this state, since a label-length change alters the node's rendered width.
+- `RenameStateCommand` (see `.claude/features/state-node-types.md`, `.claude/project/coding-rules.md`) is the single most cascading command in the codebase: rewrites the state's own `id`, every `transition[target]` referencing the old id anywhere in the document, every `initial` attribute (token-aware, preserving multi-value lists), any embedded time-event tokens (`{oldId}_t_N_timeEvent_N` — see `.claude/features/time-transition-syntax.md`), and every transition `@event` listening for its completion event (`done.state.{oldId}`, document-wide, whole-token match via `renameCompletionEventTokens` in `src/lib/utils/completion-event.ts`) — then clears stale waypoints on any transition touching this state, since a label-length change alters the node's rendered width.
 
 ## Relevant components
 
@@ -34,7 +34,7 @@ None dedicated — `isEditing`/`tempLabel` are local/node-data state, not a stor
 
 ## Relevant utilities
 
-`src/lib/commands/rename-state-command.ts`, `src/lib/utils/time-transition.ts` (`renameTimeEventTokensInEventList`), `src/lib/commands/waypoint-invalidation.ts`.
+`src/lib/commands/rename-state-command.ts`, `src/lib/utils/time-transition.ts` (`renameTimeEventTokensInEventList`), `src/lib/utils/completion-event.ts` (`renameCompletionEventTokens`, also used by paste's `rewriteOrDropTransitions`), `src/lib/commands/waypoint-invalidation.ts`.
 
 ## SCXML behavior
 

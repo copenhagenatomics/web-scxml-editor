@@ -5,6 +5,8 @@ import {
   findTransitionSlotConflict,
   checkNewConnectionSlotConflict,
   checkTransitionEditSlotConflict,
+  checkReactionsDoneStateConflict,
+  getDoneStateEvents,
 } from './transition-slot-rules';
 
 describe('classifyTransitionSlot', () => {
@@ -144,9 +146,10 @@ describe('findTransitionSlotConflict', () => {
 });
 
 describe('checkNewConnectionSlotConflict', () => {
-  // A freshly-drawn diagram connection is now constructed as a bare/eventless candidate
-  // (see onConnect in visual-diagram.tsx), so it only ever conflicts with an existing
-  // eventless transition to the same target — event- and cond-slot transitions coexist.
+  // A freshly-drawn diagram connection is usually constructed as a bare/eventless candidate
+  // (see onConnect in visual-diagram.tsx), so it only conflicts with an existing eventless
+  // transition to the same target — event- and cond-slot transitions coexist. The
+  // done.state.<id> exception is covered in its own describe below.
   it('blocks a new connection when an eventless transition to the same target already exists', () => {
     const doc: SCXMLDocument = {
       scxml: {
@@ -201,6 +204,68 @@ describe('checkNewConnectionSlotConflict', () => {
       } as any,
     };
     expect(checkNewConnectionSlotConflict(doc, 'A', 'B')).toEqual({ blocked: false });
+  });
+
+  describe('out of a compound state with a <final> inside a parallel region (done.state.<id> default)', () => {
+    const doc = (transition?: object): SCXMLDocument =>
+      ({
+        scxml: {
+          parallel: {
+            '@_id': 'P',
+            state: [
+              {
+                '@_id': 'R1',
+                state: [
+                  { '@_id': 'C', state: { '@_id': 'C1' }, final: { '@_id': 'CDone' }, transition },
+                  { '@_id': 'B' },
+                ],
+              },
+              { '@_id': 'R2', state: { '@_id': 'X' } },
+            ],
+          },
+        },
+      }) as any;
+
+    it('checks the event slot: blocked by an existing done.state event transition, not by an eventless one', () => {
+      expect(
+        checkNewConnectionSlotConflict(doc({ '@_event': 'done.state.C', '@_target': 'B' }), 'C', 'B').reason
+      ).toMatch(/only one event-based transition/i);
+      expect(checkNewConnectionSlotConflict(doc({ '@_target': 'B' }), 'C', 'B')).toEqual({ blocked: false });
+    });
+
+    it('blocks a second done.state.<id> transition to a different target too', () => {
+      const result = checkNewConnectionSlotConflict(
+        doc({ '@_event': 'done.state.C', '@_target': 'B' }),
+        'C',
+        'C1'
+      );
+      expect(result.blocked).toBe(true);
+      expect(result.reason).toMatch(/'C' already has a done\.state\.C transition \(to 'B'\)/);
+    });
+
+    it('checks the event slot out of a <parallel> whose regions all have a <final>', () => {
+      const parallelDoc = (transition: object): SCXMLDocument =>
+        ({
+          scxml: {
+            parallel: {
+              '@_id': 'P',
+              state: [
+                { '@_id': 'R1', final: { '@_id': 'R1Done' } },
+                { '@_id': 'R2', final: { '@_id': 'R2Done' } },
+              ],
+              transition,
+            },
+            state: { '@_id': 'Next' },
+          },
+        }) as any;
+      expect(
+        checkNewConnectionSlotConflict(parallelDoc({ '@_event': 'done.state.P', '@_target': 'Next' }), 'P', 'Next')
+          .reason
+      ).toMatch(/only one event-based transition/i);
+      expect(checkNewConnectionSlotConflict(parallelDoc({ '@_target': 'Next' }), 'P', 'Next')).toEqual({
+        blocked: false,
+      });
+    });
   });
 
   it('does not block a new (external) connection when the existing event-slot transition to the target is internal', () => {
@@ -443,5 +508,163 @@ describe('slot conflict checks correctly reach into <parallel> regions', () => {
     };
     const result = checkNewConnectionSlotConflict(doc, 'A', 'B');
     expect(result.blocked).toBe(true);
+  });
+});
+
+describe('one transition per done.state.<id> event (checkTransitionEditSlotConflict)', () => {
+  // C (compound, has a <final>) → B on done.state.C (index 0), → D eventless (index 1).
+  const doc = (): SCXMLDocument =>
+    ({
+      scxml: {
+        state: [
+          {
+            '@_id': 'C',
+            final: { '@_id': 'CDone' },
+            transition: [
+              { '@_event': 'done.state.C', '@_target': 'B' },
+              { '@_target': 'D' },
+            ],
+          },
+          { '@_id': 'B' },
+          { '@_id': 'D' },
+          { '@_id': 'E', transition: { '@_event': 'done.state.C', '@_target': 'B' } },
+        ],
+      } as any,
+    });
+
+  it('blocks giving another transition on the state the same done.state event (Transition panel edit)', () => {
+    const result = checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'done.state.C', '@_target': 'D' });
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/already has a done\.state\.C transition \(to 'B'\)/);
+  });
+
+  it('also catches the done event inside a merged event list', () => {
+    expect(
+      checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'go, done.state.C', '@_target': 'D' }).blocked
+    ).toBe(true);
+  });
+
+  it("doesn't count the transition being edited against itself", () => {
+    expect(
+      checkTransitionEditSlotConflict(doc(), 'C', 0, { '@_event': 'done.state.C', '@_target': 'D' })
+    ).toEqual({ blocked: false });
+  });
+
+  it('blocks moving a done.state transition onto a source that already has one (reconnect, no index)', () => {
+    // E's own done.state.C transition is moved onto C: nothing on C is excluded.
+    expect(
+      checkTransitionEditSlotConflict(doc(), 'C', undefined, { '@_event': 'done.state.C', '@_target': 'D' })
+        .blocked
+    ).toBe(true);
+  });
+
+  it('allows other events, and a distinct done.state event', () => {
+    expect(checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'go', '@_target': 'D' })).toEqual({
+      blocked: false,
+    });
+    expect(
+      checkTransitionEditSlotConflict(doc(), 'C', 1, { '@_event': 'done.state.CDone', '@_target': 'D' })
+    ).toEqual({ blocked: false });
+  });
+});
+
+describe('checkReactionsDoneStateConflict (State Actions panel event reactions)', () => {
+  // C (compound, has a <final>) → B on done.state.C, plus an existing go reaction.
+  const doc = (): SCXMLDocument =>
+    ({
+      scxml: {
+        state: [
+          {
+            '@_id': 'C',
+            final: { '@_id': 'CDone' },
+            transition: [
+              { '@_event': 'go', '@_type': 'internal' },
+              { '@_event': 'done.state.C', '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    });
+
+  it('blocks a reaction on a done.state event the state already has an edge for', () => {
+    // The reaction would be inserted before C → B and silently shadow it.
+    const result = checkReactionsDoneStateConflict(doc(), 'C', [
+      { event: 'go', type: 'internal' },
+      { event: 'done.state.C', type: 'internal' },
+    ]);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/already has a done\.state\.C transition \(to 'B'\)/);
+  });
+
+  it('also catches the done event inside a merged reaction event list', () => {
+    expect(
+      checkReactionsDoneStateConflict(doc(), 'C', [{ event: 'go, done.state.C', type: 'external' }]).blocked
+    ).toBe(true);
+  });
+
+  it('blocks two reactions that share a done.state event', () => {
+    const noEdge = (): SCXMLDocument =>
+      ({ scxml: { state: [{ '@_id': 'C', final: { '@_id': 'CDone' } }] } as any });
+    expect(
+      checkReactionsDoneStateConflict(noEdge(), 'C', [
+        { event: 'done.state.C', type: 'internal' },
+        { event: 'done.state.C, go', type: 'internal' },
+      ]).blocked
+    ).toBe(true);
+  });
+
+  it('allows ordinary reactions, and excludes the reactions being replaced', () => {
+    expect(checkReactionsDoneStateConflict(doc(), 'C', [{ event: 'go', type: 'internal' }])).toEqual({
+      blocked: false,
+    });
+    // An existing done.state.C reaction (no edge) can be kept/edited: the old
+    // reactions are replaced wholesale, so it isn't compared against itself.
+    const withReaction = (): SCXMLDocument =>
+      ({
+        scxml: {
+          state: [
+            {
+              '@_id': 'C',
+              final: { '@_id': 'CDone' },
+              transition: { '@_event': 'done.state.C', '@_type': 'internal' },
+            },
+          ],
+        } as any,
+      });
+    expect(
+      checkReactionsDoneStateConflict(withReaction(), 'C', [{ event: 'done.state.C', type: 'internal' }])
+    ).toEqual({ blocked: false });
+  });
+});
+
+describe('getDoneStateEvents', () => {
+  it('splits on commas only, keeping a space-containing state id whole (project rule 6.7)', () => {
+    expect(getDoneStateEvents({ '@_event': 'done.state.Motor left' })).toEqual(['done.state.Motor left']);
+    expect(getDoneStateEvents({ '@_event': 'go, done.state.Motor left ,done.state.B' })).toEqual([
+      'done.state.Motor left',
+      'done.state.B',
+    ]);
+  });
+
+  it('does not treat done.state.Motor left and done.state.Motor right as the same event', () => {
+    const doc = {
+      scxml: {
+        state: [
+          {
+            '@_id': 'S',
+            transition: [
+              { '@_event': 'done.state.Motor left', '@_target': 'A' },
+              { '@_target': 'B' },
+            ],
+          },
+          { '@_id': 'A' },
+          { '@_id': 'B' },
+        ],
+      } as any,
+    } as SCXMLDocument;
+    expect(
+      checkTransitionEditSlotConflict(doc, 'S', 1, { '@_event': 'done.state.Motor right', '@_target': 'B' })
+    ).toEqual({ blocked: false });
   });
 });

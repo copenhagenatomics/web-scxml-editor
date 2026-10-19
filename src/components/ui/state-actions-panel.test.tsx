@@ -152,6 +152,54 @@ describe('StateActionsPanel event reactions tab for final states', () => {
   });
 });
 
+describe('StateActionsPanel Final State checkbox', () => {
+  const finalBox = () => screen.getByRole('checkbox', { name: 'Final State' });
+
+  it('sits beside Initial State, and ticking it calls onToggleFinal when allowed', () => {
+    const onToggleFinal = vi.fn();
+    renderPanel({ canMarkFinal: true, onToggleFinal });
+    expect(screen.getByRole('checkbox', { name: 'Initial State' })).toBeInTheDocument();
+    expect(finalBox()).not.toBeChecked();
+    expect(finalBox()).not.toBeDisabled();
+    fireEvent.click(finalBox());
+    expect(onToggleFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled with the blocking reason as its tooltip when not allowed', () => {
+    renderPanel({
+      canMarkFinal: false,
+      finalBlockedReason: 'Final states can only be used inside a parallel state.',
+      onToggleFinal: noop,
+    });
+    expect(finalBox()).toBeDisabled();
+    expect(finalBox().closest('label')).toHaveAttribute(
+      'title',
+      'Final states can only be used inside a parallel state.'
+    );
+  });
+
+  it('for a final state: checked and always untickable, with no Initial State checkbox', () => {
+    const onToggleFinal = vi.fn();
+    renderPanel({ stateType: 'final', canMarkFinal: false, onToggleFinal });
+    expect(finalBox()).toBeChecked();
+    expect(finalBox()).not.toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: 'Initial State' })).not.toBeInTheDocument();
+    fireEvent.click(finalBox());
+    expect(onToggleFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered for a parallel state or a region of one', () => {
+    renderPanel({ stateType: 'parallel', canMarkFinal: true, onToggleFinal: noop });
+    expect(screen.queryByRole('checkbox', { name: 'Final State' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Initial State' })).toBeInTheDocument();
+  });
+
+  it('is not offered for a region of a parallel state', () => {
+    renderPanel({ isParallelRegion: true, canMarkFinal: true, onToggleFinal: noop });
+    expect(screen.queryByRole('checkbox', { name: 'Final State' })).not.toBeInTheDocument();
+  });
+});
+
 describe('StateActionsPanel onexit tab visibility', () => {
   it('hides the onexit tab when the state has no onexit actions', () => {
     renderPanel();
@@ -311,6 +359,50 @@ describe('StateActionsPanel new-channel suggestions', () => {
       ],
     });
     expect(onApplyReactions).not.toHaveBeenCalled();
+  });
+
+  it('blocks saving a reaction that validateReactions rejects, keeping the form open and warning', () => {
+    const onApplyReactions = vi.fn();
+    useHostAPIStore.setState({ feedbackQueue: [] });
+    const validateReactions = vi.fn(() => ({ blocked: true, reason: 'conflict reason' }));
+    renderPanel({ onApplyReactions, validateReactions });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('vector'), { target: { value: 'done.state.StateA' } });
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    expect(validateReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'done.state.StateA', location: 'x', expr: '1', type: 'internal' }),
+    ]);
+    expect(onApplyReactions).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => [f.message, f.level])).toEqual([
+      ['conflict reason', 'warning'],
+    ]);
+    // The form stays open with the user's input so they can fix the event.
+    expect(screen.getByPlaceholderText('vector')).toHaveValue('done.state.StateA');
+  });
+
+  it('blocks pasting a reaction that validateReactions rejects', () => {
+    const onApplyReactions = vi.fn();
+    useHostAPIStore.setState({ feedbackQueue: [] });
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: 'done.state.StateA', location: 'x', expr: '1', type: 'internal' },
+    });
+    renderPanel({ onApplyReactions, validateReactions: () => ({ blocked: true, reason: 'conflict reason' }) });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApplyReactions).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => [f.message, f.level])).toEqual([
+      ['conflict reason', 'warning'],
+    ]);
+    expect(screen.getByText('No reactions yet.')).toBeInTheDocument();
+    useActionClipboardStore.setState({ copied: null });
   });
 
   it('still calls onApply for a plain literal location, even when onNewChannel is provided', () => {
