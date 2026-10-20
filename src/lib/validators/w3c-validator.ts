@@ -267,7 +267,7 @@ function validateFinalRequiredAttributes(
   // so this catches hand-edited XML.
   if ((final as any).transition) {
     const count = Array.isArray((final as any).transition) ? (final as any).transition.length : 1;
-    const position = findElementPosition('final', path, elementPositions);
+    const position = locate('final', path);
     const errorKey = `final_has_transition_${path}`;
 
     if (!reportedErrors.has(errorKey)) {
@@ -277,6 +277,8 @@ function validateFinalRequiredAttributes(
         severity: 'error',
         line: position?.line,
         column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
       });
     }
   }

@@ -4,7 +4,6 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import { SCXMLValidator } from './scxml-validator';
-import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 
 describe('SCXMLValidator duplicate state id', () => {
   it('attaches the duplicated id as stateId', () => {
