@@ -1,5 +1,43 @@
 import { describe, it, expect } from 'vitest';
-import { getConfigFieldUsage } from './datamodel-extractor';
+import { getConfigFieldUsage, inferChannelInitialExpr } from './datamodel-extractor';
+
+describe('inferChannelInitialExpr (assigned value -> <data expr> for a new channel)', () => {
+  it.each([
+    ['true', 'false'],
+    ['false', 'false'],
+    [' true ', 'false'],
+    ['this_a > 5', 'false'],
+    ['this_a >= 5', 'false'],
+    ['this_a == this_b', 'false'],
+    ['this_a != 0', 'false'],
+    ['this_a && this_b', 'false'],
+    ['this_a || this_b', 'false'],
+    ['!this_a', 'false'],
+  ])('assigning %j declares a bool channel: <data expr=%j>', (input, expected) => {
+    expect(inferChannelInitialExpr(input)).toBe(expected);
+  });
+
+  it.each([
+    ['1.5', '0.0'],
+    ['-0.25', '0.0'],
+    ['.5', '0.0'],
+  ])('assigning %j declares a double channel: <data expr=%j>', (input, expected) => {
+    expect(inferChannelInitialExpr(input)).toBe(expected);
+  });
+
+  it.each([
+    ['0'],
+    ['42'],
+    ['this_a + 1'],
+    ['Math.floor(this_a)'],
+    // Non-config string fields are rejected by the C# generator, so strings fall back to int
+    ["'abc'"],
+    [''],
+    [undefined],
+  ])('assigning %j declares an int channel: <data expr="0">', (input) => {
+    expect(inferChannelInitialExpr(input)).toBe('0');
+  });
+});
 
 describe('getConfigFieldUsage', () => {
   it('returns [] when the config value is not referenced anywhere', () => {
