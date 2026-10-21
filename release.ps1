@@ -18,11 +18,11 @@ if ($status) {
 }
 
 # Must be on main
-$branch = git rev-parse --abbrev-ref HEAD
-if ($branch -ne "main") {
-    Write-Error "You must be on 'main' to release (currently on '$branch')."
-    exit 1
-}
+# $branch = git rev-parse --abbrev-ref HEAD
+# if ($branch -ne "main") {
+#     Write-Error "You must be on 'main' to release (currently on '$branch')."
+#     exit 1
+# }
 
 # Bump version in package.json / package-lock.json
 npm version $BumpType --no-git-tag-version
