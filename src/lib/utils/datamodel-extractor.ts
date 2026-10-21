@@ -52,6 +52,100 @@ function inferType(value: string): ConfigField['type'] {
   return 'int';
 }
 
+type ExprType = 'bool' | 'double' | 'int' | 'unknown';
+
+/** Blanks out everything inside quotes and brackets (and the brackets themselves), keeping only top-level text. */
+function maskNested(expr: string): string {
+  let out = '';
+  let depth = 0;
+  let quote = '';
+  for (const ch of expr) {
+    if (quote) {
+      if (ch === quote) quote = '';
+      out += ' ';
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ' ';
+    } else if ('([{'.includes(ch)) {
+      depth++;
+      out += ' ';
+    } else if (')]}'.includes(ch)) {
+      depth--;
+      out += ' ';
+    } else {
+      out += depth > 0 ? ' ' : ch;
+    }
+  }
+  return out;
+}
+
+/** Splits expr at the given (global) regex's matches found in its masked form. */
+function splitAtTopLevel(expr: string, masked: string, separator: RegExp): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (const m of masked.matchAll(separator)) {
+    parts.push(expr.slice(start, m.index));
+    start = m.index + m[0].length;
+  }
+  parts.push(expr.slice(start));
+  return parts;
+}
+
+function mergeTypes(types: ExprType[]): ExprType {
+  const known = types.filter((t) => t !== 'unknown');
+  if (known.length === 0) return 'unknown';
+  if (known.every((t) => t === known[0])) return known[0];
+  if (known.every((t) => t === 'int' || t === 'double')) return 'double';
+  return 'int'; // bool mixed with a number: no single C# type fits, so fall back to int
+}
+
+/**
+ * Infers the result type of a JS expression from its outermost operator. An operator alone does
+ * not decide the type: comparisons and "!" always give a bool, but "||"/"&&" return one of their
+ * operands (so "0 || 1" is a number) and "?:" returns one of its branches.
+ */
+function inferExprType(raw: string): ExprType {
+  const expr = raw.trim();
+  if (!expr) return 'unknown';
+  const masked = maskNested(expr);
+
+  if (/^\(/.test(expr) && !masked.trim()) return inferExprType(expr.slice(1, -1));
+
+  // ternary: type of the branches
+  const q = masked.search(/\?(?![.?])/);
+  if (q >= 0) {
+    let level = 1;
+    for (let i = q + 1; i < masked.length; i++) {
+      if (masked[i] === '?' && masked[i + 1] !== '?' && masked[i - 1] !== '?') level++;
+      else if (masked[i] === ':' && --level === 0) {
+        return mergeTypes([inferExprType(expr.slice(q + 1, i)), inferExprType(expr.slice(i + 1))]);
+      }
+    }
+  }
+
+  // logical: type of the operands; bare variables on both sides are assumed to be bool flags
+  if (/\|\||&&/.test(masked)) {
+    const t = mergeTypes(splitAtTopLevel(expr, masked, /\|\||&&/g).map(inferExprType));
+    return t === 'unknown' ? 'bool' : t;
+  }
+
+  const hasShift = /<<|>>/.test(masked);
+  const noShifts = masked.replace(/<<|>>>|>>|=>/g, '  ');
+  if (/[<>]|[!=]=/.test(noShifts)) return 'bool';
+  if (/^\s*!/.test(noShifts) && !/[-+*/%&|^]/.test(noShifts)) return 'bool';
+  if (hasShift || /[&|^]/.test(masked)) return 'int';
+
+  if (/[+\-*/%]/.test(masked)) {
+    const t = mergeTypes(splitAtTopLevel(expr, masked, /[+\-*/%]/g).map(inferExprType).filter((p) => p !== 'unknown'));
+    return t === 'double' ? 'double' : 'int';
+  }
+
+  if (expr === 'true' || expr === 'false') return 'bool';
+  if (/^\d*\.\d+$/.test(expr)) return 'double';
+  if (/^\d+$/.test(expr)) return 'int';
+  return 'unknown';
+}
+
 /**
  * Picks the <data expr> for a newly created (non-conf) channel from the value being assigned to
  * it (the <assign expr>) — the assigned expression itself never goes into <data expr>. The
@@ -60,11 +154,11 @@ function inferType(value: string): ConfigField['type'] {
  * "0" -> int. Non-config string fields are rejected by the generator, so anything else is int.
  */
 export function inferChannelInitialExpr(assignedValue: string | undefined): string {
-  const value = (assignedValue ?? '').trim();
-  if (value === 'true' || value === 'false') return 'false';
-  if (/==|!=|<|>|&&|\|\||^!/.test(value)) return 'false';
-  if (/^-?\d*\.\d+$/.test(value)) return '0.0';
-  return '0';
+  switch (inferExprType(assignedValue ?? '')) {
+    case 'bool': return 'false';
+    case 'double': return '0.0';
+    default: return '0';
+  }
 }
 
 const VALID_CONF_TYPES:ReadonlySet<string> = new Set(['int', 'double', 'bool', 'string']);

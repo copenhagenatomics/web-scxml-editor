@@ -18,6 +18,40 @@ describe('inferChannelInitialExpr (assigned value -> <data expr> for a new chann
   });
 
   it.each([
+    ['(this_a > 5)', 'false'],
+    ['this_a > 5 ? true : false', 'false'],
+    ['this_a > 0 && this_b < 3 || this_c', 'false'],
+    ["this_a == 'x'", 'false'],
+    ['!(this_a || this_b)', 'false'],
+  ])('keeps comparisons/ternaries of bools as bool: %j -> <data expr=%j>', (input, expected) => {
+    expect(inferChannelInitialExpr(input)).toBe(expected);
+  });
+
+  it.each([
+    ['this_count > 0 ? 1 : 0', '0'],
+    ['this_mask >> 1', '0'],
+    ['this_mask << 2', '0'],
+    ['this_a & this_b', '0'],
+    ['0 || 1', '0'],
+    ['this_a || 1', '0'],
+    ['this_a && 5', '0'],
+    ['this_a > 0 ? 1 : this_b', '0'],
+    ['this_a > 0 ? 1 : false', '0'],
+    ['!this_a + 1', '0'],
+  ])('does not mistake numeric results for bool: %j -> <data expr=%j>', (input, expected) => {
+    expect(inferChannelInitialExpr(input)).toBe(expected);
+  });
+
+  it.each([
+    ['this_a > 0 ? 1.5 : 0', '0.0'],
+    ['this_a || 0.5', '0.0'],
+    ['(this_a + 1.5) * 2', '0.0'],
+    ['this_a * 2.5', '0.0'],
+  ])('infers double from numeric operands: %j -> <data expr=%j>', (input, expected) => {
+    expect(inferChannelInitialExpr(input)).toBe(expected);
+  });
+
+  it.each([
     ['1.5', '0.0'],
     ['-0.25', '0.0'],
     ['.5', '0.0'],
