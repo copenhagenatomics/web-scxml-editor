@@ -161,6 +161,55 @@ export function inferChannelInitialExpr(assignedValue: string | undefined): stri
   }
 }
 
+const AUTO_CHANNEL_EXPRS: ReadonlySet<string> = new Set(['false', '0.0', '0']);
+
+/**
+ * Finds this_ channels whose <data expr> no longer matches the values assigned to them. Only
+ * channels still holding a generated zero value are considered (a hand-written initial value is
+ * left alone), and only when every <assign> to the channel agrees on one type; conflicting
+ * assigns have no single correct type, so they are skipped.
+ */
+export function inferChannelRetypes(xmlContent: string): Array<{ id: string; expr: string }> {
+  let parsed: unknown;
+  try {
+    parsed = xmlParser.parse(xmlContent);
+  } catch {
+    return [];
+  }
+
+  const assignedTypes = new Map<string, Set<string>>();
+  function collectAssigns(node: unknown): void {
+    if (!node || typeof node !== 'object') return;
+    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
+      if (key === 'assign') {
+        for (const item of Array.isArray(val) ? val : [val]) {
+          const location = item?.['@_location'];
+          const expr = item?.['@_expr'];
+          if (typeof location !== 'string' || typeof expr !== 'string') continue;
+          const types = assignedTypes.get(location) ?? new Set<string>();
+          types.add(inferChannelInitialExpr(expr));
+          assignedTypes.set(location, types);
+        }
+      } else {
+        collectAssigns(val);
+      }
+    }
+  }
+  collectAssigns(parsed);
+
+  const retypes: Array<{ id: string; expr: string }> = [];
+  for (const node of parseDataNodes(xmlContent)) {
+    const id = node['@_id'];
+    const current = node['@_expr'] ?? '';
+    if (!id?.startsWith('this_') || !AUTO_CHANNEL_EXPRS.has(current)) continue;
+    const types = assignedTypes.get(id);
+    if (types?.size !== 1) continue;
+    const [inferred] = types;
+    if (inferred !== current) retypes.push({ id, expr: inferred });
+  }
+  return retypes;
+}
+
 const VALID_CONF_TYPES:ReadonlySet<string> = new Set(['int', 'double', 'bool', 'string']);
 
 export function extractConfigFields(xmlContent: string): ConfigField[] {

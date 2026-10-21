@@ -91,7 +91,16 @@ import { wouldCrossParallelRegions } from '@/lib/utils/parallel-region-connectio
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
-import { inferChannelInitialExpr } from '@/lib/utils/datamodel-extractor';
+import { inferChannelInitialExpr, inferChannelRetypes } from '@/lib/utils/datamodel-extractor';
+import { UpdateDataExprCommand } from '@/lib/commands/update-data-expr-command';
+
+/** Re-types channels whose <data expr> no longer matches the values assigned to them. */
+function retypeChannelsFromAssigns(content: string): string {
+  return inferChannelRetypes(content).reduce((acc, { id, expr }) => {
+    const result = new UpdateDataExprCommand(id, expr).execute(acc);
+    return result.success ? result.newContent : acc;
+  }, content);
+}
 import { parseAssignActionString } from '@/lib/utils/action-string';
 
 // ==================== TYPES & INTERFACES ====================
@@ -415,7 +424,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const result = command.execute(scxmlContent);
 
         if (result.success) {
-          onSCXMLChange(result.newContent, 'property');
+          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
         } else {
           console.error('Failed to update actions:', result.error);
         }
@@ -535,7 +544,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const command = new UpdateInternalEventsCommand(nodeId, actions);
         const result = command.execute(scxmlContent);
         if (result.success) {
-          onSCXMLChange(result.newContent, 'property');
+          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
         } else {
           console.error('Failed to update internal event reactions:', result.error);
         }
