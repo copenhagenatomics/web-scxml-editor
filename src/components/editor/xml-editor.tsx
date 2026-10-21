@@ -97,8 +97,8 @@ export const XMLEditor = forwardRef<XMLEditorRef, XMLEditorProps>(
           message: error.message,
           startLineNumber: error.line || 1,
           startColumn: error.column || 1,
-          endLineNumber: error.line || 1,
-          endColumn: error.column ? error.column + 10 : 10,
+          endLineNumber: error.endLine || error.line || 1,
+          endColumn: error.endColumn || (error.column ? error.column + 10 : 10),
           code: error.code || undefined,
         }));
 

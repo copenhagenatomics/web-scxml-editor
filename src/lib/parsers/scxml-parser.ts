@@ -37,11 +37,16 @@ export class SCXMLParser {
     // Also run fast-xml-parser validation for additional checks
     const validationResult = XMLValidator.validate(xmlContent);
     if (validationResult !== true) {
-      // Only add this error if we haven't already found it
+      // Only add this error if we haven't already found it. Tag-nesting problems
+      // are reported by both checkers but at different positions (ours points at
+      // the tag left open, fast-xml-parser at the closing tag), so treat any
+      // InvalidTag as a duplicate once we've reported a tag-nesting error.
       const isDuplicate = xmlSyntaxErrors.some(
         (err) =>
-          err.line === validationResult.err.line &&
-          err.column === validationResult.err.col
+          (err.line === validationResult.err.line &&
+            err.column === validationResult.err.col) ||
+          (validationResult.err.code === 'InvalidTag' &&
+            /^(Mismatched closing|Unclosed|Unexpected closing) tag/.test(err.message))
       );
 
       if (!isDuplicate) {
@@ -218,15 +223,36 @@ export class SCXMLParser {
                 });
               } else {
                 const lastTag = tagStack[tagStack.length - 1];
-                if (lastTag.name !== tagName) {
+                const openIndex = tagStack.map((t) => t.name).lastIndexOf(tagName);
+                if (lastTag.name === tagName) {
+                  tagStack.pop();
+                } else if (openIndex === -1) {
+                  // Nothing open by this name: most likely a misspelled close of the
+                  // innermost tag. Consume it so the rest of the document doesn't
+                  // cascade into further mismatch/unclosed errors.
                   errors.push({
-                    message: `Mismatched closing tag '</${tagName}>' - expected '</${lastTag.name}>'`,
+                    message: `Mismatched closing tag '</${tagName}>' - expected '</${lastTag.name}>' to close <${lastTag.name}> opened on line ${lastTag.line}`,
                     line: lineNumber,
                     column: charIndex + 1,
+                    endLine: lineNumber,
+                    endColumn: charIndex + 1 + tagMatch[0].length + 1,
                     severity: 'error',
                   });
-                } else {
                   tagStack.pop();
+                } else {
+                  // Closes an outer tag: every tag opened inside it was never closed.
+                  for (let k = tagStack.length - 1; k > openIndex; k--) {
+                    const unclosed = tagStack[k];
+                    errors.push({
+                      message: `Unclosed tag '<${unclosed.name}>' - add '</${unclosed.name}>' (or end it with '/>') before '</${tagName}>' on line ${lineNumber}`,
+                      line: unclosed.line,
+                      column: unclosed.col,
+                      endLine: unclosed.line,
+                      endColumn: unclosed.col + unclosed.name.length + 1,
+                      severity: 'error',
+                    });
+                  }
+                  tagStack.length = openIndex;
                 }
               }
             } else {
@@ -305,9 +331,11 @@ export class SCXMLParser {
       if (!endsWithIncompleteTag) {
         for (const unclosedTag of tagStack) {
           errors.push({
-            message: `Unclosed tag '<${unclosedTag.name}>'`,
+            message: `Unclosed tag '<${unclosedTag.name}>' - add a matching '</${unclosedTag.name}>' (or end it with '/>')`,
             line: unclosedTag.line,
             column: unclosedTag.col,
+            endLine: unclosedTag.line,
+            endColumn: unclosedTag.col + unclosedTag.name.length + 1,
             severity: 'error',
           });
         }
@@ -353,7 +381,7 @@ export class SCXMLParser {
 
       if (!attrValue.startsWith('"') && !attrValue.startsWith("'")) {
         errors.push({
-          message: `Attribute '${attrName}' value must be quoted`,
+          message: `Attribute '${attrName}' value must be quoted, e.g. ${attrName}="${attrValue.replace(/\/$/, '')}"`,
           line: line,
           column: column + match.index,
           severity: 'error',

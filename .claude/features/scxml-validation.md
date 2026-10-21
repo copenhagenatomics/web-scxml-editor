@@ -29,9 +29,10 @@ Two fully independent stages, chained but not coupled:
    8. Transition semantics: `type` must be internal/external; internal may only self-target; event-name syntax (comma, not space, separates multi-event lists) as warning.
    9. Transition-slot conflicts (`transition-slot-validator.ts`) — static counterpart of live connect/edit blocking.
    10. Executable-content sanity (`<script>` needs `src` or text).
-   11. Unknown-attribute/typo detection against `attribute-schemas.ts` whitelists, Levenshtein "did you mean" (threshold 2).
+   11. Unknown-attribute/typo detection against `attribute-schemas.ts` whitelists (`getElementAttributeSchemas()`), Levenshtein "did you mean" (threshold 2). One generic recursive walk over the real parser shape reaches every schema'd element (root `<datamodel>`, `<parallel>` children, executable content at any depth); unlisted/foreign elements and `<content>` payloads are skipped, namespaced attributes and `xmlns` are allowed, `#text` is content not an attribute, and `confType` is whitelisted on `<data>` (Config panel convention).
    12. Cross-hierarchy transition rule (same-parent-only).
    13. Initial-State-group conflicts (`initial-group-validator.ts`).
+   Each pass runs inside a `run(passName, …)` guard in `SCXMLValidator.validate`: a pass that throws on a half-edited document becomes a single "could not run" warning, so it never discards the other passes' diagnostics. (Before this guard, an id-less `<state>` named in `initial` crashed `getInitialIds` → `parseStateIdList`, and the editor showed no errors at all.)
    14. Nested parallel states (`parallel-nesting-validator.ts`): an error for every `<parallel>` inside another `<parallel>`. This is the static counterpart of the live gates in `parallel-nesting-rules.ts` (`decisions/scxml.md` #14).
 3. Output: flat `deduplicateErrors(errors)` (`ValidationError[]`, deduped on `message+line+column` composite key).
 
@@ -51,16 +52,14 @@ Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`
 
 ## SCXML behavior
 
-Validates the parsed object tree, not the raw XML text — position information for messages is recovered via a **separate, approximate** regex-based line index (`parseElementPositions`) rather than tracked through the actual parse (`fast-xml-parser` doesn't retain source positions by default) — see the position-accuracy caveat below.
+Validates the parsed object tree, not the raw XML text. `fast-xml-parser` doesn't retain source positions, so `buildSourceElementIndex` (`validator-utils.ts`) scans the raw XML once and maps each element **path** — `scxml.state[0].datamodel[0].data[1]`, the same shape the required-attribute and unknown-attribute walks build (same-named siblings keep document order in the parser's arrays) — to the exact `<tag` range and each `name="value"` attribute range. `ValidationError.endLine`/`endColumn` carry the range end to the Monaco markers. The older type-and-line index (`parseElementPositions`/`findElementPosition`) remains only as a fallback and for passes not yet migrated — see the position-accuracy caveat below.
 
 ## Validation rules
 
 Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do not assume symmetric coverage across similar cases):
 - `validateCompoundStates` only recurses `state → state`, never `state → parallel → state` — a compound state nested inside a `<parallel>` missing `@initial` is not flagged.
 - `validateInitialStates`'s dedicated message only fires for **root-level** `state/@initial`; nested levels are only indirectly covered via the unreachable-state BFS, with a generic message, not the parent-aware one.
-- `<onentry>`/`<onexit>` unknown-attribute checks read an `.executable[]` shape the real parser does **not** produce for files loaded from disk — effectively dead code for that specific check on real files (required-attribute checks for the same content work fine, since they read differently).
-- `validateStateChildren` (onentry/onexit/datamodel/invoke attribute-schema pass) is only invoked for `<state>`, never `<parallel>`.
-- Position lookup (`getElementPosition`) is type-and-line based, not identity-based — with multiple same-type elements sharing a violation, the reported line can point at the wrong instance.
+- Position lookup is exact (path-based) only for required-attribute and unknown-attribute errors. Other passes (unreachable/duplicate states — which navigate by `stateId` instead — transition semantics, `<script>` content) still have no line or use type-and-line helpers.
 - Several of the 7 downstream-C#-generator pitfalls documented in `docs/invalid-event-identifiers.md` (empty `event=""`, C# reserved words, digit-leading event names, wildcard `assign` locations, event-name sanitization collisions) have **no corresponding automated rule yet** — see `.claude/project/scxml-rules.md`.
 
 ## Related features
@@ -75,18 +74,19 @@ Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do no
 
 ## Tests
 
-`src/lib/validators/scxml-validator.test.ts`, `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`, `parallel-nesting-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
+`src/lib/validators/scxml-validator.test.ts` (includes parser-driven unknown-attribute/position regression tests), `state-validator.test.ts`, `transition-validator.test.ts`, `transition-slot-validator.test.ts`, `initial-group-validator.test.ts`, `src/lib/parsers/scxml-parser.test.ts` (syntax diagnostics), `parallel-nesting-validator.test.ts`. No dedicated test file for `w3c-validator.ts`, `attribute-schemas.ts`, or `validator-utils.ts` individually — their logic is exercised only indirectly through `scxml-validator.test.ts`.
 
 ## Known limitations
 
 - `ValidationError.code` is defined in the type but **never populated by any validator** — all classification is message-text-based; don't build new logic that branches on `error.code` without first deciding to actually populate it everywhere.
-- Position tracking is approximate (line-and-type based, not a true source map) — can misattribute the reported line for documents with repeated element types sharing a violation.
+- Position tracking outside the attribute passes is still approximate (line-and-type based) — can misattribute the reported line for documents with repeated element types sharing a violation.
+- Parser syntax errors: on a closing tag that matches nothing open, the hand-rolled checker treats it as a misspelled close of the innermost tag (one error, no cascade); on a close of an outer tag, it reports each inner tag as unclosed at its opening position. `fast-xml-parser`'s `InvalidTag` second opinion is suppressed once a tag-nesting error is already reported.
 - `main_`-prefix warnings are emitted **once per textual occurrence**, not deduplicated per identifier — a variable referenced in 5 expressions produces 5 separate warnings.
 - Duplicate `<data>` id errors report the position of the **last** occurrence, not the first (a deliberate but easy-to-miss choice, confirmed in code).
 
 ## Important edge cases
 
-- Validation runs **even if parsing produced some errors**, as long as a valid `<scxml>` root was extracted (`scxml-parser.ts`'s flow: `hasXMLError` doesn't necessarily stop `validateSCXML`/downstream validation) — so a document with e.g. one malformed tag elsewhere can still surface unrelated semantic errors for the parts that did parse.
+- `SCXMLValidator` runs **only when parsing succeeded** (`useContentValidation` checks `parseResult.success`), so while any XML syntax error exists the user sees only syntax errors; semantic/attribute errors appear once the XML is well-formed. (Inside `SCXMLParser.parse`, the light `validateSCXML` root check still runs whenever an `<scxml>` root was extracted.)
 - `SCXMLValidator` and the diagram's `SCXMLToXStateConverter` are **fully independent** — validation never blocks or informs rendering, and a document that fails validation still renders normally in the diagram (with whatever partial/best-effort structure the converter can build).
 
 ## Things that must NOT be changed

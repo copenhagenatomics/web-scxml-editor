@@ -14,14 +14,9 @@ import type {
   ParallelElement,
   FinalElement,
   HistoryElement,
-  InitialElement,
   TransitionElement,
-  OnEntryElement,
-  OnExitElement,
-  DataModelElement,
   DataElement,
   InvokeElement,
-  ScriptElement,
   AssignElement,
   SendElement,
   RaiseElement,
@@ -29,40 +24,21 @@ import type {
   CancelElement,
   IfElement,
   ElseIfElement,
-  ElseElement,
   ForEachElement,
 } from '@/types/scxml';
 import type { ValidationError } from '@/types/common';
-import {
-  getValidScxmlAttributes,
-  getValidStateAttributes,
-  getValidParallelAttributes,
-  getValidFinalAttributes,
-  getValidHistoryAttributes,
-  getValidTransitionAttributes,
-  getValidOnentryAttributes,
-  getValidOnexitAttributes,
-  getValidInitialAttributes,
-  getValidDatamodelAttributes,
-  getValidDataAttributes,
-  getValidInvokeAttributes,
-  getValidScriptAttributes,
-  getValidAssignAttributes,
-  getValidSendAttributes,
-  getValidRaiseAttributes,
-  getValidLogAttributes,
-  getValidCancelAttributes,
-  getValidIfAttributes,
-  getValidElseifAttributes,
-  getValidElseAttributes,
-  getValidForeachAttributes,
-} from './attribute-schemas';
+import { getElementAttributeSchemas } from './attribute-schemas';
 import {
   findSimilarAttribute,
   findElementPosition,
-  getElementPosition,
   createFriendlyLogErrorMessage,
+  type SourceElement,
 } from './validator-utils';
+
+type SourcePosition = { line: number; column: number; endLine?: number; endColumn?: number };
+
+/** Resolves an element (by type and tree path) to its source position. */
+type Locate = (elementType: string, path: string) => SourcePosition | undefined;
 
 /**
  * Validate W3C compliance requirements
@@ -122,12 +98,18 @@ export function validateRequiredAttributes(
   scxml: SCXMLElement,
   reportedErrors: Set<string>,
   elementPositions: Map<any, { line: number; column: number }>,
-  errors: ValidationError[]
+  errors: ValidationError[],
+  sourceIndex?: Map<string, SourceElement>
 ): void {
+  // Prefer the exact path-based position; fall back to the legacy
+  // type-and-line lookup when no source index entry exists.
+  const locate: Locate = (elementType, path) =>
+    sourceIndex?.get(path)?.range ?? findElementPosition(elementType, path, elementPositions);
+
   validateRequiredAttributesRecursive(
     scxml,
     reportedErrors,
-    elementPositions,
+    locate,
     errors,
     'scxml',
     ''
@@ -140,80 +122,81 @@ export function validateRequiredAttributes(
 function validateRequiredAttributesRecursive(
   element: any,
   reportedErrors: Set<string>,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   elementName: string = 'scxml',
   path: string = ''
 ): void {
   if (!element) return;
 
-  const currentPath = path ? `${path}.${elementName}` : elementName;
+  // Same path shape as buildSourceElementIndex: scxml.state[0].datamodel[0].data[1]
+  const currentPath = path || elementName;
 
   // Validate based on element type
   switch (elementName) {
     case 'state':
-      validateStateRequiredAttributes(element, reportedErrors, elementPositions, errors, currentPath);
+      validateStateRequiredAttributes(element, reportedErrors, locate, errors, currentPath);
       break;
     case 'parallel':
-      validateParallelRequiredAttributes(element, reportedErrors, elementPositions, errors, currentPath);
+      validateParallelRequiredAttributes(element, reportedErrors, locate, errors, currentPath);
       break;
     case 'final':
-      validateFinalRequiredAttributes(element, reportedErrors, elementPositions, errors, currentPath);
+      validateFinalRequiredAttributes(element, reportedErrors, locate, errors, currentPath);
       break;
     case 'transition':
-      validateTransitionRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateTransitionRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'history':
-      validateHistoryRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateHistoryRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'initial':
-      validateInitialRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateInitialRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'invoke':
-      validateInvokeRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateInvokeRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'data':
-      validateDataRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateDataRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'assign':
-      validateAssignRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateAssignRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'send':
-      validateSendRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateSendRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'cancel':
-      validateCancelRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateCancelRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'raise':
-      validateRaiseRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateRaiseRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'log':
-      validateLogRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateLogRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'if':
-      validateIfRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateIfRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'elseif':
-      validateElseIfRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateElseIfRequiredAttributes(element, locate, errors, currentPath);
       break;
     case 'foreach':
-      validateForEachRequiredAttributes(element, elementPositions, errors, currentPath);
+      validateForEachRequiredAttributes(element, locate, errors, currentPath);
       break;
   }
 
   // Recursively validate child elements
-  validateChildElements(element, reportedErrors, elementPositions, errors, currentPath);
+  validateChildElements(element, reportedErrors, locate, errors, currentPath);
 }
 
 function validateStateRequiredAttributes(
   state: StateElement,
   reportedErrors: Set<string>,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!state['@_id']) {
-    const position = findElementPosition('state', path, elementPositions);
+    const position = locate('state', path);
     const errorKey = `missing_state_id_${path}`;
 
     if (!reportedErrors.has(errorKey)) {
@@ -223,6 +206,8 @@ function validateStateRequiredAttributes(
         severity: 'error',
         line: position?.line,
         column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
       });
     }
   }
@@ -231,12 +216,12 @@ function validateStateRequiredAttributes(
 function validateParallelRequiredAttributes(
   parallel: ParallelElement,
   reportedErrors: Set<string>,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!parallel['@_id']) {
-    const position = findElementPosition('parallel', path, elementPositions);
+    const position = locate('parallel', path);
     const errorKey = `missing_parallel_id_${path}`;
 
     if (!reportedErrors.has(errorKey)) {
@@ -246,6 +231,8 @@ function validateParallelRequiredAttributes(
         severity: 'error',
         line: position?.line,
         column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
       });
     }
   }
@@ -254,12 +241,12 @@ function validateParallelRequiredAttributes(
 function validateFinalRequiredAttributes(
   final: FinalElement,
   reportedErrors: Set<string>,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!final['@_id']) {
-    const position = findElementPosition('final', path, elementPositions);
+    const position = locate('final', path);
     const errorKey = `missing_final_id_${path}`;
 
     if (!reportedErrors.has(errorKey)) {
@@ -269,6 +256,8 @@ function validateFinalRequiredAttributes(
         severity: 'error',
         line: position?.line,
         column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
       });
     }
   }
@@ -278,7 +267,7 @@ function validateFinalRequiredAttributes(
   // so this catches hand-edited XML.
   if ((final as any).transition) {
     const count = Array.isArray((final as any).transition) ? (final as any).transition.length : 1;
-    const position = findElementPosition('final', path, elementPositions);
+    const position = locate('final', path);
     const errorKey = `final_has_transition_${path}`;
 
     if (!reportedErrors.has(errorKey)) {
@@ -288,6 +277,8 @@ function validateFinalRequiredAttributes(
         severity: 'error',
         line: position?.line,
         column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
       });
     }
   }
@@ -295,12 +286,12 @@ function validateFinalRequiredAttributes(
 
 function validateTransitionRequiredAttributes(
   transition: TransitionElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!transition['@_target'] && transition['@_type'] !== 'internal') {
-    const position = findElementPosition('transition', path, elementPositions);
+    const position = locate('transition', path);
     const event = transition['@_event'];
     const eventInfo = event ? ` (triggered by "${event}")` : '';
 
@@ -309,216 +300,240 @@ function validateTransitionRequiredAttributes(
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateHistoryRequiredAttributes(
   history: HistoryElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!history['@_id']) {
-    const position = findElementPosition('history', path, elementPositions);
+    const position = locate('history', path);
 
     errors.push({
       message: `History element missing required 'id' attribute. History elements need unique identifiers to be referenced by transitions.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateInitialRequiredAttributes(
   initial: any,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!initial.transition) {
-    const position = findElementPosition('initial', path, elementPositions);
+    const position = locate('initial', path);
 
     errors.push({
       message: `Initial element must contain a <transition> element. The initial element defines the default transition to take when entering a compound state.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateInvokeRequiredAttributes(
   invoke: InvokeElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!invoke['@_type'] && !invoke['@_src']) {
-    const position = findElementPosition('invoke', path, elementPositions);
+    const position = locate('invoke', path);
 
     errors.push({
       message: `Missing required invocation specification in <invoke> element. Must have either 'type' (invocation type) or 'src' (external service URL) attribute.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateDataRequiredAttributes(
   data: DataElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!data['@_id']) {
-    const position = findElementPosition('data', path, elementPositions);
+    const position = locate('data', path);
 
     errors.push({
       message: `Missing required 'id' attribute in <data> element. The 'id' attribute provides a unique name for the data variable.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateAssignRequiredAttributes(
   assign: AssignElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!assign['@_location']) {
-    const position = findElementPosition('assign', path, elementPositions);
+    const position = locate('assign', path);
 
     errors.push({
       message: `Missing required 'location' attribute in <assign> element. The 'location' attribute specifies which data variable to modify.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateSendRequiredAttributes(
   send: SendElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!send['@_event'] && !send['@_eventexpr']) {
-    const position = findElementPosition('send', path, elementPositions);
+    const position = locate('send', path);
 
     errors.push({
       message: `Missing required event specification in <send> element. Must have either 'event' (static event name) or 'eventexpr' (dynamic event expression) attribute.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateCancelRequiredAttributes(
   cancel: CancelElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!cancel['@_sendid'] && !cancel['@_sendidexpr']) {
-    const position = findElementPosition('cancel', path, elementPositions);
+    const position = locate('cancel', path);
 
     errors.push({
       message: `Missing required send identifier in <cancel> element. Must have either 'sendid' (static ID) or 'sendidexpr' (dynamic expression) attribute to identify which sent event to cancel.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateRaiseRequiredAttributes(
   raise: RaiseElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!raise['@_event']) {
-    const position = findElementPosition('raise', path, elementPositions);
+    const position = locate('raise', path);
 
     errors.push({
       message: `Missing required 'event' attribute in <raise> element. The 'event' attribute specifies which event to trigger within the state machine.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateLogRequiredAttributes(
   log: LogElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!log['@_expr']) {
-    const position = getElementPosition(log, elementPositions);
-    const friendlyMessage = createFriendlyLogErrorMessage(log, path, elementPositions);
+    const position = locate('log', path);
+    const friendlyMessage = createFriendlyLogErrorMessage(log, path, position);
 
     errors.push({
       message: friendlyMessage,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateIfRequiredAttributes(
   ifElement: IfElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!ifElement['@_cond']) {
-    const position = findElementPosition('if', path, elementPositions);
+    const position = locate('if', path);
 
     errors.push({
       message: `Missing required 'cond' attribute in <if> element. The 'cond' attribute must contain a boolean expression that determines when to execute the if block.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateElseIfRequiredAttributes(
   elseif: ElseIfElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
   if (!elseif['@_cond']) {
-    const position = findElementPosition('elseif', path, elementPositions);
+    const position = locate('elseif', path);
 
     errors.push({
       message: `Missing required 'cond' attribute in <elseif> element. The 'cond' attribute must contain a boolean expression that determines when to execute the elseif block.`,
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
 
 function validateForEachRequiredAttributes(
   foreach: ForEachElement,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
-  const position = findElementPosition('foreach', path, elementPositions);
+  const position = locate('foreach', path);
 
   if (!foreach['@_item']) {
     errors.push({
@@ -526,6 +541,8 @@ function validateForEachRequiredAttributes(
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
   if (!foreach['@_array']) {
@@ -534,6 +551,8 @@ function validateForEachRequiredAttributes(
       severity: 'error',
       line: position?.line,
       column: position?.column,
+      endLine: position?.endLine,
+      endColumn: position?.endColumn,
     });
   }
 }
@@ -541,7 +560,7 @@ function validateForEachRequiredAttributes(
 function validateChildElements(
   element: any,
   reportedErrors: Set<string>,
-  elementPositions: Map<any, { line: number; column: number }>,
+  locate: Locate,
   errors: ValidationError[],
   path: string
 ): void {
@@ -579,7 +598,7 @@ function validateChildElements(
         validateRequiredAttributesRecursive(
           child,
           reportedErrors,
-          elementPositions,
+          locate,
           errors,
           type,
           childPath
@@ -633,341 +652,110 @@ export function validateExecutableElements(
 
 /**
  * Validate all element attributes against schemas
+ *
+ * Walks every element the parser produced (root <datamodel>, <parallel>
+ * children, executable content nested at any depth) and reports attributes
+ * missing from the element's schema. When xmlContent is given, each error
+ * carries the exact source range of the offending attribute.
  */
 export function validateAllElementAttributes(
   scxml: SCXMLElement,
-  errors: ValidationError[]
+  errors: ValidationError[],
+  sourceIndex?: Map<string, SourceElement>
 ): void {
-  validateElementAttributes(
+  validateElementAttributesRecursive(
     'scxml',
     scxml as unknown as Record<string, unknown>,
-    getValidScxmlAttributes(),
+    'scxml',
+    getElementAttributeSchemas(),
+    sourceIndex,
     errors
   );
-  validateChildElementAttributes(scxml, errors);
 }
 
-function validateChildElementAttributes(
-  element: SCXMLElement | StateElement | ParallelElement,
+// Elements whose children are an arbitrary payload, not SCXML.
+const OPAQUE_ELEMENTS = new Set(['content']);
+
+function validateElementAttributesRecursive(
+  elementName: string,
+  element: Record<string, unknown>,
+  path: string,
+  schemas: Map<string, Set<string>>,
+  sourceIndex: Map<string, SourceElement> | undefined,
   errors: ValidationError[]
 ): void {
-  // Validate states
-  if (element.state) {
-    const states = Array.isArray(element.state) ? element.state : [element.state];
-    states.forEach((state: StateElement) => {
-      validateElementAttributes(
-        'state',
-        state as unknown as Record<string, unknown>,
-        getValidStateAttributes(),
-        errors
-      );
-      validateStateChildren(state, errors);
-      validateChildElementAttributes(state, errors);
-    });
-  }
+  const validAttributes = schemas.get(elementName);
+  if (!validAttributes) return;
 
-  // Validate parallel states
-  if (element.parallel) {
-    const parallels = Array.isArray(element.parallel)
-      ? element.parallel
-      : [element.parallel];
-    parallels.forEach((parallel: ParallelElement) => {
-      validateElementAttributes(
-        'parallel',
-        parallel as unknown as Record<string, unknown>,
-        getValidParallelAttributes(),
-        errors
-      );
-      validateChildElementAttributes(parallel, errors);
-    });
-  }
-
-  // Validate final states
-  if ((element as any).final) {
-    const finals = Array.isArray((element as any).final)
-      ? (element as any).final
-      : [(element as any).final];
-    finals.forEach((final: FinalElement) => {
-      validateElementAttributes(
-        'final',
-        final as unknown as Record<string, unknown>,
-        getValidFinalAttributes(),
-        errors
-      );
-    });
-  }
-
-  // Validate history states
-  if ((element as any).history) {
-    const histories = Array.isArray((element as any).history)
-      ? (element as any).history
-      : [(element as any).history];
-    histories.forEach((history: HistoryElement) => {
-      validateElementAttributes(
-        'history',
-        history as unknown as Record<string, unknown>,
-        getValidHistoryAttributes(),
-        errors
-      );
-    });
-  }
-
-  // Validate transitions
-  if ((element as any).transition) {
-    const transitions = Array.isArray((element as any).transition)
-      ? (element as any).transition
-      : [(element as any).transition];
-    transitions.forEach((transition: TransitionElement) => {
-      validateElementAttributes(
-        'transition',
-        transition as unknown as Record<string, unknown>,
-        getValidTransitionAttributes(),
-        errors
-      );
-    });
-  }
-}
-
-function validateStateChildren(state: StateElement, errors: ValidationError[]): void {
-  // Validate onentry
-  if (state.onentry) {
-    const onentries = Array.isArray(state.onentry) ? state.onentry : [state.onentry];
-    onentries.forEach((onentry: OnEntryElement) => {
-      validateElementAttributes(
-        'onentry',
-        onentry as unknown as Record<string, unknown>,
-        getValidOnentryAttributes(),
-        errors
-      );
-    });
-  }
-
-  // Validate onexit
-  if (state.onexit) {
-    const onexits = Array.isArray(state.onexit) ? state.onexit : [state.onexit];
-    onexits.forEach((onexit: OnExitElement) => {
-      validateElementAttributes(
-        'onexit',
-        onexit as unknown as Record<string, unknown>,
-        getValidOnexitAttributes(),
-        errors
-      );
-    });
-  }
-
-  // Validate datamodel
-  if (state.datamodel) {
-    const datamodels = Array.isArray(state.datamodel)
-      ? state.datamodel
-      : [state.datamodel];
-    datamodels.forEach((datamodel: DataModelElement) => {
-      validateElementAttributes(
-        'datamodel',
-        datamodel as unknown as Record<string, unknown>,
-        getValidDatamodelAttributes(),
-        errors
-      );
-
-      // Validate data elements
-      if (datamodel.data) {
-        const dataElements = Array.isArray(datamodel.data)
-          ? datamodel.data
-          : [datamodel.data];
-        dataElements.forEach((data: DataElement) => {
-          validateElementAttributes(
-            'data',
-            data as unknown as Record<string, unknown>,
-            getValidDataAttributes(),
-            errors
-          );
-        });
-      }
-    });
-  }
-
-  // Validate invoke
-  if (state.invoke) {
-    const invokes = Array.isArray(state.invoke) ? state.invoke : [state.invoke];
-    invokes.forEach((invoke: InvokeElement) => {
-      validateElementAttributes(
-        'invoke',
-        invoke as unknown as Record<string, unknown>,
-        getValidInvokeAttributes(),
-        errors
-      );
-    });
-  }
-
-  // Validate executable content
-  validateExecutableContent(state.onentry, errors);
-  validateExecutableContent(state.onexit, errors);
-}
-
-function validateExecutableContent(
-  element:
-    | OnEntryElement
-    | OnExitElement
-    | OnEntryElement[]
-    | OnExitElement[]
-    | undefined,
-  errors: ValidationError[]
-): void {
-  if (!element) return;
-  const elements = Array.isArray(element) ? element : [element];
-  elements.forEach((el: OnEntryElement | OnExitElement) => {
-    if (el.executable) {
-      el.executable.forEach((executable) => {
-        validateExecutableElement(executable, errors);
-      });
-    }
-  });
-}
-
-function validateExecutableElement(
-  executable: import('@/types/scxml').ExecutableElement,
-  errors: ValidationError[]
-): void {
-  const elementType = Object.keys(executable).find(
-    (key) => !key.startsWith('@_') && key !== '#text' && key !== '#cdata'
+  validateElementAttributes(
+    elementName,
+    element,
+    validAttributes,
+    sourceIndex?.get(path),
+    errors
   );
 
-  if (!elementType) return;
+  if (OPAQUE_ELEMENTS.has(elementName)) return;
 
-  switch (elementType) {
-    case 'raise':
-      validateElementAttributes(
-        'raise',
-        executable as Record<string, unknown>,
-        getValidRaiseAttributes(),
+  Object.keys(element).forEach((key) => {
+    if (key.startsWith('@_') || key === '#text' || key === '#cdata') return;
+    if (!schemas.has(key)) return;
+
+    const value = element[key];
+    const children = Array.isArray(value) ? value : [value];
+    children.forEach((child, index) => {
+      // Text-only elements without attributes parse to primitives.
+      if (!child || typeof child !== 'object') return;
+      validateElementAttributesRecursive(
+        key,
+        child as Record<string, unknown>,
+        `${path}.${key}[${index}]`,
+        schemas,
+        sourceIndex,
         errors
       );
-      break;
-    case 'if':
-      validateElementAttributes(
-        'if',
-        executable as Record<string, unknown>,
-        getValidIfAttributes(),
-        errors
-      );
-      const ifEl = executable as IfElement;
-      if (ifEl.executable) {
-        ifEl.executable.forEach((nested) => validateExecutableElement(nested, errors));
-      }
-      break;
-    case 'elseif':
-      validateElementAttributes(
-        'elseif',
-        executable as Record<string, unknown>,
-        getValidElseifAttributes(),
-        errors
-      );
-      break;
-    case 'else':
-      validateElementAttributes(
-        'else',
-        executable as Record<string, unknown>,
-        getValidElseAttributes(),
-        errors
-      );
-      const elseEl = executable as ElseElement;
-      if (elseEl.executable) {
-        elseEl.executable.forEach((nested) =>
-          validateExecutableElement(nested, errors)
-        );
-      }
-      break;
-    case 'foreach':
-      validateElementAttributes(
-        'foreach',
-        executable as Record<string, unknown>,
-        getValidForeachAttributes(),
-        errors
-      );
-      const foreachEl = executable as ForEachElement;
-      if (foreachEl.executable) {
-        foreachEl.executable.forEach((nested) =>
-          validateExecutableElement(nested, errors)
-        );
-      }
-      break;
-    case 'log':
-      validateElementAttributes(
-        'log',
-        executable as Record<string, unknown>,
-        getValidLogAttributes(),
-        errors
-      );
-      break;
-    case 'assign':
-      validateElementAttributes(
-        'assign',
-        executable as Record<string, unknown>,
-        getValidAssignAttributes(),
-        errors
-      );
-      break;
-    case 'script':
-      validateElementAttributes(
-        'script',
-        executable as Record<string, unknown>,
-        getValidScriptAttributes(),
-        errors
-      );
-      break;
-    case 'send':
-      validateElementAttributes(
-        'send',
-        executable as Record<string, unknown>,
-        getValidSendAttributes(),
-        errors
-      );
-      break;
-    case 'cancel':
-      validateElementAttributes(
-        'cancel',
-        executable as Record<string, unknown>,
-        getValidCancelAttributes(),
-        errors
-      );
-      break;
-  }
+    });
+  });
 }
 
 function validateElementAttributes(
   elementName: string,
   element: Record<string, unknown>,
   validAttributes: Set<string>,
+  source: SourceElement | undefined,
   errors: ValidationError[]
 ): void {
-  if (!element || typeof element !== 'object') return;
-
   Object.keys(element).forEach((key) => {
-    // Skip non-attribute properties
-    if (!key.startsWith('@_') && key !== '#text' && key !== '#cdata') return;
+    // Only attributes; '#text' is element content, not an attribute.
+    if (!key.startsWith('@_')) return;
 
-    const attributeName = key.startsWith('@_') ? key.substring(2) : key;
+    const attributeName = key.substring(2);
 
-    // Skip visual namespace attributes
-    if (attributeName.includes(':') && attributeName.match(/^[\w-]+:[\w-]+$/)) {
-      return;
-    }
+    // Namespaced attributes (viz:xywh, xmlns:viz, ...) are allowed extensions,
+    // and a default-namespace declaration is legal on any element.
+    if (attributeName.includes(':') || attributeName === 'xmlns') return;
 
-    // Skip xmlns declarations
-    if (attributeName.startsWith('xmlns:')) {
-      return;
-    }
+    if (validAttributes.has(attributeName)) return;
 
-    if (!validAttributes.has(attributeName)) {
-      const suggestion = findSimilarAttribute(attributeName, validAttributes);
-      const elementId = element['@_id'] ? ` (id: ${element['@_id']})` : '';
+    const suggestion = findSimilarAttribute(attributeName, validAttributes);
+    const elementId = element['@_id'] ? ` id="${element['@_id']}"` : '';
+    const allowed =
+      validAttributes.size > 0
+        ? ` Valid attributes for <${elementName}>: ${[...validAttributes].join(', ')}.`
+        : ` <${elementName}> does not take any attributes.`;
+    const fix = suggestion
+      ? ` Did you mean '${suggestion}'?`
+      : ' Custom attributes need a namespace prefix (e.g. viz:name) declared on <scxml>.';
+    const range = source?.attributes.get(attributeName) ?? source?.range;
 
-      errors.push({
-        message: `Unknown attribute '${attributeName}' in <${elementName}>${elementId}${
-          suggestion ? `. Did you mean '${suggestion}'?` : ''
-        }`,
-        severity: 'error',
-      });
-    }
+    errors.push({
+      message: `Unknown attribute '${attributeName}' on <${elementName}${elementId}>.${fix}${allowed}`,
+      severity: 'error',
+      line: range?.line,
+      column: range?.column,
+      endLine: range?.endLine,
+      endColumn: range?.endColumn,
+    });
   });
 }
 

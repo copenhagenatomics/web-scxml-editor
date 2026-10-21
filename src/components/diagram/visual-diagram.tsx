@@ -106,6 +106,17 @@ import {
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
+import { inferChannelInitialExpr, inferChannelRetypes } from '@/lib/utils/datamodel-extractor';
+import { UpdateDataExprCommand } from '@/lib/commands/update-data-expr-command';
+
+/** Re-types channels whose <data expr> no longer matches the values assigned to them. */
+function retypeChannelsFromAssigns(content: string): string {
+  return inferChannelRetypes(content).reduce((acc, { id, expr }) => {
+    const result = new UpdateDataExprCommand(id, expr).execute(acc);
+    return result.success ? result.newContent : acc;
+  }, content);
+}
+import { parseAssignActionString } from '@/lib/utils/action-string';
 
 // ==================== TYPES & INTERFACES ====================
 interface VisualDiagramProps {
@@ -432,7 +443,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const result = command.execute(scxmlContent);
 
         if (result.success) {
-          onSCXMLChange(result.newContent, 'property');
+          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
         } else {
           console.error('Failed to update actions:', result.error);
         }
@@ -552,7 +563,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const command = new UpdateInternalEventsCommand(nodeId, actions);
         const result = command.execute(scxmlContent);
         if (result.success) {
-          onSCXMLChange(result.newContent, 'property');
+          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
         } else {
           console.error('Failed to update internal event reactions:', result.error);
         }
@@ -924,8 +935,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const { AddDataCommand, UpdateTransitionCommand } = require('@/lib/commands');
         const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
 
-        // Step 1: insert <data> element
-        const addResult = new AddDataCommand(channelName).execute(scxmlContent);
+        // Step 1: insert <data> element — a channel used as the whole cond is a bool
+        const initialExpr = editingField === 'cond' ? 'false' : '0';
+        const addResult = new AddDataCommand(channelName, initialExpr).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
         // Step 2: update the transition cond/event on the already-modified content
@@ -958,8 +970,15 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       try {
         const { AddDataCommand, UpdateActionsCommand, UpdateInternalEventsCommand } = require('@/lib/commands');
 
-        // Step 1: insert the data element for the new channel
-        const addResult = new AddDataCommand(channelName).execute(scxmlContent);
+        // Step 1: insert the data element for the new channel, typed from the value assigned to it
+        // (no matching assign, e.g. a channel picked inside an expression, falls back to int)
+        const assignedValue = apply.kind === 'reactions'
+          ? apply.actions.find((a) => a.location === channelName)?.expr
+          : [...apply.entryActions, ...apply.exitActions]
+              .map(parseAssignActionString)
+              .find((assign) => assign?.location === channelName)
+              ?.expr;
+        const addResult = new AddDataCommand(channelName, inferChannelInitialExpr(assignedValue)).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
         // Step 2: apply the actions/reactions change on the already-patched content
@@ -1446,9 +1465,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                     // raw onentry/onexit rows. They remain in the underlying
                     // SCXML and are visible in the code editor.
                     return actions.filter((a) => !isTimerGeneratedActionString(a)).flatMap((a): ParsedActionRow[] => {
-                      if (a.startsWith('assign|')) {
-                        const parts = a.split('|');
-                        return [{ type: 'assign', location: parts[1] || '', expr: parts.slice(2).join('|') }];
+                      const assign = parseAssignActionString(a);
+                      if (assign) {
+                        return [{ type: 'assign', ...assign }];
                       }
                       if (a.startsWith('send|')) {
                         const parts = a.split('|');

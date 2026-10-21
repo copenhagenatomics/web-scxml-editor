@@ -21,6 +21,7 @@ export { DeleteNodeCommand } from './delete-node-command';
 export { AddNoteCommand, UpdateNoteTextCommand, DeleteNoteCommand } from './note-commands';
 export { ReconnectTransitionCommand } from './reconnect-transition-command';
 export { AddDataCommand } from './add-data-command';
+export { UpdateDataExprCommand } from './update-data-expr-command';
 export { UpdateInternalEventsCommand, type InternalEventAction } from './update-internal-events-command';
 export { ToggleInitialStateCommand } from './toggle-initial-state-command';
 export { AddAnchorPointCommand } from './add-anchor-point-command';
