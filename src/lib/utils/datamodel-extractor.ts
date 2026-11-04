@@ -126,7 +126,7 @@ function inferExprType(raw: string): ExprType {
   // logical: type of the operands; bare variables on both sides are assumed to be bool flags
   if (/\|\||&&/.test(masked)) {
     const t = mergeTypes(splitAtTopLevel(expr, masked, /\|\||&&/g).map(inferExprType));
-    return t === 'unknown' ? 'bool' : t;
+    return t === 'unknown' && !/[+\-*/%]/.test(expr) ? 'bool' : t;
   }
 
   const hasShift = /<<|>>/.test(masked);
@@ -136,8 +136,10 @@ function inferExprType(raw: string): ExprType {
   if (hasShift || /[&|^]/.test(masked)) return 'int';
 
   if (/[+\-*/%]/.test(masked)) {
-    const t = mergeTypes(splitAtTopLevel(expr, masked, /[+\-*/%]/g).map(inferExprType).filter((p) => p !== 'unknown'));
-    return t === 'double' ? 'double' : 'int';
+    // any double makes the result double; otherwise an operand of unknown type could still be one
+    const operands = splitAtTopLevel(expr, masked, /[+\-*/%]/g).filter((p) => p.trim()).map(inferExprType);
+    if (operands.includes('double')) return 'double';
+    return operands.includes('unknown') ? 'unknown' : 'int';
   }
 
   if (expr === 'true' || expr === 'false') return 'bool';
@@ -151,13 +153,15 @@ function inferExprType(raw: string): ExprType {
  * it (the <assign expr>) — the assigned expression itself never goes into <data expr>. The
  * LoopCode C# generator (GetFieldAndType) infers the field type from this literal and only
  * accepts the zero value per type for non-config fields: "false" -> bool, "0.0" -> double,
- * "0" -> int. Non-config string fields are rejected by the generator, so anything else is int.
+ * "0" -> int. Anything of unknown type is double: a double field accepts both int and double
+ * values, while assigning a double to an int field fails to compile. Non-config string fields
+ * are rejected by the generator whichever type is declared.
  */
 export function inferChannelInitialExpr(assignedValue: string | undefined): string {
   switch (inferExprType(assignedValue ?? '')) {
     case 'bool': return 'false';
-    case 'double': return '0.0';
-    default: return '0';
+    case 'int': return '0';
+    default: return '0.0';
   }
 }
 
@@ -167,7 +171,9 @@ const AUTO_CHANNEL_EXPRS: ReadonlySet<string> = new Set(['false', '0.0', '0']);
  * Finds this_ channels whose <data expr> no longer matches the values assigned to them. Only
  * channels still holding a generated zero value are considered (a hand-written initial value is
  * left alone), and only when every <assign> to the channel agrees on one type; conflicting
- * assigns have no single correct type, so they are skipped.
+ * assigns have no single correct type, so they are skipped. So are assigns whose type cannot be
+ * determined, and a double is never narrowed to int: variable types are unknown here, and the
+ * generated C# rejects assigning a double to an int field but accepts an int in a double field.
  */
 export function inferChannelRetypes(xmlContent: string): Array<{ id: string; expr: string }> {
   let parsed: unknown;
@@ -187,7 +193,7 @@ export function inferChannelRetypes(xmlContent: string): Array<{ id: string; exp
           const expr = item?.['@_expr'];
           if (typeof location !== 'string' || typeof expr !== 'string') continue;
           const types = assignedTypes.get(location) ?? new Set<string>();
-          types.add(inferChannelInitialExpr(expr));
+          types.add(inferExprType(expr) === 'unknown' ? 'unknown' : inferChannelInitialExpr(expr));
           assignedTypes.set(location, types);
         }
       } else {
@@ -203,8 +209,9 @@ export function inferChannelRetypes(xmlContent: string): Array<{ id: string; exp
     const current = node['@_expr'] ?? '';
     if (!id?.startsWith('this_') || !AUTO_CHANNEL_EXPRS.has(current)) continue;
     const types = assignedTypes.get(id);
-    if (types?.size !== 1) continue;
+    if (types?.size !== 1 || types.has('unknown')) continue;
     const [inferred] = types;
+    if (current === '0.0' && inferred === '0') continue;
     if (inferred !== current) retypes.push({ id, expr: inferred });
   }
   return retypes;

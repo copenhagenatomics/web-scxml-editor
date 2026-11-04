@@ -936,7 +936,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
 
         // Step 1: insert <data> element — a channel used as the whole cond is a bool
-        const initialExpr = editingField === 'cond' ? 'false' : '0';
+        const initialExpr = editingField === 'cond' ? 'false' : '0.0';
         const addResult = new AddDataCommand(channelName, initialExpr).execute(scxmlContent);
         const base = addResult.success ? addResult.newContent : scxmlContent;
 
@@ -971,7 +971,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const { AddDataCommand, UpdateActionsCommand, UpdateInternalEventsCommand } = require('@/lib/commands');
 
         // Step 1: insert the data element for the new channel, typed from the value assigned to it
-        // (no matching assign, e.g. a channel picked inside an expression, falls back to int)
+        // (no matching assign, e.g. a channel picked inside an expression, falls back to double)
         const assignedValue = apply.kind === 'reactions'
           ? apply.actions.find((a) => a.location === channelName)?.expr
           : [...apply.entryActions, ...apply.exitActions]

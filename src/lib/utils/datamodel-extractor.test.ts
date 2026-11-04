@@ -59,17 +59,21 @@ describe('inferChannelInitialExpr (assigned value -> <data expr> for a new chann
     expect(inferChannelInitialExpr(input)).toBe(expected);
   });
 
+  it.each([['0'], ['42'], ['-5'], ['1 + 2']])('assigning %j declares an int channel: <data expr="0">', (input) => {
+    expect(inferChannelInitialExpr(input)).toBe('0');
+  });
+
   it.each([
-    ['0'],
-    ['42'],
+    ['this_a'],
     ['this_a + 1'],
+    ['this_a - this_b'],
     ['Math.floor(this_a)'],
-    // Non-config string fields are rejected by the C# generator, so strings fall back to int
+    // Non-config string fields are rejected by the C# generator whichever type is declared
     ["'abc'"],
     [''],
     [undefined],
-  ])('assigning %j declares an int channel: <data expr="0">', (input) => {
-    expect(inferChannelInitialExpr(input)).toBe('0');
+  ])('declares a double channel when the type of %j is unknown: <data expr="0.0">', (input) => {
+    expect(inferChannelInitialExpr(input)).toBe('0.0');
   });
 });
 
@@ -95,6 +99,51 @@ describe('inferChannelRetypes', () => {
 
   it('leaves hand-written initial values and conf_ data alone', () => {
     const xml = doc('<data id="this_v" expr="5"/><data id="conf_v" expr="false"/>', entry('1.5'));
+    expect(inferChannelRetypes(xml)).toEqual([]);
+  });
+
+  // Channels are doubles in the generated C#, so narrowing this_v to int fails with CS0266.
+  it.each([['this_a - this_b'], ['this_a + 1'], ['this_a * 2']])(
+    'never narrows a double channel to int: %j',
+    (assigned) => {
+      expect(inferChannelRetypes(doc('<data id="this_v" expr="0.0"/>', entry(assigned)))).toEqual([]);
+    }
+  );
+
+  it('still widens an int channel to double', () => {
+    const xml = doc('<data id="this_v" expr="0"/>', entry('1.5'));
+    expect(inferChannelRetypes(xml)).toEqual([{ id: 'this_v', expr: '0.0' }]);
+  });
+
+  it('still retypes a double channel to bool', () => {
+    const xml = doc('<data id="this_v" expr="0.0"/>', entry('this_a > 5'));
+    expect(inferChannelRetypes(xml)).toEqual([{ id: 'this_v', expr: 'false' }]);
+  });
+
+  it.each([
+    ['this_a'],
+    ['Math.floor(this_a)'],
+    ['this_a - this_b'],
+    ['this_a + 1'],
+    ['(this_a - this_b) || this_c'],
+  ])(
+    'leaves a channel alone when an assigned type cannot be determined: %j',
+    (assigned) => {
+      expect(inferChannelRetypes(doc('<data id="this_v" expr="false"/>', entry(assigned)))).toEqual([]);
+    }
+  );
+
+  it.each([
+    ['1 + 2', '0'],
+    ['-5', '0'],
+    ['this_a * 2.5', '0.0'],
+  ])('still retypes when arithmetic has a known type: %j -> %j', (assigned, expected) => {
+    const xml = doc('<data id="this_v" expr="false"/>', entry(assigned));
+    expect(inferChannelRetypes(xml)).toEqual([{ id: 'this_v', expr: expected }]);
+  });
+
+  it('leaves a channel alone when only some assigned types can be determined', () => {
+    const xml = doc('<data id="this_v" expr="false"/>', entry('this_a', '5'));
     expect(inferChannelRetypes(xml)).toEqual([]);
   });
 });
