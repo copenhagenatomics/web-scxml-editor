@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Code2, Workflow, ChevronRight, Home, Layers } from "lucide-react";
-import { InlineTipsCarousel } from "./inline-tips-carousel";
+import { TipsPopover, type Tip } from "./tips-popover";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useHostAPIStore } from "@/stores/host-api-store";
 import { useEditorStore } from "@/stores/editor-store";
@@ -101,7 +101,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
     [setFocusTarget, onNavigateToLine]
   );
 
-  const editorTips = [
+  const editorTips: Tip[] = [
     {
       tab: "code" as const,
       content: (
@@ -360,12 +360,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
 
         <div className='flex-1' />
 
-        <InlineTipsCarousel
-          tips={editorTips}
-          activeTab={activeTab}
-          autoAdvance={true}
-          autoAdvanceInterval={10000}
-        />
+        <TipsPopover tips={editorTips} activeTab={activeTab} />
 
         <ThemeToggle />
 
