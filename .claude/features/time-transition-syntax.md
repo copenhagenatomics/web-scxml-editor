@@ -9,6 +9,7 @@ Let a user author a timed/delayed transition (`after 2s`, `after 714ms`, `after 
 - In the Transition panel, typing `after 2s` (or `after 714ms`, or `after (expr) s` for a dynamic/expression-based delay) sets up a transition that fires after that delay.
 - The displayed text always shows the human-authored form (`after 2s`) — the underlying millisecond-conversion math is invisible to the user.
 - Renaming the source state automatically updates the auto-generated timer event name baked into the transition — the user does not need to manually fix up a timer transition after a rename.
+- Dragging a timer transition's source end onto another state moves the timer with it (issue #79): the `<send>`/`<cancel>` pair relocates to the new source and the token is re-issued as `{newSourceId}_t_N_timeEvent_N` (next free N). Dragging only the target end leaves the timer where it is.
 
 ## UI behavior
 
@@ -21,6 +22,7 @@ Let a user author a timed/delayed transition (`after 2s`, `after 714ms`, `after 
 - **Critical runtime constraint**: the LoopControl runtime interprets a bare `delayexpr` value as **raw milliseconds with no unit conversion**. So any delay authored in seconds gets a `* 1000` baked directly into the stored `delayexpr` expression string by `ensureMsConversion()` — this is not a display artifact, it's what actually gets compiled/run. `formatAfterSyntax()` reverses this for display so the round-trip is invisible to the user.
 - **Storage → display**: `resolveTimeEventDisplay()`/`findTimeEventToken()` scan the source state's entry actions for a `send|...` action matching the synthetic-event naming pattern and reconstruct the human-readable "after X" string per-token — this must work even when the transition's `event` attribute is a **comma-merged multi-event list** (from `transition-merge-utils.ts`), resolving only the matching token and leaving other event names in the list untouched.
 - **Rename coupling**: because the synthetic event name literally embeds the state id (`{oldId}_t_N_timeEvent_N`), `RenameStateCommand` must specifically rewrite this token (via `renameTimeEventTokensInEventList`) inside the renamed state's own `transition/@event`, `onentry > send/@event`, and `onexit > cancel/@sendid` — a plain string-replace-everywhere would be wrong since it needs to only touch the *token* inside a possibly comma-merged list, not any other part of an event name that happens to contain the old id as a substring.
+- **Reconnect coupling**: `ReconnectTransitionCommand.moveTimeEvent()` handles a source change — it moves the old source's matching `onentry > send[event]` / `onexit > cancel[sendid]` (removing a now-empty block, appending to the new source's last existing block or a new one), and rewrites only the token inside the transition's event list. It does nothing if the old source has no matching `<send>` (a hand-written timer sent elsewhere), and copies rather than moves if another transition left on the old source still uses the token. `undo()` passes the original token back as `preferredTimeEventName` so the round-trip restores the exact original name.
 - **Slot classification coupling**: `transition-slot-rules.ts`'s `classifyTransitionSlot` uses `isTimeEventName()` (the same pattern-matcher) specifically to distinguish the `'timer'` slot from a plain `'event'` slot — a transition-slot conflict message like "Only one timer-based transition is allowed from 'A' to 'B'" depends on this classification being correct.
 
 ## Relevant components
@@ -50,11 +52,11 @@ No dedicated validator rule exists solely for "after X" syntax — timer transit
 
 ## Related files
 
-`src/lib/utils/time-transition.ts`, `src/lib/commands/rename-state-command.ts` (the token-rewrite coupling), `src/lib/utils/transition-slot-rules.ts` (the `'timer'` slot), `src/components/diagram/transition-panel.tsx`.
+`src/lib/utils/time-transition.ts`, `src/lib/commands/rename-state-command.ts` (the token-rewrite coupling), `src/lib/commands/reconnect-transition-command.ts` (the source-change move), `src/lib/utils/transition-slot-rules.ts` (the `'timer'` slot), `src/components/diagram/transition-panel.tsx`.
 
 ## Tests
 
-`src/lib/utils/time-transition.test.ts`.
+`src/lib/utils/time-transition.test.ts`, `src/lib/commands/reconnect-transition-command.test.ts`.
 
 ## Known limitations
 
