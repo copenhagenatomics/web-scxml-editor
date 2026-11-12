@@ -14,10 +14,12 @@ import { Download, Eye, Github, MoreVertical, Upload as UploadIcon } from 'lucid
 import { useShallow } from 'zustand/react/shallow';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { CodeEditorPane } from './_components/code-editor-pane';
-import { VisualEditorPane } from './_components/visual-editor-pane';
+import { DraftRestoreBanner } from './_components/draft-restore-banner';
+import { VisualEditorPane, type DiagramChangeType } from './_components/visual-editor-pane';
 import { WelcomeScreen } from './_components/welcome-screen';
 import { useContentValidation } from './_hooks/use-content-validation';
 import { useDownload } from './_hooks/use-download';
+import { useDraftAutosave } from './_hooks/use-draft-autosave';
 import { useFileOperations } from './_hooks/use-file-operations';
 import { useHistoryRestore } from './_hooks/use-history-restore';
 import { useHostAPIBridge } from './_hooks/use-host-api-bridge';
@@ -47,6 +49,18 @@ export default function Home() {
   const { fileInputRef, handleFileLoad, handleFileError, handleCreateNewDocument, handleNewFileUpload, handleFileInputChange } = useFileOperations();
   const { handleDownloadClean, handleDownloadWithVisualData } = useDownload();
   const { isMoreMenuOpen, setIsMoreMenuOpen, moreMenuRef } = useMoreMenu();
+  // Before useHostAPIBridge: it must already be subscribed when the host calls loadScxml.
+  const { draftBanner, restoreDraft, discardDraft, discardRestoredChanges, dismissRestoredNotice } =
+    useDraftAutosave();
+  const draftBannerElement = (
+    <DraftRestoreBanner
+      state={draftBanner}
+      onRestore={restoreDraft}
+      onDiscard={discardDraft}
+      onDiscardRestored={discardRestoredChanges}
+      onDismissRestored={dismissRestoredNotice}
+    />
+  );
   const { handleEntriesChange } = useHostAPIBridge();
   useContentValidation();
 
@@ -107,13 +121,24 @@ export default function Home() {
   );
 
   const handleSCXMLChangeFromDiagram = useCallback(
-    (newContent: string, changeType?: 'position' | 'structure' | 'property' | 'resize') => {
+    (newContent: string, changeType?: DiagramChangeType) => {
+      const wasClean = !useEditorStore.getState().isDirty;
       setContent(newContent);
+      // The diagram's automatic first layout (adding viz:xywh to a document that
+      // had none) is not a user edit: if nothing was edited yet, it becomes part of
+      // the baseline, so it doesn't count as unsaved changes (draft / leave prompt).
+      if (changeType === 'layout-init' && wasClean) {
+        useEditorStore.getState().markSaved();
+      }
       // Track the post-normalization content (already computed synchronously
       // by setContent above), not the pre-normalization newContent, so a
       // history entry always matches what was actually live at that point.
       if (!isUpdatingFromHistory) {
-        historyManager.trackDiagramChange(useEditorStore.getState().content, undefined, changeType);
+        historyManager.trackDiagramChange(
+          useEditorStore.getState().content,
+          undefined,
+          changeType === 'layout-init' ? 'position' : changeType
+        );
       }
     },
     [setContent, historyManager, isUpdatingFromHistory]
@@ -260,44 +285,50 @@ export default function Home() {
             <div className='h-8 w-8 border-4 border-primary border-t-transparent rounded-full animate-spin' />
           </div>
         ) : !content ? (
-          <WelcomeScreen
-            onFileLoad={handleFileLoad}
-            onFileError={handleFileError}
-            onCreateNew={handleCreateNewDocument}
-          />
-        ) : (
-          <div className='h-screen relative'>
-            <TwoTabLayout
-              codeEditor={
-                <CodeEditorPane
-                  editorRef={editorRef}
-                  onContentChange={handleContentChange}
-                  onErrorClick={handleErrorClick}
-                  validationPanelTab={validationPanelTab}
-                  onValidationTabChange={setValidationPanelTab}
-                  onValidationClose={handleValidationClose}
-                  onEntriesChange={handleEntriesChange}
-                  onEditorMount={handleEditorMount}
-                />
-              }
-              visualDiagram={
-                <VisualEditorPane
-                  onSCXMLChange={handleSCXMLChangeFromDiagram}
-                  isUpdatingFromHistory={isUpdatingFromHistory}
-                  historyActionType={currentHistoryActionType}
-                  onEntriesChange={handleEntriesChange}
-                  onContentChange={handleContentChange}
-                />
-              }
-              fileInfo={{ name: fileInfo?.name, isDirty }}
-              actions={renderActions}
-              validationPanelTab={validationPanelTab}
-              onValidationTabChange={setValidationPanelTab}
-              onValidationClose={handleValidationClose}
-              onNavigateToLine={(line, column) => {
-                pendingNavigateRef.current = { line, column };
-              }}
+          <>
+            {draftBannerElement}
+            <WelcomeScreen
+              onFileLoad={handleFileLoad}
+              onFileError={handleFileError}
+              onCreateNew={handleCreateNewDocument}
             />
+          </>
+        ) : (
+          <div className='h-screen flex flex-col'>
+            {draftBannerElement}
+            <div className='flex-1 min-h-0 relative'>
+              <TwoTabLayout
+                codeEditor={
+                  <CodeEditorPane
+                    editorRef={editorRef}
+                    onContentChange={handleContentChange}
+                    onErrorClick={handleErrorClick}
+                    validationPanelTab={validationPanelTab}
+                    onValidationTabChange={setValidationPanelTab}
+                    onValidationClose={handleValidationClose}
+                    onEntriesChange={handleEntriesChange}
+                    onEditorMount={handleEditorMount}
+                  />
+                }
+                visualDiagram={
+                  <VisualEditorPane
+                    onSCXMLChange={handleSCXMLChangeFromDiagram}
+                    isUpdatingFromHistory={isUpdatingFromHistory}
+                    historyActionType={currentHistoryActionType}
+                    onEntriesChange={handleEntriesChange}
+                    onContentChange={handleContentChange}
+                  />
+                }
+                fileInfo={{ name: fileInfo?.name, isDirty }}
+                actions={renderActions}
+                validationPanelTab={validationPanelTab}
+                onValidationTabChange={setValidationPanelTab}
+                onValidationClose={handleValidationClose}
+                onNavigateToLine={(line, column) => {
+                  pendingNavigateRef.current = { line, column };
+                }}
+              />
+            </div>
           </div>
         )}
       </div>

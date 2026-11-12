@@ -33,6 +33,11 @@ export interface HierarchyState {
 
 interface EditorStore extends EditorState {
   fileInfo: FileInfo | null;
+  // Incremented by every setFileInfo() call (a document load: upload, create-new,
+  // GitHub pull, host loadScxml) — but not by markSaved(), which only moves the
+  // dirty-tracking baseline. Lets the draft autosave tell "a new document was
+  // loaded" apart from "the current one was saved".
+  loadGeneration: number;
 
   // Hierarchy navigation state
   hierarchyState: HierarchyState;
@@ -50,6 +55,9 @@ interface EditorStore extends EditorState {
   setFileInfo: (fileInfo: FileInfo | null) => void;
   markDirty: () => void;
   markClean: () => void;
+  // Make the current content the new dirty-tracking baseline (e.g. after a
+  // successful GitHub push), without counting as a document load.
+  markSaved: () => void;
   reset: () => void;
 
   // Hierarchy navigation actions
@@ -77,6 +85,7 @@ const initialHierarchyState: HierarchyState = {
 export const useEditorStore = create<EditorStore>((set, get) => ({
   ...initialState,
   fileInfo: null,
+  loadGeneration: 0,
   hierarchyState: initialHierarchyState,
   initialChildByParent: new Map(),
   focusTarget: null,
@@ -104,7 +113,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       fileInfo: normalizedFileInfo,
       content: normalized,
       isDirty: false,
-      errors: []
+      errors: [],
+      loadGeneration: get().loadGeneration + 1,
     });
   },
 
@@ -114,6 +124,18 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   markClean: () => {
     set({ isDirty: false });
+  },
+
+  markSaved: () => {
+    const { content, fileInfo } = get();
+    if (!fileInfo) {
+      set({ isDirty: false });
+      return;
+    }
+    set({
+      fileInfo: { ...fileInfo, content, size: content.length },
+      isDirty: false,
+    });
   },
 
   reset: () => {

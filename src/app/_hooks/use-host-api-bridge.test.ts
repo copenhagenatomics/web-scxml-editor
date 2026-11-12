@@ -3,6 +3,7 @@ import { renderHook, act, cleanup } from '@testing-library/react';
 import { useHostAPIBridge } from './use-host-api-bridge';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { PRE_READY_STUB_SCRIPT } from '@/lib/host-api/pre-ready-stub';
+import { useEditorStore } from '@/stores/editor-store';
 
 // Installs the actual production pre-ready stub (the same script layout.tsx embeds via
 // dangerouslySetInnerHTML) rather than hand-constructing a _q shape, so a producer/handler
@@ -218,5 +219,40 @@ describe('useHostAPIBridge showFeedback sanitization', () => {
     expect(hostErrors).toHaveLength(1);
     expect(hostErrors[0].message).toBe('boom via showErrors');
     expect(requestedValidationTab).toBe('host-alerts');
+  });
+});
+
+describe('useHostAPIBridge loadScxml', () => {
+  beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).ScxmlEditorAPI;
+    useEditorStore.getState().reset();
+  });
+
+  afterEach(() => {
+    act(() => {
+      cleanup();
+    });
+    useHostAPIStore.setState(initialHostAPIState, true);
+    useEditorStore.getState().reset();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).ScxmlEditorAPI;
+  });
+
+  it('makes the host-pushed document the unsaved-changes baseline (#80)', () => {
+    renderHook(() => useHostAPIBridge());
+    const xml = '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A"><state id="A"/></scxml>';
+    const generation = useEditorStore.getState().loadGeneration;
+
+    act(() => {
+      window.ScxmlEditorAPI.loadScxml(xml);
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.content).toBe(xml);
+    expect(state.fileInfo?.content).toBe(xml);
+    expect(state.isDirty).toBe(false);
+    expect(state.loadGeneration).toBe(generation + 1);
+    expect(window.ScxmlEditorAPI.getScxml()).toBe(xml);
   });
 });

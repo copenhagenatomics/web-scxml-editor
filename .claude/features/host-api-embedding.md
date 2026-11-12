@@ -39,7 +39,7 @@ None dedicated beyond the hook itself; it does call into `annotateLegacyConfType
 
 ## SCXML behavior
 
-`loadScxml(xml)` applies the same `annotateLegacyConfTypes` normalization as a manual file upload (but notably **not** the transition-merge normalization that upload/GitHub-pull apply — verify this is intentional if you touch `loadScxml`). `getScxml()` returns the current live content string via a ref (`contentRef`) kept in sync via a `useEffect`, to avoid a stale closure inside the imperatively-constructed API object.
+`loadScxml(xml)` applies the same `annotateLegacyConfTypes` normalization as a manual file upload (but notably **not** the transition-merge normalization that upload/GitHub-pull apply — verify this is intentional if you touch `loadScxml`). It loads through `setFileInfo` (name `document.scxml`), so the host's copy becomes the unsaved-changes baseline and bumps `loadGeneration`, which the draft autosave depends on (see `draft-autosave.md`). It used to call `setContent`, which left `isDirty` meaningless when embedded. `getScxml()` returns the current live content string via a ref (`contentRef`) kept in sync via a `useEffect`, to avoid a stale closure inside the imperatively-constructed API object.
 
 ## Validation rules
 

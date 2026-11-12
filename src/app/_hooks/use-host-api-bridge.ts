@@ -10,7 +10,7 @@ import { useHostAPIStore } from '@/stores/host-api-store';
 import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, FeedbackItem, ScxmlEditorAPI } from '@/types/host-api';
 
 export function useHostAPIBridge() {
-  const { setContent, setErrors, navigateToRoot } = useEditorStore();
+  const { setFileInfo, navigateToRoot } = useEditorStore();
   const { togglePanel } = usePanelStore();
   const { markReady, onReady, registerCommand, showFeedback, showErrors } = useHostAPIStore();
   const historyManager = useMemo(() => HistoryManager.getInstance(), []);
@@ -57,9 +57,16 @@ export function useHostAPIBridge() {
       onReady,
       loadScxml: (xml: string) => {
         const annotated = annotateLegacyConfTypes(xml);
-        setContent(annotated);
-        setErrors([]);
-        historyManager.initialize(annotated, 'Loaded from host');
+        // setFileInfo (not setContent) so the host's copy becomes the dirty-tracking
+        // baseline, like every other load path — the draft autosave compares against it.
+        // 'document.scxml' matches the download filename used when no file is loaded.
+        setFileInfo({
+          name: 'document.scxml',
+          content: annotated,
+          size: annotated.length,
+          lastModified: new Date(),
+        });
+        historyManager.initialize(useEditorStore.getState().content, 'Loaded from host');
         navigateToRoot();
       },
       getScxml: () => contentRef.current,

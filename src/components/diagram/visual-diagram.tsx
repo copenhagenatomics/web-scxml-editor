@@ -104,14 +104,18 @@ function retypeChannelsFromAssigns(content: string): string {
 import { parseAssignActionString } from '@/lib/utils/action-string';
 
 // ==================== TYPES & INTERFACES ====================
+/**
+ * 'layout-init' marks the diagram's automatic first layout write-back (adding
+ * viz:xywh to a document that had none) — not a user edit, so the page can keep
+ * it out of unsaved-changes tracking. History treats it like 'position'.
+ */
+export type DiagramChangeType = 'position' | 'structure' | 'property' | 'resize' | 'layout-init';
+
 interface VisualDiagramProps {
   scxmlContent: string;
   onNodeChange?: (nodes: Node[]) => void;
   onEdgeChange?: (edges: Edge[]) => void;
-  onSCXMLChange?: (
-    scxmlContent: string,
-    changeType?: 'position' | 'structure' | 'property' | 'resize'
-  ) => void;
+  onSCXMLChange?: (scxmlContent: string, changeType?: DiagramChangeType) => void;
   isUpdatingFromHistory?: boolean;
   historyActionType?: ActionType;
 }
@@ -2102,7 +2106,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
           // If SCXML was initialized (viz:xywh added), update with history
           if (initializedSCXML && onSCXMLChange) {
-            onSCXMLChange(initializedSCXML, 'position');
+            onSCXMLChange(initializedSCXML, 'layout-init');
           }
 
           const enhancedNodes = nodes.map((node) => {

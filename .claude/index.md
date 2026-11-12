@@ -112,6 +112,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | crash, blank screen, "something went wrong", ErrorBoundary | [error-handling-and-resilience.md](features/error-handling-and-resilience.md) |
 | tips, toolbar hints, carousel | [inline-tips-carousel.md](features/inline-tips-carousel.md) |
 | embedding, iframe, LoopControl, `window.ScxmlEditorAPI`, host integration | [host-api-embedding.md](features/host-api-embedding.md) |
+| autosave, draft, restore unsaved changes, "Leave page?" prompt, `isDirty`, `markSaved`, data loss on navigation | [draft-autosave.md](features/draft-autosave.md) |
 | config value, `conf_`, IO.Conf, per-deployment setting | [config-panel.md](features/config-panel.md) |
 | channel, channel mapping, unresolved reference, `this_` | [channel-mapping-panel.md](features/channel-mapping-panel.md) |
 | user action, operator button, Events panel, hidden action, EventEntry | [events-user-actions-panel.md](features/events-user-actions-panel.md), [hidden-actions.md](features/hidden-actions.md) |
@@ -144,6 +145,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 | [hidden-actions.md](features/hidden-actions.md) | The `EventEntry.hidden` operator-visibility toggle |
 | [hierarchy-navigation.md](features/hierarchy-navigation.md) | Drill-down navigation into compound states |
 | [host-api-embedding.md](features/host-api-embedding.md) | `window.ScxmlEditorAPI`, embedded-vs-standalone detection, the `_q` queue and its stub script |
+| [draft-autosave.md](features/draft-autosave.md) | Browser-local draft of unsaved edits, the restore banner, the leave-page prompt, and the dirty-tracking baseline |
 | [initial-state-groups.md](features/initial-state-groups.md) | Multiple independent Initial States per hierarchy level |
 | [inline-tips-carousel.md](features/inline-tips-carousel.md) | The auto-advancing toolbar tips strip |
 | [labels.md](features/labels.md) | State id/rename (double-click), edge label display, note text editing |
@@ -170,7 +172,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 
 ### Grouped by theme (alternative view)
 
-- **Core editing loop / data pipeline**: two-way-sync, scxml-parsing, scxml-serialization, scxml-validation, undo-redo-history, file-import-export, error-handling-and-resilience.
+- **Core editing loop / data pipeline**: two-way-sync, scxml-parsing, scxml-serialization, scxml-validation, undo-redo-history, file-import-export, draft-autosave, error-handling-and-resilience.
 - **States**: state-node-types, state-editing, state-hierarchy-tree, initial-state-groups, parallel-state-auto-grouping, labels.
 - **Transitions & connections**: transitions-editing, state-connections-handles, conditions-and-expressions, time-transition-syntax, events-and-executable-actions.
 - **Canvas mechanics**: diagram-interaction, selection, zoom-pan-controls, node-positioning, auto-layout-elk, sticky-notes, drag-and-drop, context-menus (verified absence).
