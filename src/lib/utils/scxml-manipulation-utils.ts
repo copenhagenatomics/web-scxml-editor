@@ -956,11 +956,13 @@ export function updateStatePosition(
  * Removes a <state>, <parallel> or <final> from wherever it currently sits (root or
  * nested, including inside a <parallel>), fixing up the OLD parent's
  * @_initial bookkeeping the same way removeStateFromDocument does — but,
- * unlike removeStateFromDocument, this does NOT touch any transitions, since
- * reparenting must keep every transition targeting the moved state intact.
- * Returns the detached element and its tag for re-insertion elsewhere (see
- * addStateToDocument), or null if not found. A <parallel> parent never gets
- * an `initial` (its children are all active).
+ * unlike removeStateFromDocument, this does NOT touch any transitions: the
+ * moved state keeps its id, so transitions targeting it stay valid
+ * references. Transitions the new nesting turns cross-level are repaired
+ * separately, once all states have moved (fixTransitionsAfterReparent in
+ * reparent-transition-fix.ts). Returns the detached element and its tag for
+ * re-insertion elsewhere (see addStateToDocument), or null if not found. A
+ * <parallel> parent never gets an `initial` (its children are all active).
  */
 export function detachElementFromParent(
   scxmlDoc: SCXMLDocument,

@@ -32,6 +32,11 @@ import {
   checkTransitionEditSlotConflict,
   checkReactionsDoneStateConflict,
 } from '@/lib/utils/transition-slot-rules';
+import {
+  buildStateParentMap,
+  describeRemovedTransitions,
+  fixTransitionsAfterReparent,
+} from '@/lib/utils/reparent-transition-fix';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
 import {
@@ -3005,10 +3010,13 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       // A <final> can't contain child states
       if (targetParentId && isFinalState(scxmlDoc, targetParentId)) return;
       const docBeforeMove = JSON.parse(JSON.stringify(scxmlDoc)) as SCXMLDocument;
+      // Hierarchy before the move, so transitions the move breaks can be told apart
+      // from ones that were already cross-level (#81).
+      const parentsBefore = buildStateParentMap(scxmlDoc);
       const targetIsParallel =
         !!targetParentId && findElementById(scxmlDoc, targetParentId)?.tag === 'parallel';
 
-      let changed = false;
+      const movedIds: string[] = [];
       stateIds.forEach((id) => {
         if (id === targetParentId) return;
         // A <parallel> can't hold a <final> directly — it would vanish from
@@ -3018,7 +3026,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const detached = detachElementFromParent(scxmlDoc, id);
         if (!detached) return;
         addStateToDocument(scxmlDoc, detached.element, targetParentId, detached.tag);
-        changed = true;
+        movedIds.push(id);
 
         if (targetParentId) {
           // A <parallel> takes no `initial` — every child is an always-active region.
@@ -3040,15 +3048,27 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         }
       });
 
-      if (!changed) return;
+      if (movedIds.length === 0) return;
       const nestingCheck = introducesNestedParallel(docBeforeMove, scxmlDoc);
       if (nestingCheck.blocked) {
         showFeedback(nestingCheck.reason || 'Parallel states cannot be nested.', 'warning');
         return;
       }
+
+      // Transitions between a moved state and one left outside would now span
+      // hierarchy levels — hidden on the canvas but still in the document. Remove
+      // them and say which; Undo restores them.
+      const removedTransitions = fixTransitionsAfterReparent(scxmlDoc, movedIds, parentsBefore);
+
       const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
       onSCXMLChange(updatedSCXML, 'structure');
       setActiveStates(new Set());
+
+      const notice = describeRemovedTransitions(removedTransitions);
+      if (notice) {
+        // Lists transitions by name, so give it time to be read (still dismissable).
+        showFeedback(notice, 'warning', { durationMs: 10000 });
+      }
     },
     [scxmlContent, onSCXMLChange, showFeedback]
   );
