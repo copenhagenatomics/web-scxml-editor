@@ -257,6 +257,11 @@ export function GithubPanel({ isVisible, onClose }: GithubPanelProps) {
         linkedRepo.lastKnownSha ?? undefined,
       );
       useGithubStore.getState().updateLinkedRepoSha(newSha);
+      // Only if nothing was edited while the push was in flight — otherwise those
+      // edits would wrongly stop counting as unsaved.
+      if (useEditorStore.getState().content === content) {
+        useEditorStore.getState().markSaved();
+      }
       showFeedback('Pushed to GitHub.', 'info');
     } catch (err) {
       if (err instanceof GithubApiError && err.status === 409) {

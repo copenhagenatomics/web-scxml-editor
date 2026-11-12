@@ -1,13 +1,15 @@
 'use client';
 
-import { VisualDiagram } from '@/components/diagram';
+import { VisualDiagram, type DiagramChangeType } from '@/components/diagram';
 import { useEditorStore } from '@/stores/editor-store';
 import type { ActionType } from '@/types/history';
 import type { ConfigValue } from '@/types/host-api';
 import { SidePanels } from './side-panels';
 
+export type { DiagramChangeType };
+
 export interface VisualEditorPaneProps {
-  onSCXMLChange: (content: string, changeType?: 'position' | 'structure' | 'property' | 'resize') => void;
+  onSCXMLChange: (content: string, changeType?: DiagramChangeType) => void;
   isUpdatingFromHistory: boolean;
   historyActionType: ActionType | undefined;
   onEntriesChange: (values: ConfigValue[]) => void;
