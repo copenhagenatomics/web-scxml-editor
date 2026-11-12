@@ -22,7 +22,8 @@ interface HostAPIActions {
   onReady: (callback: () => void) => void;
   registerCommand: (options: CommandOptions) => void;
   executeCommand: (id: string) => Promise<void>;
-  showFeedback: (message: string, level?: FeedbackItem['level']) => void;
+  /** Toast; auto-dismissed after `durationMs` (default 4000) — pass longer for messages users must read. */
+  showFeedback: (message: string, level?: FeedbackItem['level'], options?: { durationMs?: number }) => void;
   dismissFeedback: (id: string) => void;
   setChannels: (channels: ChannelInfo[]) => void;
   setChannelMappings: (mappings: ChannelMapping[]) => void;
@@ -104,10 +105,10 @@ export const useHostAPIStore = create<HostAPIState & HostAPIActions>((set, get) 
     }
   },
 
-  showFeedback: (message: string, level: FeedbackItem['level'] = 'info') => {
+  showFeedback: (message: string, level: FeedbackItem['level'] = 'info', options?: { durationMs?: number }) => {
     const item: FeedbackItem = { id: uuidv4(), message, level };
     set(state => ({ feedbackQueue: [...state.feedbackQueue, item] }));
-    setTimeout(() => get().dismissFeedback(item.id), 4000);
+    setTimeout(() => get().dismissFeedback(item.id), options?.durationMs ?? 4000);
   },
 
   dismissFeedback: (id: string) => {
