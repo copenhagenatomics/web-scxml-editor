@@ -110,7 +110,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | Monaco, code editor, syntax highlighting, autocomplete in the XML editor, hover docs | [monaco-code-editor.md](features/monaco-code-editor.md) |
 | light mode, dark mode, theme toggle, appearance | [theme-and-appearance.md](features/theme-and-appearance.md) |
 | crash, blank screen, "something went wrong", ErrorBoundary | [error-handling-and-resilience.md](features/error-handling-and-resilience.md) |
-| tips, toolbar hints, carousel | [inline-tips-carousel.md](features/inline-tips-carousel.md) |
+| tips, toolbar hints, lightbulb, 💡 | [tips-popover.md](features/tips-popover.md) |
 | embedding, iframe, LoopControl, `window.ScxmlEditorAPI`, host integration | [host-api-embedding.md](features/host-api-embedding.md) |
 | autosave, draft, restore unsaved changes, "Leave page?" prompt, `isDirty`, `markSaved`, data loss on navigation | [draft-autosave.md](features/draft-autosave.md) |
 | config value, `conf_`, IO.Conf, per-deployment setting | [config-panel.md](features/config-panel.md) |
@@ -147,7 +147,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 | [host-api-embedding.md](features/host-api-embedding.md) | `window.ScxmlEditorAPI`, embedded-vs-standalone detection, the `_q` queue and its stub script |
 | [draft-autosave.md](features/draft-autosave.md) | Browser-local draft of unsaved edits, the restore banner, the leave-page prompt, and the dirty-tracking baseline |
 | [initial-state-groups.md](features/initial-state-groups.md) | Multiple independent Initial States per hierarchy level |
-| [inline-tips-carousel.md](features/inline-tips-carousel.md) | The auto-advancing toolbar tips strip |
+| [tips-popover.md](features/tips-popover.md) | The toolbar 💡 button and its one-tip-at-a-time popover |
 | [labels.md](features/labels.md) | State id/rename (double-click), edge label display, note text editing |
 | [monaco-code-editor.md](features/monaco-code-editor.md) | XML syntax highlighting, hover docs, autocomplete, paste normalization |
 | [node-positioning.md](features/node-positioning.md) | Manual placement, `viz:xywh` storage, the auto-layout priority rule |
@@ -178,7 +178,7 @@ If a request doesn't match any row above, check the full alphabetical table belo
 - **Canvas mechanics**: diagram-interaction, selection, zoom-pan-controls, node-positioning, auto-layout-elk, sticky-notes, drag-and-drop, context-menus (verified absence).
 - **Behavioral editing**: state-actions-panel, events-and-executable-actions.
 - **Code editor**: monaco-code-editor.
-- **App shell / chrome**: theme-and-appearance, inline-tips-carousel, error-handling-and-resilience.
+- **App shell / chrome**: theme-and-appearance, tips-popover, error-handling-and-resilience.
 - **Host/LoopControl integration**: host-api-embedding, config-panel, channel-mapping-panel, events-user-actions-panel, hidden-actions.
 - **External integration**: github-integration.
 
