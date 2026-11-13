@@ -7,7 +7,12 @@ Give the user real-time, line/column-precise feedback on both XML syntax and SCX
 ## User behavior
 
 - Errors/warnings appear automatically ~500ms after the user stops typing or editing.
-- The toolbar status dot shows red (errors present) / yellow (warnings only) / green (clean); clicking it opens the Validation Panel.
+- The toolbar validation badge (`ValidationStatusBadge`, issue #82) toggles the Validation Panel:
+  - **Errors:** a red pill such as "2 errors · 1 warning".
+  - **Warnings only:** an amber pill such as "1 warning".
+  - **Clean:** a small green check, with no text.
+  - Counts include Host Alerts (error/warning level) as well as this editor's own validation results.
+  - It replaced a bare colored dot that users didn't notice or understand. The space came from turning the tips bar into a 💡 button (#93, `tips-popover.md`).
 - Clicking an error jumps to it: if it has a line/column, the code editor scrolls/highlights that location; if it has a `stateId` (from a diagram-relevant check), the diagram instead navigates to and highlights that state (drilling through hierarchy levels as needed).
 - A separate "Host Alerts" tab in the same panel shows persistent, host-pushed messages (from the embedding LoopControl host) — entirely independent of this editor's own SCXML validation; only shown as a tab when at least one host alert exists. As of `decisions/error-handling.md` #6, this tab can also receive entries the user didn't explicitly push via `showErrors()`: any host `showFeedback(msg, 'error')` call (e.g. a failed "Apply"/"Generate Program" action) is auto-mirrored here too — see `host-api-embedding.md`.
 
@@ -39,7 +44,7 @@ Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`
 
 ## Relevant components
 
-`src/components/ui/validation-panel.tsx`, `src/components/layout/two-tab-layout.tsx` (renders the panel + status dot), `src/app/page.tsx` (error-click → editor navigation wiring).
+`src/components/ui/validation-panel.tsx`, `src/components/ui/validation-status-badge.tsx` (toolbar badge, tested in `validation-status-badge.test.tsx`), `src/components/layout/two-tab-layout.tsx` (renders the panel), `src/app/page.tsx` (renders the badge; error-click → editor navigation wiring).
 
 ## Relevant state/store
 
