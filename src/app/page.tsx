@@ -3,7 +3,7 @@
 import { type XMLEditorRef } from '@/components/editor';
 import { TwoTabLayout, type TabType } from '@/components/layout';
 import { ErrorBoundary, UndoRedoControls } from '@/components/ui';
-import { StatusDot } from '@/components/ui/primitives';
+import { ValidationStatusBadge } from '@/components/ui/validation-status-badge';
 import { HistoryManager } from '@/lib/history/history-manager';
 import { hasVisualMetadata } from '@/lib/utils';
 import { useEditorStore } from '@/stores/editor-store';
@@ -98,8 +98,6 @@ export default function Home() {
     () => errors.filter(e => e.severity === 'warning').length + hostErrors.filter(e => e.level === 'warning').length,
     [errors, hostErrors]
   );
-  const hasErrors = totalErrors > 0;
-  const hasWarnings = totalWarnings > 0;
 
   // --- Handlers ---
   const handleContentChange = useCallback(
@@ -188,21 +186,16 @@ export default function Home() {
 
         <UndoRedoControls onUndo={handleHistoryRestore} onRedo={handleHistoryRestore} />
 
-        <button
+        <ValidationStatusBadge
+          errorCount={totalErrors}
+          warningCount={totalWarnings}
+          isOpen={activePanel === 'validation'}
           onClick={() => {
             const opening = activePanel !== 'validation';
             setActivePanel(opening ? 'validation' : null);
             if (!opening) setValidationPanelTab('validation');
           }}
-          title={
-            totalErrors === 0 && totalWarnings === 0
-              ? 'No issues'
-              : `${totalErrors} error${totalErrors !== 1 ? 's' : ''}, ${totalWarnings} warning${totalWarnings !== 1 ? 's' : ''}`
-          }
-          className='p-2 rounded-md hover:bg-muted transition-colors'
-        >
-          <StatusDot status={hasErrors ? 'error' : hasWarnings ? 'warning' : 'success'} />
-        </button>
+        />
 
         <button
           onClick={() => setActivePanel(activePanel === 'github' ? null : 'github')}
@@ -278,7 +271,7 @@ export default function Home() {
     ),
     [
       fileInputRef, handleFileInputChange, handleHistoryRestore,
-      activePanel, setActivePanel, totalErrors, totalWarnings, hasErrors, hasWarnings,
+      activePanel, setActivePanel, totalErrors, totalWarnings,
       moreMenuRef, isMoreMenuOpen, setIsMoreMenuOpen,
       handleNewFileUpload, handleDownloadClean, handleDownloadWithVisualData, handleDownloadPdf, content,
       menuCommands, executeCommand,
