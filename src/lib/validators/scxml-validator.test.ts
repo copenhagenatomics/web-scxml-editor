@@ -122,6 +122,50 @@ describe('SCXMLValidator final states with outgoing transitions', () => {
   });
 });
 
+describe('SCXMLValidator unreachable states around <parallel>', () => {
+  const unreachable = (xml: string) => {
+    const parsed = new SCXMLParser().parse(xml);
+    expect(parsed.success).toBe(true);
+    return new SCXMLValidator()
+      .validate(parsed.data!.scxml, xml)
+      .filter((e) => e.message.includes('is unreachable'))
+      .map((e) => e.message);
+  };
+
+  it('treats parallel regions and targets of transitions on the <parallel> as reachable', () => {
+    expect(
+      unreachable(`<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="p">
+  <state id="after_final"/>
+  <parallel id="p">
+    <state id="stopped_region" initial="stopped">
+      <state id="stopped"><transition target="final_1"/></state>
+      <final id="final_1"/>
+    </state>
+    <state id="waiting_region" initial="waiting">
+      <state id="waiting"><transition target="final_2"/></state>
+      <final id="final_2"/>
+    </state>
+    <parallel id="nested">
+      <state id="n1"/>
+    </parallel>
+    <transition event="done.state.p" target="after_final"/>
+  </parallel>
+</scxml>`)
+    ).toEqual([]);
+  });
+
+  it('still flags a genuinely unreachable state next to a parallel', () => {
+    expect(
+      unreachable(`<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="p">
+  <state id="orphan"/>
+  <parallel id="p">
+    <state id="r1"/>
+  </parallel>
+</scxml>`)
+    ).toEqual(["State 'orphan' is unreachable"]);
+  });
+});
+
 describe('SCXMLValidator unknown-attribute diagnostics (real parsed documents)', () => {
   // Runs the same parse -> validate chain as useContentValidation.
   const validateXml = (xml: string) => {

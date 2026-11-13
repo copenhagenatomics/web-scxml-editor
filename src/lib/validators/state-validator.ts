@@ -538,6 +538,33 @@ export function findReachableStates(
       const parallelId = parallel['@_id'];
       if (parallelId && !visitedStates.has(parallelId)) {
         visitedStates.add(parallelId);
+
+        // Transitions declared on the <parallel> itself (e.g. done.state.<id>)
+        if (parallel.transition) {
+          const transitions = Array.isArray(parallel.transition)
+            ? parallel.transition
+            : [parallel.transition];
+          transitions.forEach((transition) => {
+            if (transition['@_target']) {
+              const targets = parseStateIdList(transition['@_target'], stateIds);
+              targets.forEach((target) => reachableStates.add(target));
+            }
+          });
+        }
+
+        // Every child region of a <parallel> is entered alongside it
+        const childRegions = [
+          ...(parallel.state
+            ? Array.isArray(parallel.state) ? parallel.state : [parallel.state]
+            : []),
+          ...(parallel.parallel
+            ? Array.isArray(parallel.parallel) ? parallel.parallel : [parallel.parallel]
+            : []),
+        ];
+        childRegions.forEach((child) => {
+          if (child['@_id']) reachableStates.add(child['@_id']);
+        });
+
         findReachableStates(parallel, reachableStates, visitedStates, stateIds);
       }
     });
