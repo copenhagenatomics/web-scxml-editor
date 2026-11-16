@@ -10,11 +10,12 @@ import { useEditorStore } from '@/stores/editor-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
 import type { ValidationError } from '@/types/common';
-import { Download, Eye, Github, MoreVertical, Upload as UploadIcon } from 'lucide-react';
+import { Download, Eye, FileText, Github, MoreVertical, Upload as UploadIcon } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { CodeEditorPane } from './_components/code-editor-pane';
 import { DraftRestoreBanner } from './_components/draft-restore-banner';
+import { PdfExportOverlay } from './_components/pdf-export-overlay';
 import { VisualEditorPane, type DiagramChangeType } from './_components/visual-editor-pane';
 import { WelcomeScreen } from './_components/welcome-screen';
 import { useContentValidation } from './_hooks/use-content-validation';
@@ -47,7 +48,7 @@ export default function Home() {
   const { isInitialLoading } = useInitialLoad();
   const { isUpdatingFromHistory, currentHistoryActionType, handleHistoryRestore } = useHistoryRestore();
   const { fileInputRef, handleFileLoad, handleFileError, handleCreateNewDocument, handleNewFileUpload, handleFileInputChange } = useFileOperations();
-  const { handleDownloadClean, handleDownloadWithVisualData } = useDownload();
+  const { handleDownloadClean, handleDownloadWithVisualData, handleDownloadPdf } = useDownload();
   const { isMoreMenuOpen, setIsMoreMenuOpen, moreMenuRef } = useMoreMenu();
   // Before useHostAPIBridge: it must already be subscribed when the host calls loadScxml.
   const { draftBanner, restoreDraft, discardDraft, discardRestoredChanges, dismissRestoredNotice } =
@@ -240,6 +241,13 @@ export default function Home() {
                   Download
                 </button>
               )}
+              <button
+                onClick={() => { handleDownloadPdf(activeTab, setActiveTab); setIsMoreMenuOpen(false); }}
+                className='w-full flex items-center gap-3 px-4 py-2 text-sm text-default hover:bg-muted transition-colors'
+              >
+                <FileText className='h-4 w-4 text-muted' />
+                Export PDF
+              </button>
               {menuCommands.map(cmd => (
                 <button
                   key={cmd.id}
@@ -265,7 +273,7 @@ export default function Home() {
       fileInputRef, handleFileInputChange, handleHistoryRestore,
       activePanel, setActivePanel, totalErrors, totalWarnings,
       moreMenuRef, isMoreMenuOpen, setIsMoreMenuOpen,
-      handleNewFileUpload, handleDownloadClean, handleDownloadWithVisualData, content,
+      handleNewFileUpload, handleDownloadClean, handleDownloadWithVisualData, handleDownloadPdf, content,
       menuCommands, executeCommand,
     ]
   );
@@ -322,6 +330,7 @@ export default function Home() {
                 }}
               />
             </div>
+            <PdfExportOverlay />
           </div>
         )}
       </div>

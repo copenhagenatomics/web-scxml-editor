@@ -178,6 +178,25 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(screen.getByText('(new channel)')).toBeInTheDocument();
   });
 
+  it('renders the Location and Expression fields in the normal (non-monospace) font', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByTitle('Add action'));
+
+    expect(screen.getByPlaceholderText('variable or channel')).not.toHaveClass('font-mono');
+    expect(screen.getByPlaceholderText('expression')).not.toHaveClass('font-mono');
+  });
+
+  it('renders saved assign rows in the normal (non-monospace) font', () => {
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
+    });
+
+    expect(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'a = 1'),
+    ).not.toHaveClass('font-mono');
+  });
+
   it('does not offer a new-channel suggestion when the variable already exists', () => {
     renderPanel({ scxmlContent: scxmlWithData('this_channel') });
 
@@ -636,16 +655,33 @@ describe('StateActionsPanel paste action', () => {
     expect(onApply).toHaveBeenLastCalledWith(['assign|copied|42', 'assign|copied|42'], []);
   });
 
-  it('disables Paste on the reactions tab when an assign action (not a reaction) is copied', () => {
+  it('pastes a copied assign action into the reactions tab with default event/type', () => {
+    const onApplyReactions = vi.fn();
     useActionClipboardStore.getState().copy({
       kind: 'action',
       row: { type: 'assign', location: 'copied', expr: '42' },
     });
-    renderPanel();
+    renderPanel({ onApplyReactions });
 
     fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Paste action'));
 
-    expect(screen.getByTitle('Copy an action first')).toBeDisabled();
+    expect(onApplyReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'vector', location: 'copied', expr: '42', type: 'internal' }),
+    ]);
+  });
+
+  it('pastes a copied reaction into onentry as an assign action', () => {
+    const onApply = vi.fn();
+    useActionClipboardStore.getState().copy({
+      kind: 'reaction',
+      row: { event: 'evtA', location: 'x', expr: '1', type: 'external' },
+    });
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Paste action'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|x|1'], []);
   });
 
   it('pastes a copied reaction as a new reaction row and calls onApplyReactions', () => {

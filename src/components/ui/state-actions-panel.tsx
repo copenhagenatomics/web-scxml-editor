@@ -197,15 +197,24 @@ function ExpressionSuggestionDropdown({
 }: ExpressionSuggestionDropdownProps) {
   const caret = textareaEl ? getCaretCoordinates(textareaEl, cursorPos) : null;
 
+  // Caret coordinates are relative to the textarea, but the dropdown is
+  // positioned against the wrapper, which also holds the field's label —
+  // shift by the textarea's own offset so the dropdown sits below the caret
+  // line instead of a label-height above it (covering the text being typed).
+  const offsetTop = textareaEl?.offsetTop ?? 0;
+  const offsetLeft = textareaEl?.offsetLeft ?? 0;
+
   // Assumed dropdown width for clamping, matching the max-w set on the
   // dropdown's own class below — keeps it from overflowing the panel's
   // right edge when the caret is near the end of a long line.
   const DROPDOWN_WIDTH = 200;
   const containerWidth = textareaEl?.clientWidth ?? 0;
-  const clampedLeft = caret ? Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH)) : 0;
+  const clampedLeft = caret
+    ? offsetLeft + Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH))
+    : 0;
 
   const positionStyle: React.CSSProperties = caret
-    ? { top: caret.top + caret.height + 4, left: clampedLeft }
+    ? { top: offsetTop + caret.top + caret.height + 4, left: clampedLeft }
     : {};
   const positionClassName = caret
     ? 'absolute z-50 bg-elevated border border-default rounded shadow-lg max-h-36 w-[200px] overflow-y-auto'
@@ -305,7 +314,9 @@ export function StateActionsPanel({
   const channelMappings = useHostAPIStore((s) => s.channelMappings);
   const showFeedback = useHostAPIStore((s) => s.showFeedback);
   const copied = useActionClipboardStore((s) => s.copied);
-  const canPaste = copied !== null && copied.kind === (activeTab === 'reactions' ? 'reaction' : 'action');
+  // Any copied row can be pasted into any tab — handlePaste converts between
+  // the action and reaction shapes, so the clipboard's kind doesn't matter here.
+  const canPaste = copied !== null;
   const dataVars = React.useMemo(
     () => extractDatamodelVariables(scxmlContent),
     [scxmlContent],
@@ -537,12 +548,20 @@ export function StateActionsPanel({
     showFeedback('Action copied.', 'info');
   };
 
+  // Pasting works across buckets: both row shapes share location + expr, so a
+  // reaction pasted into onentry/onexit becomes an assign (event/type
+  // dropped), and an assign pasted into reactions gets the same event/type
+  // defaults the Add button uses.
   const handlePaste = () => {
     if (!copied) return;
 
     if (activeTab === 'reactions') {
-      if (copied.kind !== 'reaction') return;
-      const newRow: WithRowId<InternalEventActionRow> = { ...copied.row, _rowId: uuidv4() };
+      // A copied assign has no event/type, so fill in the Add-button defaults.
+      const reaction: InternalEventActionRow =
+        copied.kind === 'reaction'
+          ? copied.row
+          : { event: 'vector', location: copied.row.location, expr: copied.row.expr, type: 'internal' };
+      const newRow: WithRowId<InternalEventActionRow> = { ...reaction, _rowId: uuidv4() };
       const updated = [...localReactions, newRow];
       setLocalReactions(updated);
       onApplyReactions(updated);
@@ -550,8 +569,13 @@ export function StateActionsPanel({
       return;
     }
 
-    if (copied.kind !== 'action') return;
-    const newRow: WithRowId<ActionRow> = { ...copied.row, _rowId: uuidv4() };
+    // A copied reaction keeps only location/expr; its event/type have no
+    // equivalent on an onentry/onexit assign and are dropped.
+    const assign: AssignActionRow =
+      copied.kind === 'action'
+        ? copied.row
+        : { type: 'assign', location: copied.row.location, expr: copied.row.expr };
+    const newRow: WithRowId<ActionRow> = { ...assign, _rowId: uuidv4() };
     const updated = [...currentList, newRow];
     if (activeTab === 'onentry') {
       setLocalEntry(updated);
@@ -808,7 +832,7 @@ export function StateActionsPanel({
           }}
           placeholder='expression'
           rows={3}
-          className={`${inputClass} resize-y font-mono`}
+          className={`${inputClass} resize-y`}
         />
         {showExprSuggestions && (
           <ExpressionSuggestionDropdown
@@ -948,7 +972,7 @@ export function StateActionsPanel({
                           <span className='text-primary text-[10px] font-medium'>{row.event}</span>
                           <span className='text-[9px] px-1 rounded border border-default text-dimmed'>{row.type}</span>
                         </div>
-                        <span className='font-mono text-xs text-default pl-2 break-all'>
+                        <span className='text-xs text-default pl-2 break-all'>
                           <span className='text-default'>{row.location || '…'}</span>
                           <span className='text-default'> = </span>
                           <span className='text-muted'>{row.expr || '…'}</span>
@@ -987,20 +1011,20 @@ export function StateActionsPanel({
                       onDelete={() => handleDelete(index)}
                     >
                       {row.type === 'assign' && (
-                        <span className='block font-mono break-all text-default'>
+                        <span className='block break-all text-default'>
                           <span className='text-primary'>{row.location || '…'}</span>
                           <span className='text-dimmed'> = </span>
                           <span className='text-default'>{row.expr || '…'}</span>
                         </span>
                       )}
                       {row.type === 'send' && (
-                        <span className='font-mono text-default flex flex-col min-w-0'>
+                        <span className='text-default flex flex-col min-w-0'>
                           <span className='text-primary break-all'>{row.event || '…'}</span>
                           <span className='text-dimmed text-[10px]'>{row.delayType}: {row.delayValue || '…'}</span>
                         </span>
                       )}
                       {row.type === 'cancel' && (
-                        <span className='block font-mono break-all text-default'>
+                        <span className='block break-all text-default'>
                           <span className='text-dimmed'>cancel: </span>
                           <span className='text-primary'>{row.sendid || '…'}</span>
                         </span>
