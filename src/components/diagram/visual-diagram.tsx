@@ -1251,19 +1251,23 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
 
       const reconnecting = reconnectingEdgeRef.current;
       const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
-      const slotCheck =
-        reconnecting && reconnecting.source === connection.source
-          ? checkTransitionEditSlotConflict(
-              parseResult.data,
-              connection.source,
-              parseTransitionIndexFromEdgeId(reconnecting.id),
-              {
-                '@_event': reconnecting.data?.event,
-                '@_cond': reconnecting.data?.condition,
-                '@_target': connection.target,
-              }
-            )
-          : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
+      // A reconnected transition keeps its event/cond (ReconnectTransitionCommand), so
+      // check that rather than a fresh connection's default. Moved onto a different
+      // source, none of that source's transitions is itself — nothing to exclude.
+      const slotCheck = reconnecting
+        ? checkTransitionEditSlotConflict(
+            parseResult.data,
+            connection.source,
+            reconnecting.source === connection.source
+              ? parseTransitionIndexFromEdgeId(reconnecting.id)
+              : undefined,
+            {
+              '@_event': reconnecting.data?.event,
+              '@_cond': reconnecting.data?.condition,
+              '@_target': connection.target,
+            }
+          )
+        : checkNewConnectionSlotConflict(parseResult.data, connection.source, connection.target);
       if (slotCheck.blocked) {
         setConnectionBlockedMessage(slotCheck.reason || 'Cannot add this transition.');
         return false;
