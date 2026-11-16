@@ -462,10 +462,15 @@ export function findTransitionPosition(
       const transitionIndex = line.indexOf('<transition');
       let depthAtTransition: number | undefined;
       while ((match = tagRegex.exec(line)) !== null) {
-        // Tags after the transition on the same line don't affect its scope
-        if (transitionIndex !== -1 && match.index > transitionIndex) {
+        // Tags after the transition on the same line don't affect its scope, but
+        // they still count for the lines below — e.g. the `</state>` closing a
+        // one-line `<state id="X"><transition .../></state>`.
+        if (
+          transitionIndex !== -1 &&
+          match.index > transitionIndex &&
+          depthAtTransition === undefined
+        ) {
           depthAtTransition = depth;
-          break;
         }
         if (match[3]) {
           depth--;
