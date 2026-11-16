@@ -330,6 +330,7 @@ export default function Home() {
                 }}
               />
             </div>
+            <PdfExportOverlay />
           </div>
         )}
       </div>
