@@ -146,8 +146,11 @@ export function getInitialIds(
   container: ContainerElement,
   kind: ContainerKind = "state",
 ): Set<string> {
+  // Skip id-less children (e.g. a typo like idd="...") — they can't be Initial.
   const childIds = new Set(
-    getDirectChildStates(container, kind).map((c) => c["@_id"]),
+    getDirectChildStates(container, kind)
+      .map((c) => c["@_id"])
+      .filter((id): id is string => typeof id === "string" && id !== ""),
   );
   if (kind === "parallel") return childIds;
 

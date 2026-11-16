@@ -165,6 +165,16 @@ describe('getInitialIds', () => {
     const container = { '@_id': 'P', state: [{ '@_id': 'R1' }, { '@_id': 'R2' }] };
     expect(getInitialIds(container as any, 'parallel')).toEqual(new Set(['R1', 'R2']));
   });
+
+  it('skips an id-less child of a <parallel> (e.g. a typo like idd="...")', () => {
+    const container = { '@_id': 'P', state: [{ '@_idd': 'R1' }, { '@_id': 'R2' }] };
+    expect(getInitialIds(container as any, 'parallel')).toEqual(new Set(['R2']));
+  });
+
+  it('skips id-less children of a <state>', () => {
+    const container = { '@_initial': 'B', state: [{ '@_idd': 'A' }, { '@_id': 'B' }] };
+    expect(getInitialIds(container as any)).toEqual(new Set(['B']));
+  });
 });
 
 describe('getSiblingEdges', () => {
