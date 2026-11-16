@@ -1,5 +1,7 @@
 # Feature: Automatic "Parallel State" Grouping of Multiple Initial-State Work Trees
 
+> **Disabled on the `release/no-parallel` line (`vX.Y.Z` builds).** `useEditorStore` no longer calls `normalizeParallelGroups` (`src/stores/editor-store.ts`), so 2+ Initial-State work trees stay flat siblings with a multi-value `initial`. The code below is still present (it renders a `<parallel>` already in a loaded document), but nothing creates or restructures one. The feature lives on `release/parallel` (`vX.Y.Z-p` builds).
+
 ## Purpose
 
 Give multiple, mutually-disconnected Initial-State work trees (see `initial-state-groups.md`) real SCXML `<parallel>` semantics instead of leaving them as merely-adjacent siblings — live, on the actual document, not as a display-only or export-only transform. Originated from the same product requirement as `initial-state-groups.md` (`docs/parallel-states-requirement.md`), specifically its "Support for N-Parallel Machines" phase; reintroduces `<parallel>`/region structure previously implemented and reverted (commit `801145d`, reverted in `bf0ab49`) but scoped narrowly this time to only this automatic-grouping trigger, not a general manual "convert to parallel" feature.

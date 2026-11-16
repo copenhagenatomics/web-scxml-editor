@@ -54,11 +54,11 @@ import {
  * using getInitialIds (also auto-wrap-aware) rather than a raw attribute
  * read to determine the current, real set of Initial ids — the raw
  * attribute on a wrapped container names the synthetic <parallel>'s id, not
- * any real state. The actual document restructuring (moving the toggled
- * state in or out of the <parallel>) is left entirely to
- * normalizeParallelGroups, which every mutation path already runs through
- * downstream (useEditorStore.setContent) — this command only ever needs to
- * get the `initial` attribute's real token list right.
+ * any real state. This command only ever gets the `initial` attribute's
+ * real token list right; it never restructures the document. (On the
+ * no-parallel release line nothing downstream wraps 2+ Initial States into a
+ * <parallel> either — useEditorStore stores content as given — so they stay
+ * flat siblings with a multi-value `initial`.)
  */
 export class ToggleInitialStateCommand extends BaseCommand {
   private previousInitialAttr?: string | null;

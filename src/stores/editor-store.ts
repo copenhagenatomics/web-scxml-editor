@@ -1,27 +1,11 @@
 import { create } from 'zustand';
 import type { ValidationError, FileInfo, EditorState } from '@/types/common';
 import type { InitialChildInfo } from '@/lib/utils/hierarchy-initial-info';
-import { SCXMLParser } from '@/lib/parsers/scxml-parser';
-import { normalizeParallelGroups } from '@/lib/utils/parallel-group-normalization';
 
-/**
- * Best-effort: wraps 2+ initial-state work trees into a real <parallel>
- * element (and unwraps back to flat siblings when they no longer qualify),
- * live, on the actual document content — not a display/export-only
- * transform. Returns the input unchanged if the XML doesn't parse (typing
- * mid-edit) or nothing needs to change.
- */
-function normalizeContent(content: string): string {
-  const parser = new SCXMLParser();
-  const parseResult = parser.parse(content);
-  if (!parseResult.success || !parseResult.data) return content;
-
-  const { changed } = normalizeParallelGroups(parseResult.data);
-  if (!changed) return content;
-
-  parser.getVisualMetadataManager().extractAllVisualMetadata(parseResult.data);
-  return parser.serialize(parseResult.data, true);
-}
+// No-parallel build: content is stored exactly as given. The automatic
+// wrapping of 2+ Initial-State work trees into a <parallel>
+// (normalizeParallelGroups) is deliberately not run here, so several Initial
+// States at one level stay ordinary siblings (initial="A B").
 
 // Hierarchy navigation state
 export interface HierarchyState {
@@ -90,12 +74,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   initialChildByParent: new Map(),
   focusTarget: null,
 
-  setContent: (content: string, options?: { immediate?: boolean }) => {
-    const immediate = options?.immediate ?? true;
-    const normalized = immediate ? normalizeContent(content) : content;
+  // `immediate` is kept for callers (page.tsx's typing debounce); with no
+  // normalization step it no longer changes what is stored.
+  setContent: (content: string, _options?: { immediate?: boolean }) => {
     set({
-      content: normalized,
-      isDirty: normalized !== (get().fileInfo?.content || '')
+      content,
+      isDirty: content !== (get().fileInfo?.content || '')
     });
   },
 
@@ -104,14 +88,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   setFileInfo: (fileInfo: FileInfo | null) => {
-    const normalized = fileInfo ? normalizeContent(fileInfo.content) : '';
-    // Keep fileInfo.content/size in sync with the normalized buffer so the
-    // dirty-tracking baseline in setContent() compares against what's
-    // actually loaded, not the pre-normalization original.
-    const normalizedFileInfo = fileInfo ? { ...fileInfo, content: normalized, size: normalized.length } : null;
     set({
-      fileInfo: normalizedFileInfo,
-      content: normalized,
+      fileInfo,
+      content: fileInfo ? fileInfo.content : '',
       isDirty: false,
       errors: [],
       loadGeneration: get().loadGeneration + 1,
