@@ -16,7 +16,7 @@ Every rule below is grounded in this repository. Nothing here is a generic best 
 `next.config.ts` sets `output: "export"`. The build produces static files with no server. `NEXT_PUBLIC_*` env vars are baked in at build time. See `decisions/architecture.md` #1, `decisions/configuration.md` #4.
 
 **1.2 — SCXML mutation must go through one of exactly two mechanisms: the Command pattern (`src/lib/commands/*`) or the direct object-tree edit path (`src/lib/utils/scxml-manipulation-utils.ts`). Never invent a third.** [EXPLICIT]
-Default to writing a Command for any new mutation with undo requirements. Only follow the direct-edit precedent for the four operations that already use it (connect, add-root-state, copy/paste, drag-to-reparent). See `project/coding-rules.md` §1, `decisions/architecture.md` #2.
+Default to writing a Command for any new mutation with undo requirements. Only follow the direct-edit precedent for the four operations that already use it (connect, add-root-state, copy/paste, drag-to-reparent) — that path regroups siblings by tag (comments are restored by `SCXMLParser.serialize`). See `project/coding-rules.md` §1, `decisions/architecture.md` #2.
 
 **1.3 — Never mix `DOMParser`/`XMLSerializer` (used by Commands) with `fast-xml-parser`'s object-tree API (used by the direct-edit path and `VisualMetadataManager`) inside one function or mutation.** [EXPLICIT]
 Every Command must finish via `BaseCommand.serializeXML`. Mixing the two produces inconsistent formatting and risks parsing the wrong representation. See `decisions/scxml.md` #9.

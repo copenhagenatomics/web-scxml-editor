@@ -37,7 +37,7 @@ Accepted.
 The app needs undoable, structured mutations (rename, resize, delete, edit actions) for most interactions, but a few operations (drawing a new connection, copy/paste, drag-to-reparent) were implemented differently.
 
 ### Decision
-Two separate mutation code paths coexist: (1) the **Command pattern** (`src/lib/commands/*`, 16 classes implementing `execute`/`undo`/`getDescription`), using the browser's native `DOMParser`/`XMLSerializer`; (2) **direct object-tree edits** (`src/lib/utils/scxml-manipulation-utils.ts`), using `fast-xml-parser`'s parsed object representation, invoked only from `visual-diagram.tsx` for `onConnect`, add-root-state, copy/paste, and drag-to-reparent.
+Two separate mutation code paths coexist: (1) the **Command pattern** (`src/lib/commands/*`, 16 classes implementing `execute`/`undo`/`getDescription`), using the browser's native `DOMParser`/`XMLSerializer`; (2) **direct object-tree edits** (`src/lib/utils/scxml-manipulation-utils.ts`), using `fast-xml-parser`'s parsed object representation, invoked only from `visual-diagram.tsx` for `onConnect`, add-root-state, copy/paste, and drag-to-reparent. (The object tree has no comments — the parser has no `commentPropName` — so since 2026-11-17 `SCXMLParser.serialize` restores the parsed source's comments generically (`src/lib/utils/comment-preservation.ts`) for every object-tree edit, rather than each operation handling them. It does not restore sibling order: these edits still regroup siblings by tag.)
 
 ### Reason
 Not explicitly documented in any single design note. The Command pattern's own header comment (`base-command.ts`) states its purpose is "undo/redo functionality" and "clean separation of business logic from UI" — suggesting the DOM-based approach was chosen for its transactional execute/undo symmetry. The direct-edit path appears to be either an earlier implementation predating the Command pattern's introduction for these four operations, or a deliberate choice that these particular operations didn't need per-operation undo semantics beyond the whole-document history snapshot already covering them (see `state-management.md` #2).
@@ -50,7 +50,7 @@ Not explicitly documented in any single design note. The Command pattern's own h
 None found evidenced — no comment or commit indicates the team considered unifying these into one strategy.
 
 ### Evidence
-`src/lib/commands/base-command.ts`, `src/lib/utils/scxml-manipulation-utils.ts`, `src/components/diagram/visual-diagram.tsx` (`onConnect`, `handleAddRootState`, copy/paste, reparent handlers).
+`src/lib/commands/base-command.ts`, `src/lib/utils/scxml-manipulation-utils.ts`, `src/components/diagram/visual-diagram.tsx` (`onConnect`, `handleAddRootState`, copy/paste, reparent handlers), `src/lib/utils/comment-preservation.ts`.
 
 ### Status
 Accepted (with the caveat that the split appears organic rather than a deliberately documented up-front design — treat the four direct-edit operations as an accepted precedent, not necessarily a pattern to actively extend to new features without reason).

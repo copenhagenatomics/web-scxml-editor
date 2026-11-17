@@ -322,6 +322,7 @@ Each file contains multiple numbered decision records, each following the same t
 
 Confirmed, specific defects (not style opinions) found during source analysis. Full detail in `PROJECT_ANALYSIS.md` §14; the relevant feature doc for each also calls it out under "Known limitations."
 
+- The `fast-xml-parser` object tree has no comments, so `SCXMLParser.serialize` re-inserts the parsed source's comments (and `<?xml?>` declaration) via `restoreComments` in `comment-preservation.ts`, anchored by element id / tag+index. Don't remove that step or serialize a tree that didn't come from `parse()` (it has no source to restore from). The object-tree path still regroups siblings by tag ([architecture.md](decisions/architecture.md) #2).
 - `ChangeStateTypeCommand`'s state→parallel conversion is not implemented ([state-node-types.md](features/state-node-types.md), [state-editing.md](features/state-editing.md)).
 - Leftover `debugger;` statements execute on every layout pass (`adaptive-spacing.ts:36`, `hub-centroid-nudge.ts:51,120`) and on every connection attempt (`initial-group-utils.ts`) ([auto-layout-elk.md](features/auto-layout-elk.md), [initial-state-groups.md](features/initial-state-groups.md)).
 - `viz:xywh` is written space-separated by a couple of `scxml-manipulation-utils.ts` code paths but read as comma-separated everywhere ([visual-metadata-namespace.md](features/visual-metadata-namespace.md)).
