@@ -39,6 +39,7 @@ Two fully independent stages, chained but not coupled:
    13. Initial-State-group conflicts (`initial-group-validator.ts`).
    Each pass runs inside a `run(passName, …)` guard in `SCXMLValidator.validate`: a pass that throws on a half-edited document becomes a single "could not run" warning, so it never discards the other passes' diagnostics. (Before this guard, an id-less `<state>` named in `initial` crashed `getInitialIds` → `parseStateIdList`, and the editor showed no errors at all.)
    14. Nested parallel states (`parallel-nesting-validator.ts`): an error for every `<parallel>` inside another `<parallel>`. This is the static counterpart of the live gates in `parallel-nesting-rules.ts` (`decisions/scxml.md` #14).
+   15. Eventless `_event.data` entry (`event-data-validator.ts`): a **warning** on every transition with no `event` (or `event=""`, not `type="internal"`) whose target reads `_event.data` in its `<onentry>`, or in the `<onentry>` of a descendant entered by default (`@initial` / `<initial>` / first child; all regions of a `<parallel>`). The downstream runtime evaluates `_event.data` to 0 there, which surprised users. `<initial>` transitions are deliberately **not** checked (user decision). Reads in `<onexit>` or inside transitions are not flagged.
 3. Output: flat `deduplicateErrors(errors)` (`ValidationError[]`, deduped on `message+line+column` composite key).
 
 Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`), debounced 500ms, writing into `useEditorStore.errors`.
