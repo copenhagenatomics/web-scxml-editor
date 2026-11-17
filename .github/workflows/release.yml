@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+" # release/no-parallel build (without <parallel>)
+      - "v[0-9]+.[0-9]+.[0-9]+-p" # main build (with <parallel>), published as a pre-release
 
 permissions:
   contents: write
