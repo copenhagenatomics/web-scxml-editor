@@ -26,6 +26,7 @@ import {
 } from './transition-validator';
 import { validateInitialStateGroups } from './initial-group-validator';
 import { validateTransitionSlotConflicts } from './transition-slot-validator';
+import { validateEventlessEventDataEntry } from './event-data-validator';
 import {
   validateW3CCompliance,
   validateRequiredAttributes,
@@ -124,6 +125,11 @@ export class SCXMLValidator {
 
     // Multiple Initial State group validation
     run('initial state groups', () => validateInitialStateGroups(scxml, errors));
+
+    // Eventless transitions into a state that reads _event.data on entry
+    run('eventless _event.data', () =>
+      validateEventlessEventDataEntry(scxml, this.xmlContent, errors)
+    );
 
     return deduplicateErrors(errors);
   }
