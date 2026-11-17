@@ -17,6 +17,21 @@ import {
   getAdditionalClasses,
 } from '@/lib/utils/visual-style-utils';
 import { isTimerGeneratedActionString } from '@/lib/utils/time-transition';
+import { MAX_ANCHORS_PER_SIDE } from '@/lib/converters/converter-modules/visual-metadata';
+import { useHostAPIStore } from '@/stores/host-api-store';
+
+export const ANCHOR_LIMIT_MESSAGE = `This side already has the maximum of ${MAX_ANCHORS_PER_SIDE} connection points.`;
+
+/**
+ * Shows the anchor-limit warning toast, unless it's already on screen —
+ * repeated shift-clicks on a full side shouldn't stack identical toasts.
+ * Reads the store imperatively so state nodes don't subscribe to it.
+ */
+export function warnAnchorLimitReached(): void {
+  const { feedbackQueue, showFeedback } = useHostAPIStore.getState();
+  if (feedbackQueue.some((f) => f.message === ANCHOR_LIMIT_MESSAGE)) return;
+  showFeedback(ANCHOR_LIMIT_MESSAGE, 'warning');
+}
 
 export interface VisualStyles {
   backgroundColor?: string;
@@ -172,8 +187,17 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       );
       if (dist > EDGE_MARGIN) return;
       e.stopPropagation();
+      // A side already at the cap gets a warning toast instead of an anchor.
+      // Reaching the limit is expected, so it's not routed through the
+      // command's failure path (which logs a console.error).
+      if (!sideHasRoom(side)) {
+        warnAnchorLimitReached();
+        return;
+      }
       onAddAnchor(side);
     };
+    const sideHasRoom = (side: HandleSideName) =>
+      (anchors?.[side] ?? 1) < MAX_ANCHORS_PER_SIDE;
 
     // While Shift is held and the pointer is within the add-anchor zone,
     // switch the cursor to a crosshair so the gesture is discoverable before
@@ -185,13 +209,13 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
         return;
       }
       const rect = e.currentTarget.getBoundingClientRect();
-      const { dist } = nearestBorderSide(
+      const { side, dist } = nearestBorderSide(
         rect.width,
         rect.height,
         e.clientX - rect.left,
         e.clientY - rect.top
       );
-      setNearAddableBorder(dist <= EDGE_MARGIN);
+      setNearAddableBorder(dist <= EDGE_MARGIN && sideHasRoom(side));
     };
     const handleNodeMouseLeave = () => {
       if (nearAddableBorder) setNearAddableBorder(false);

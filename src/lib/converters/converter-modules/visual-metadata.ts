@@ -21,7 +21,7 @@ export interface VisualMetadata {
 }
 
 /** Hard cap on anchors per side — guards against runaway shift-clicking or malformed XML. */
-export const MAX_ANCHORS_PER_SIDE = 6;
+export const MAX_ANCHORS_PER_SIDE = 20;
 
 /**
  * Parses the viz:anchors attribute value ("side:count;side:count") into a

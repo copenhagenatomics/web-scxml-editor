@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AddAnchorPointCommand } from './add-anchor-point-command';
+import { MAX_ANCHORS_PER_SIDE } from '@/lib/converters/converter-modules/visual-metadata';
 
 const SCXML_HEADER = '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0"';
 const VIZ_HEADER =
@@ -29,8 +30,15 @@ describe('AddAnchorPointCommand', () => {
     expect(result.newContent).toContain('top:2');
   });
 
-  it('fails without modifying content once a side reaches the maximum of 6 anchors', () => {
-    const xml = `${VIZ_HEADER}><state id="A" viz:anchors="bottom:6"/></scxml>`;
+  it('allows adding anchors up to the maximum', () => {
+    const xml = `${VIZ_HEADER}><state id="A" viz:anchors="bottom:${MAX_ANCHORS_PER_SIDE - 1}"/></scxml>`;
+    const result = new AddAnchorPointCommand('A', 'bottom').execute(xml);
+    expect(result.success).toBe(true);
+    expect(result.newContent).toContain(`bottom:${MAX_ANCHORS_PER_SIDE}`);
+  });
+
+  it('fails without modifying content once a side reaches the maximum anchors', () => {
+    const xml = `${VIZ_HEADER}><state id="A" viz:anchors="bottom:${MAX_ANCHORS_PER_SIDE}"/></scxml>`;
     const result = new AddAnchorPointCommand('A', 'bottom').execute(xml);
     expect(result.success).toBe(false);
     expect(result.newContent).toBe(xml);
