@@ -3,6 +3,15 @@ import type { SCXMLDocument, SCXMLElement } from '@/types/scxml';
 import type { ValidationError, ParseResult } from '@/types/common';
 import { VisualMetadataManager } from '@/lib/metadata';
 import type { ElementVisualMetadata } from '@/types/visual-metadata';
+import { restoreComments, withDeclaration } from '@/lib/utils/comment-preservation';
+
+/**
+ * The XML text each parsed document came from, so serialize() can restore
+ * its comments. Module-level (not per instance) so a document parsed by one
+ * SCXMLParser and serialized by another still finds it; weak, so it never
+ * keeps a document alive.
+ */
+const parsedSource = new WeakMap<object, string>();
 
 export class SCXMLParser {
   private parser: XMLParser;
@@ -89,6 +98,10 @@ export class SCXMLParser {
       scxmlDoc = {
         scxml: parsed.scxml as SCXMLElement,
       };
+      // Keyed on both: a caller may hand serialize() a new wrapper around the same tree.
+      // (A text-only root like <scxml>x</scxml> parses to a string, which can't be a WeakMap key.)
+      parsedSource.set(scxmlDoc, xmlContent);
+      if (typeof scxmlDoc.scxml === 'object') parsedSource.set(scxmlDoc.scxml, xmlContent);
 
       // Extract visual metadata if namespace is present
       if (hasVisualNamespace) {
@@ -441,20 +454,26 @@ export class SCXMLParser {
     scxmlDoc: SCXMLDocument,
     includeVisualMetadata: boolean = true
   ): string {
-    if (includeVisualMetadata) {
-      // Use visual metadata manager for enhanced serialization
-      return this.visualMetadataManager.serializeWithVisualMetadata(scxmlDoc, {
-        includeVisualMetadata: true,
-        formatOutput: true,
-        validate: true,
-      });
-    } else {
-      // Return clean SCXML without visual metadata
-      return this.visualMetadataManager.serializeWithVisualMetadata(scxmlDoc, {
-        includeVisualMetadata: false,
-        formatOutput: true,
-      });
-    }
+    const built = includeVisualMetadata
+      ? // Use visual metadata manager for enhanced serialization
+        this.visualMetadataManager.serializeWithVisualMetadata(scxmlDoc, {
+          includeVisualMetadata: true,
+          formatOutput: true,
+          validate: true,
+        })
+      : // Return clean SCXML without visual metadata
+        this.visualMetadataManager.serializeWithVisualMetadata(scxmlDoc, {
+          includeVisualMetadata: false,
+          formatOutput: true,
+        });
+
+    // The object tree has no comments or <?xml?> declaration (fast-xml-parser
+    // drops them), so put the parsed source's back — every parse → edit →
+    // serialize path keeps them without having to know about them.
+    const source =
+      parsedSource.get(scxmlDoc) ??
+      (typeof scxmlDoc.scxml === 'object' ? parsedSource.get(scxmlDoc.scxml) : undefined);
+    return source ? withDeclaration(source, restoreComments(source, built)) : built;
   }
 
   private serializeElement(

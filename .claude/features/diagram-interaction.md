@@ -34,7 +34,7 @@ All of this lives in `src/components/diagram/visual-diagram.tsx` (3,347 lines �
 - **Resize**: live preview during drag mutates `setNodes` directly (visual only); on `onResizeEnd`, `handleNodeResize` commits via `UpdatePositionAndDimensionsCommand`.
 - **Reparent**: two separate ReactFlow drag-event families — `onNodeDrag*` (single node) and `onSelectionDragStart/Drag/DragStop` (multi-selection, since RF renders a group drag through a distinct `.react-flow__nodesselection-rect` overlay) — both funnel into the same `computeDropTarget` logic and then `handleReparent`. `handleReparent` captures the hierarchy before moving (`buildStateParentMap`), moves the states, then calls `fixTransitionsAfterReparent` (`src/lib/utils/reparent-transition-fix.ts`). That function judges "same parent" with the validator's own `buildStateHierarchy`, so it fixes exactly what `validateCrossHierarchyTransitions` would otherwise report. There is no drag-to-unnest gesture (the "Back to parent" drop zone was removed); moving a state back out to its grandparent requires editing the SCXML directly.
 - **Copy/paste**: uses the **direct object-tree manipulation path** (`scxml-manipulation-utils.ts`'s `cloneStateSubtreeWithFreshIds`), not a Command — see `.claude/project/architecture.md` §Two mutation strategies. Buffered in `useStateClipboardStore`.
-- **Create/Connect**: `handleAddRootState`/`onConnect` also use the direct object-tree path, not Commands.
+- **Create/Connect**: `handleAddRootState`/`onConnect` also use the direct object-tree path, not Commands (comments are restored by `SCXMLParser.serialize`; sibling order is not).
 - **Delete**: `handleNodeDelete` routes to `DeleteNoteCommand` or `DeleteNodeCommand` based on `isNoteId(id)`.
 
 ## Relevant components
