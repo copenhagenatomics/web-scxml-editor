@@ -12,6 +12,9 @@ import { ValidationPanel } from "@/components/ui";
 import { usePanelStore } from "@/stores/panel-store";
 import type { ValidationError } from "@/types/common";
 
+/** Set at build time by next.config.ts (release tag, or the nearest tag locally, e.g. v0.3.9). */
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION;
+
 interface TwoTabLayoutProps {
   codeEditor: React.ReactNode;
   visualDiagram: React.ReactNode;
@@ -359,6 +362,16 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
         )}
 
         <div className='flex-1' />
+
+        {/* App version, fixed at build time in next.config.ts */}
+        {APP_VERSION && (
+          <span
+            className='mr-2 text-xs text-dimmed tabular-nums whitespace-nowrap hidden sm:inline'
+            title={`SCXML Editor ${APP_VERSION}`}
+          >
+            {APP_VERSION}
+          </span>
+        )}
 
         <TipsPopover tips={editorTips} activeTab={activeTab} />
 
