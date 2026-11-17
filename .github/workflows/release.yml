@@ -37,6 +37,8 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          # Version shown in the toolbar (read in next.config.ts), e.g. v0.4.0 or v0.4.0-p.
+          NEXT_PUBLIC_APP_VERSION: ${{ steps.version.outputs.VERSION }}
           # Baked into this release's static bundle for the LoopControl-embedded
           # deployment target (see DEVELOPER_GUIDE.md's "GitHub Integration"
           # section). The device-flow relay endpoints are relative paths since
