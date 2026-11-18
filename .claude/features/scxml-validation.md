@@ -24,7 +24,7 @@ Give the user real-time, line/column-precise feedback on both XML syntax and SCX
 
 Two fully independent stages, chained but not coupled:
 1. **`SCXMLParser.parse(xmlContent)`** (`src/lib/parsers/scxml-parser.ts`) — runs a hand-rolled character-scanning XML syntax checker first (tag-stack matching, CDATA/comment/PI-aware, unescaped-`&` detection, with a heuristic to avoid false "unclosed tag" errors while the user is mid-typing), then `fast-xml-parser`'s own `XMLValidator.validate()` as a second opinion (deduped against the first), then the real parse if no hard errors.
-2. **`SCXMLValidator.validate(scxml, xmlContent)`** (`src/lib/validators/scxml-validator.ts`) — only runs if parsing succeeded. **17 ordered passes**, order matters (later passes depend on state built earlier — id sets, hierarchy maps):
+2. **`SCXMLValidator.validate(scxml, xmlContent)`** (`src/lib/validators/scxml-validator.ts`) — only runs if parsing succeeded. **18 ordered passes**, order matters (later passes depend on state built earlier — id sets, hierarchy maps):
    1. Build element-position index + state-id/hierarchy maps.
    2. State reference validation (root `@initial`, every `transition/@target` must resolve).
    3. Root-level `state/@initial` reference validation (dedicated message; does **not** cover nested compound states — see gap below).
@@ -40,6 +40,12 @@ Two fully independent stages, chained but not coupled:
    Each pass runs inside a `run(passName, …)` guard in `SCXMLValidator.validate`: a pass that throws on a half-edited document becomes a single "could not run" warning, so it never discards the other passes' diagnostics. (Before this guard, an id-less `<state>` named in `initial` crashed `getInitialIds` → `parseStateIdList`, and the editor showed no errors at all.)
    14. Nested parallel states (`parallel-nesting-validator.ts`): an error for every `<parallel>` inside another `<parallel>`. This is the static counterpart of the live gates in `parallel-nesting-rules.ts` (`decisions/scxml.md` #14).
    15. Eventless `_event.data` entry (`event-data-validator.ts`): a **warning** on every transition with no `event` (or `event=""`, not `type="internal"`) whose target reads `_event.data` in its `<onentry>`, or in the `<onentry>` of a descendant entered by default (`@initial` / `<initial>` / first child; all regions of a `<parallel>`). The downstream runtime evaluates `_event.data` to 0 there, which surprised users. `<initial>` transitions are deliberately **not** checked (user decision). Reads in `<onexit>` or inside transitions are not flagged.
+   16. `this_` channel types (`this-channel-validator.ts`, logic in `findThisChannelTypeIssues`, `datamodel-extractor.ts`, the same inference `syncThisChannels` uses on Apply). It checks every `cond` and `<assign>`, in any state including `<parallel>` regions:
+       - an **error** for a `this_` channel that is referenced but not declared (the host's "Condition identifier(s) not found");
+       - a **warning** when its uses disagree, true/false in one place and a number in another (no fix);
+       - a **warning** when the declared value's type contradicts a use: a number used as true/false, true/false compared to or assigned a number, or an int assigned a double.
+
+       The undeclared and mismatch entries carry a `fix` (`ValidationFix`: `add-data` / `set-data-expr`). The panel renders it as a **Fix** button, and `page.tsx` applies it via `applyValidationFix` as a discrete edit with its own undo entry. It exists for client feedback (Nov 2026): users couldn't fix host type errors without hand-editing SCXML. The visual panels already auto-fix generated values on Apply, but only for the channels in what was applied. So in practice this surfaces code-editor edits, hand-written values, disagreeing uses, and wrong channels elsewhere in the document. It is also the first rule to populate `ValidationError.fix`.
 3. Output: flat `deduplicateErrors(errors)` (`ValidationError[]`, deduped on `message+line+column` composite key).
 
 Consumed by `useContentValidation()` (`src/app/_hooks/use-content-validation.ts`), debounced 500ms, writing into `useEditorStore.errors`.
@@ -97,7 +103,7 @@ Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do no
 
 ## Things that must NOT be changed
 
-- Do not reorder the 17 validation passes without checking dependencies — several passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular).
+- Do not reorder the 18 validation passes without checking dependencies — several passes rely on state built by earlier ones (the id set and hierarchy maps from pass 1, in particular).
 - Do not duplicate transition-slot-conflict, Initial-group-conflict or parallel-nesting logic directly in `scxml-validator.ts` — always delegate to the shared utility modules (`transition-slot-rules.ts`, `initial-group-utils.ts`, `parallel-nesting-rules.ts`) that the live-blocking UI also uses.
 
 ## Previous design decisions

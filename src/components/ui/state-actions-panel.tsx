@@ -70,12 +70,6 @@ interface StateActionsPanelProps {
    * shown as a warning. Deleting and reordering never add an event, so they skip it.
    */
   validateReactions?: (actions: InternalEventActionRow[]) => { blocked: boolean; reason?: string };
-  onNewChannel?: (
-    channelName: string,
-    apply:
-      | { kind: 'actions'; entryActions: string[]; exitActions: string[] }
-      | { kind: 'reactions'; actions: InternalEventActionRow[] }
-  ) => void;
 }
 
 function toStrings(rows: ActionRow[]): string[] {
@@ -297,7 +291,6 @@ export function StateActionsPanel({
   onApply,
   onApplyReactions,
   validateReactions,
-  onNewChannel,
 }: StateActionsPanelProps) {
   const [activeTab, setActiveTab] = React.useState<Tab>('onentry');
   const [localEntry, setLocalEntry] = React.useState<WithRowId<ActionRow>[]>(() => withRowIds(initialEntry));
@@ -456,27 +449,8 @@ export function StateActionsPanel({
       exprTextareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
       exprTextareaRef.current?.focus();
     });
-
-    // The channel just needs to exist as a <data> element for the expression
-    // to reference it — the assign row itself (location/expr) isn't
-    // committed until Apply, so we pass the *current*, unmodified action
-    // lists here rather than anything from the in-progress form. This makes
-    // the parent's list-update step a no-op re-write while still running its
-    // AddDataCommand step to register the channel.
-    if (s.kind === 'new-channel' && onNewChannel) {
-      if (activeTab === 'reactions') {
-        onNewChannel(s.label, {
-          kind: 'reactions',
-          actions: localReactions.map(({ _rowId, ...rest }) => rest),
-        });
-      } else {
-        onNewChannel(s.label, {
-          kind: 'actions',
-          entryActions: toStrings(localEntry),
-          exitActions: toStrings(localExit),
-        });
-      }
-    }
+    // A "(new channel)" is only declared once the action is applied (the parent's
+    // onApply/onApplyReactions declares every this_ channel the actions reference).
   };
 
   /** Runs validateReactions; on a block, warns with its reason and returns true. */
@@ -489,7 +463,6 @@ export function StateActionsPanel({
 
   const handleApply = () => {
     if (formMode === 'idle') return;
-    const isNewChannel = suggestions.length === 1 && suggestions[0].kind === 'new-channel';
 
     if (activeTab === 'reactions') {
       const rowId = formMode === 'editing' && editingRowIndex !== null
@@ -509,11 +482,7 @@ export function StateActionsPanel({
       // Blocked: keep the form open with the user's input so they can change the event.
       if (reactionsBlocked(updatedList)) return;
       setLocalReactions(updatedList);
-      if (isNewChannel && onNewChannel) {
-        onNewChannel(formLocation, { kind: 'reactions', actions: updatedList });
-      } else {
-        onApplyReactions(updatedList);
-      }
+      onApplyReactions(updatedList);
       resetForm();
       showFeedback('Reaction saved.', 'info');
       return;
@@ -530,18 +499,10 @@ export function StateActionsPanel({
 
     if (activeTab === 'onentry') {
       setLocalEntry(updatedList);
-      if (isNewChannel && onNewChannel) {
-        onNewChannel(formLocation, { kind: 'actions', entryActions: toStrings(updatedList), exitActions: toStrings(localExit) });
-      } else {
-        onApply(toStrings(updatedList), toStrings(localExit));
-      }
+      onApply(toStrings(updatedList), toStrings(localExit));
     } else {
       setLocalExit(updatedList);
-      if (isNewChannel && onNewChannel) {
-        onNewChannel(formLocation, { kind: 'actions', entryActions: toStrings(localEntry), exitActions: toStrings(updatedList) });
-      } else {
-        onApply(toStrings(localEntry), toStrings(updatedList));
-      }
+      onApply(toStrings(localEntry), toStrings(updatedList));
     }
 
     resetForm();

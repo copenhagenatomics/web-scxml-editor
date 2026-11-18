@@ -111,16 +111,7 @@ import {
 import { hasAnyChildren } from '@/lib/utils/parallel-group-normalization';
 import { expandWrapperPositionChanges } from '@/lib/layout/parallel-group-drag';
 import { resolveEnhancedNodePosition } from '@/lib/utils/resolve-enhanced-node-position';
-import { inferChannelInitialExpr, inferChannelRetypes } from '@/lib/utils/datamodel-extractor';
-import { UpdateDataExprCommand } from '@/lib/commands/update-data-expr-command';
-
-/** Re-types channels whose <data expr> no longer matches the values assigned to them. */
-function retypeChannelsFromAssigns(content: string): string {
-  return inferChannelRetypes(content).reduce((acc, { id, expr }) => {
-    const result = new UpdateDataExprCommand(id, expr).execute(acc);
-    return result.success ? result.newContent : acc;
-  }, content);
-}
+import { changedItems, syncThisChannels, thisChannelRefsIn } from '@/lib/utils/sync-this-channels';
 import { parseAssignActionString } from '@/lib/utils/action-string';
 
 // ==================== TYPES & INTERFACES ====================
@@ -452,7 +443,14 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const result = command.execute(scxmlContent);
 
         if (result.success) {
-          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
+          // Declare/re-type only the this_ channels in the rows this edit added or changed — the
+          // panel sends the whole list, so untouched rows' channels must not be swept along.
+          const previous = nodes.find((n) => n.id === nodeId)?.data;
+          const changed = [
+            ...changedItems<string>(previous?.entryActions ?? [], entryActions),
+            ...changedItems<string>(previous?.exitActions ?? [], exitActions),
+          ];
+          onSCXMLChange(syncThisChannels(result.newContent, thisChannelRefsIn(changed)), 'property');
         } else {
           console.error('Failed to update actions:', result.error);
         }
@@ -460,7 +458,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         console.error('Failed to sync actions change:', error);
       }
     },
-    [scxmlContent, onSCXMLChange]
+    [scxmlContent, onSCXMLChange, nodes]
   );
 
   const handleTransitionApply = React.useCallback(
@@ -556,7 +554,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        onSCXMLChange(content, 'property');
+        // Declare/re-type only the this_ channels the applied condition references
+        const channels = editingField === 'cond' ? thisChannelRefsIn([newValue]) : [];
+        onSCXMLChange(syncThisChannels(content, channels), 'property');
       } catch (error) {
         console.error('Failed to apply transition:', error);
       }
@@ -572,7 +572,11 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const command = new UpdateInternalEventsCommand(nodeId, actions);
         const result = command.execute(scxmlContent);
         if (result.success) {
-          onSCXMLChange(retypeChannelsFromAssigns(result.newContent), 'property');
+          // Declare/re-type only the this_ channels in the reactions this edit added or changed
+          const previous = nodes.find((n) => n.id === nodeId)?.data.internalEventActions ?? [];
+          const changed = changedItems(previous, actions, (a) => `${a.event}|${a.location}|${a.expr}|${a.type}`);
+          const channels = thisChannelRefsIn(changed.flatMap((a) => [a.location, a.expr]));
+          onSCXMLChange(syncThisChannels(result.newContent, channels), 'property');
         } else {
           console.error('Failed to update internal event reactions:', result.error);
         }
@@ -580,7 +584,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         console.error('Failed to update internal event reactions:', error);
       }
     },
-    [scxmlContent, onSCXMLChange]
+    [scxmlContent, onSCXMLChange, nodes]
   );
 
   // Pre-check for the State Actions panel: a done.state.<id> reaction would be inserted
@@ -927,89 +931,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
       }
     },
     [scxmlContent, onSCXMLChange]
-  );
-
-  const handleNewChannel = React.useCallback(
-    (
-      channelName: string,
-      source: string,
-      target: string,
-      originalEvent: string | undefined,
-      originalCond: string | undefined,
-      editingField: 'event' | 'cond',
-      edgeId: string
-    ) => {
-      if (!onSCXMLChange || !scxmlContent) return;
-      try {
-        const { AddDataCommand, UpdateTransitionCommand } = require('@/lib/commands');
-        const { parseTransitionIndexFromEdgeId } = require('@/lib/converters/converter-modules');
-
-        // Step 1: insert <data> element — a channel used as the whole cond is a bool
-        const initialExpr = editingField === 'cond' ? 'false' : '0.0';
-        const addResult = new AddDataCommand(channelName, initialExpr).execute(scxmlContent);
-        const base = addResult.success ? addResult.newContent : scxmlContent;
-
-        // Step 2: update the transition cond/event on the already-modified content
-        const transitionIndex = parseTransitionIndexFromEdgeId(edgeId);
-        const updateResult = new UpdateTransitionCommand(
-          source, target, originalEvent, originalCond,
-          channelName, editingField, transitionIndex
-        ).execute(base);
-
-        if (updateResult.success) {
-          onSCXMLChange(updateResult.newContent, 'structure');
-        } else {
-          console.error('Failed to update transition after adding channel:', updateResult.error);
-        }
-      } catch (error) {
-        console.error('Failed to add channel:', error);
-      }
-    },
-    [scxmlContent, onSCXMLChange]
-  );
-
-  const handleNewChannelForStateActions = React.useCallback(
-    (
-      channelName: string,
-      apply:
-        | { kind: 'actions'; entryActions: string[]; exitActions: string[] }
-        | { kind: 'reactions'; actions: Array<{ event: string; location: string; expr: string; type: 'internal' | 'external' }> }
-    ) => {
-      if (!onSCXMLChange || !scxmlContent || !selectedStateForActions) return;
-      try {
-        const { AddDataCommand, UpdateActionsCommand, UpdateInternalEventsCommand } = require('@/lib/commands');
-
-        // Step 1: insert the data element for the new channel, typed from the value assigned to it
-        // (no matching assign, e.g. a channel picked inside an expression, falls back to double)
-        const assignedValue = apply.kind === 'reactions'
-          ? apply.actions.find((a) => a.location === channelName)?.expr
-          : [...apply.entryActions, ...apply.exitActions]
-              .map(parseAssignActionString)
-              .find((assign) => assign?.location === channelName)
-              ?.expr;
-        const addResult = new AddDataCommand(channelName, inferChannelInitialExpr(assignedValue)).execute(scxmlContent);
-        const base = addResult.success ? addResult.newContent : scxmlContent;
-
-        // Step 2: apply the actions/reactions change on the already-patched content
-        const stateId = selectedStateForActions.id;
-        const result = apply.kind === 'actions'
-          ? new UpdateActionsCommand(
-              stateId,
-              mergeHiddenActions(apply.entryActions, selectedStateForActions.hiddenEntryActions),
-              mergeHiddenActions(apply.exitActions, selectedStateForActions.hiddenExitActions),
-            ).execute(base)
-          : new UpdateInternalEventsCommand(stateId, apply.actions).execute(base);
-
-        if (result.success) {
-          onSCXMLChange(result.newContent, 'structure');
-        } else {
-          console.error('Failed to update state actions after adding channel:', result.error);
-        }
-      } catch (error) {
-        console.error('Failed to add channel:', error);
-      }
-    },
-    [scxmlContent, onSCXMLChange, selectedStateForActions]
   );
 
   const handleEdgeMouseEnter = useCallback(
@@ -3865,7 +3786,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           entryActions={nodes.find((n) => n.id === selectedEdgeForEdit.source)?.data.entryActions ?? []}
           exitActions={nodes.find((n) => n.id === selectedEdgeForEdit.source)?.data.exitActions ?? []}
           onApply={handleTransitionApply}
-          onNewChannel={handleNewChannel}
           onClose={() => {
             setSelectedEdgeForEdit(null);
             setSelectedTransitions(new Set());
@@ -3922,7 +3842,6 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
             ? validateNodeInternalEvents(selectedStateForActions.id, actions)
             : { blocked: false }
         }
-        onNewChannel={handleNewChannelForStateActions}
       />
     </div>
   );

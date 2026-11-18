@@ -62,6 +62,22 @@ describe('TransitionPanel condition-mode suggestions (characterization)', () => 
     expect(screen.getByText('(new channel)')).toBeInTheDocument();
   });
 
+  // The handler behind onApply declares the channel (syncThisChannels); the panel just applies.
+  it.each([['this_brand_new'], ['this_number == 2'], ['!this_door']])(
+    'applies %j as a plain condition on a single Enter',
+    (value) => {
+      const onApply = vi.fn(() => undefined);
+      renderPanel({ onApply });
+      fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
+      const textarea = screen.getByPlaceholderText('Enter condition');
+      fireEvent.change(textarea, { target: { value } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(onApply).toHaveBeenCalledTimes(1);
+      expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ newValue: value, editingField: 'cond' }));
+    }
+  );
+
   it('replaces the token being typed with the selected suggestion (buildCondValue)', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));

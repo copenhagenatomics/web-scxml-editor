@@ -28,6 +28,7 @@ import { validateInitialStateGroups } from './initial-group-validator';
 import { validateParallelNesting } from './parallel-nesting-validator';
 import { validateTransitionSlotConflicts } from './transition-slot-validator';
 import { validateEventlessEventDataEntry } from './event-data-validator';
+import { validateThisChannelTypes } from './this-channel-validator';
 import {
   validateW3CCompliance,
   validateRequiredAttributes,
@@ -134,6 +135,9 @@ export class SCXMLValidator {
     run('eventless _event.data', () =>
       validateEventlessEventDataEntry(scxml, this.xmlContent, errors)
     );
+
+    // this_ channels that are undeclared or typed differently from how they're used
+    run('this_ channel types', () => validateThisChannelTypes(this.xmlContent, errors));
 
     return deduplicateErrors(errors);
   }

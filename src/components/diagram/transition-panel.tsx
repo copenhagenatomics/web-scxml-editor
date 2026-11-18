@@ -37,21 +37,12 @@ interface TransitionPanelProps {
   scxmlContent: string;
   entryActions?: string[];
   exitActions?: string[];
+  /** Missing this_ channels the condition references are declared by the handler, not here. */
   onApply: (args: TransitionApplyArgs) => TransitionApplyResult;
-  onNewChannel?: (
-    channelName: string,
-    source: string,
-    target: string,
-    originalEvent: string | undefined,
-    originalCond: string | undefined,
-    editingField: 'event' | 'cond',
-    edgeId: string
-  ) => void;
   onClose: () => void;
 }
 
 export const TransitionPanel: React.FC<TransitionPanelProps> = ({
-  edgeId,
   source,
   target,
   event,
@@ -59,7 +50,6 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   scxmlContent,
   entryActions,
   onApply,
-  onNewChannel,
   onClose,
 }) => {
   // ── event/cond search state ──
@@ -258,12 +248,6 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     }
 
     // Regular event or condition — always driven by the explicit switch, never guessed.
-    const isNewChannel = suggestions.length === 1 && suggestions[0].kind === 'new-channel';
-    if (isNewChannel && onNewChannel) {
-      onNewChannel(trimmed, source, target, event, cond, editingField, edgeId);
-      return;
-    }
-
     const result = onApply({
       newValue: trimmed,
       editingField,
@@ -283,8 +267,9 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       if (e.key === 'Tab' && activeIndex >= 0) { e.preventDefault(); acceptSuggestion(suggestions[activeIndex]); return; }
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (activeIndex >= 0 && suggestions[activeIndex]) acceptSuggestion(suggestions[activeIndex]);
-        else if (suggestions[0]?.kind === 'new-channel') acceptSuggestion(suggestions[0]);
+        // A "(new channel)" row is the text already typed, so accepting it would change nothing.
+        const active = activeIndex >= 0 ? suggestions[activeIndex] : undefined;
+        if (active && active.kind !== 'new-channel') acceptSuggestion(active);
         else handleApply();
         return;
       }

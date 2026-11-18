@@ -6,7 +6,7 @@ import { useIsDark } from '@/lib/theme/use-is-dark';
 import { useEditorStore } from '@/stores/editor-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
-import type { ValidationError } from '@/types/common';
+import type { ValidationError, ValidationFix } from '@/types/common';
 import type { ConfigValue } from '@/types/host-api';
 import { SidePanels } from './side-panels';
 
@@ -14,6 +14,7 @@ export interface CodeEditorPaneProps {
   editorRef: React.RefObject<XMLEditorRef | null>;
   onContentChange: (content: string) => void;
   onErrorClick: (error: ValidationError) => void;
+  onApplyValidationFix: (fix: ValidationFix) => void;
   validationPanelTab: 'validation' | 'host-alerts';
   onValidationTabChange: (tab: 'validation' | 'host-alerts') => void;
   onValidationClose: () => void;
@@ -25,6 +26,7 @@ export function CodeEditorPane({
   editorRef,
   onContentChange,
   onErrorClick,
+  onApplyValidationFix,
   validationPanelTab,
   onValidationTabChange,
   onValidationClose,
@@ -60,6 +62,7 @@ export function CodeEditorPane({
           onClose={onValidationClose}
           onTabChange={onValidationTabChange}
           onErrorClick={onErrorClick}
+          onApplyFix={onApplyValidationFix}
           onDismissHostError={dismissHostError}
           onClearHostErrors={clearHostErrors}
         />

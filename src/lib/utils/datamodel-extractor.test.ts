@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { getConfigFieldUsage, inferChannelInitialExpr, inferChannelRetypes } from './datamodel-extractor';
+import {
+  getConfigFieldUsage,
+  inferChannelInitialExpr,
+  inferChannelRetypes,
+  inferThisChannelChanges,
+} from './datamodel-extractor';
 
 describe('inferChannelInitialExpr (assigned value -> <data expr> for a new channel)', () => {
   it.each([
@@ -145,6 +150,145 @@ describe('inferChannelRetypes', () => {
   it('leaves a channel alone when only some assigned types can be determined', () => {
     const xml = doc('<data id="this_v" expr="false"/>', entry('this_a', '5'));
     expect(inferChannelRetypes(xml)).toEqual([]);
+  });
+});
+
+describe('inferThisChannelChanges', () => {
+  const doc = (data: string, body: string) =>
+    `<scxml xmlns="http://www.w3.org/2005/07/scxml"><datamodel>${data}</datamodel>${body}</scxml>`;
+  const withCond = (cond: string) =>
+    `<state id="A"><transition cond="${cond}" target="B"/></state><state id="B"/>`;
+  const assignV = (expr: string) => `<state id="C"><onentry><assign location="this_v" expr="${expr}"/></onentry></state>`;
+
+  describe('missing channels', () => {
+    it.each([
+      ['this_number == 2', 'this_number', '0.0'],
+      ['this_temp &gt; 20.5', 'this_temp', '0.0'],
+      ['2 &lt; this_x', 'this_x', '0.0'],
+      ['this_flag', 'this_flag', 'false'],
+      ['!this_door', 'this_door', 'false'],
+      ['this_on == true', 'this_on', 'false'],
+      ['(this_a)', 'this_a', 'false'],
+    ])('declares the channel a condition %j references: %s = %s', (cond, id, expr) => {
+      expect(inferThisChannelChanges(doc('', withCond(cond))).missing).toEqual([{ id, expr }]);
+    });
+
+    it('declares every this_ channel in a compound condition, typed by its own use', () => {
+      const { missing } = inferThisChannelChanges(doc('', withCond('this_a &amp;&amp; this_b &gt;= 3')));
+      expect(missing).toEqual([
+        { id: 'this_a', expr: 'false' },
+        { id: 'this_b', expr: '0.0' },
+      ]);
+    });
+
+    it('falls back to a double when a referenced channel has no clear type', () => {
+      const { missing } = inferThisChannelChanges(doc('', withCond('this_a + this_b &gt; 3')));
+      expect(missing).toEqual([
+        { id: 'this_a', expr: '0.0' },
+        { id: 'this_b', expr: '0.0' },
+      ]);
+    });
+
+    it('declares assign targets typed from the assigned value, and channels read in the expression', () => {
+      const { missing } = inferThisChannelChanges(doc('', assignV('!this_ready')));
+      expect(missing).toEqual([
+        { id: 'this_ready', expr: 'false' },
+        { id: 'this_v', expr: 'false' },
+      ]);
+    });
+
+    it('ignores non-this_ names, property accesses and string contents', () => {
+      const cond = "_event.data.this_x == 1 || other == 2 || name == 'this_y' || conf_z";
+      expect(inferThisChannelChanges(doc('', withCond(cond))).missing).toEqual([]);
+    });
+
+    describe('typed from declared variables', () => {
+      const declared =
+        '<data id="conf_enabled" expr="true"/>' +
+        '<data id="conf_limit" expr="12.5"/>' +
+        '<data id="conf_gain" expr="2" confType="double"/>' +
+        `<data id="conf_label" expr="'x'" confType="string"/>` +
+        '<data id="this_a" expr="false"/>';
+
+      it.each([
+        ['conf_enabled', 'false'],
+        ['this_a', 'false'],
+        ['!conf_enabled', 'false'],
+        ['conf_limit * 2', '0.0'],
+        // confType wins over the literal: "2" alone would make an int
+        ['conf_gain', '0.0'],
+        // strings and undeclared names still have no type, so the double fallback applies
+        ['conf_label', '0.0'],
+        ['conf_unknown', '0.0'],
+        ['_event.data', '0.0'],
+      ])('assigning %j creates this_v as %s', (assigned, expr) => {
+        const { missing } = inferThisChannelChanges(doc(declared, assignV(assigned)));
+        expect(missing).toEqual([{ id: 'this_v', expr }]);
+      });
+
+      it.each([
+        ['this_x == this_a', 'false'],
+        ['this_x != conf_enabled', 'false'],
+        ['this_x &gt; conf_limit', '0.0'],
+        ['conf_limit &lt;= this_x', '0.0'],
+      ])('condition %j creates this_x as %s', (cond, expr) => {
+        const { missing } = inferThisChannelChanges(doc(declared, withCond(cond)));
+        expect(missing).toEqual([{ id: 'this_x', expr }]);
+      });
+    });
+
+    it('leaves already declared channels alone', () => {
+      expect(inferThisChannelChanges(doc('<data id="this_n" expr="0"/>', withCond('this_n == 2'))).missing).toEqual([]);
+    });
+  });
+
+  describe('retypes from conditions', () => {
+    // Typing "this_number" first creates a bool; finishing the cond must turn it into a number.
+    it('turns a generated bool into a double once a condition compares it to a number', () => {
+      const { retypes } = inferThisChannelChanges(doc('<data id="this_number" expr="false"/>', withCond('this_number == 2')));
+      expect(retypes).toEqual([{ id: 'this_number', expr: '0.0' }]);
+    });
+
+    it('turns a generated number into a bool once it is used as a boolean condition', () => {
+      const { retypes } = inferThisChannelChanges(doc('<data id="this_flag" expr="0.0"/>', withCond('!this_flag')));
+      expect(retypes).toEqual([{ id: 'this_flag', expr: 'false' }]);
+    });
+
+    it.each([['0'], ['0.0']])('keeps a %s channel that a condition compares to a number', (current) => {
+      const xml = doc(`<data id="this_n" expr="${current}"/>`, withCond('this_n &gt; 5'));
+      expect(inferThisChannelChanges(xml).retypes).toEqual([]);
+    });
+
+    it('leaves a hand-written initial value alone', () => {
+      const xml = doc('<data id="this_n" expr="true"/>', withCond('this_n == 2'));
+      expect(inferThisChannelChanges(xml).retypes).toEqual([]);
+    });
+
+    it('skips a channel whose condition and assign disagree', () => {
+      const xml = doc('<data id="this_v" expr="0"/>', withCond('this_v') + assignV('5'));
+      expect(inferThisChannelChanges(xml).retypes).toEqual([]);
+    });
+
+    it('re-types a generated channel assigned a declared variable of another type', () => {
+      const xml = doc('<data id="conf_enabled" expr="true"/><data id="this_v" expr="0.0"/>', assignV('conf_enabled'));
+      expect(inferThisChannelChanges(xml).retypes).toEqual([{ id: 'this_v', expr: 'false' }]);
+    });
+
+    it('still never narrows a double channel to int, even from declared int operands', () => {
+      const xml = doc(
+        '<data id="this_a" expr="0"/><data id="this_b" expr="0"/><data id="this_v" expr="0.0"/>',
+        assignV('this_a - this_b')
+      );
+      expect(inferThisChannelChanges(xml).retypes).toEqual([]);
+    });
+
+    it('widens an int channel to double when it is assigned both int and double values', () => {
+      const xml = doc(
+        '<data id="this_v" expr="0"/>',
+        `<state id="C"><onentry><assign location="this_v" expr="1"/><assign location="this_v" expr="1.5"/></onentry></state>`
+      );
+      expect(inferThisChannelChanges(xml).retypes).toEqual([{ id: 'this_v', expr: '0.0' }]);
+    });
   });
 });
 

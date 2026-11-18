@@ -9,7 +9,8 @@ import { hasVisualMetadata } from '@/lib/utils';
 import { useEditorStore } from '@/stores/editor-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { usePanelStore } from '@/stores/panel-store';
-import type { ValidationError } from '@/types/common';
+import type { ValidationError, ValidationFix } from '@/types/common';
+import { applyValidationFix } from '@/lib/utils/validation-fix';
 import { Download, Eye, FileText, Github, MoreVertical, Upload as UploadIcon } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -141,6 +142,17 @@ export default function Home() {
       }
     },
     [setContent, historyManager, isUpdatingFromHistory]
+  );
+
+  // A Validation panel fix is a discrete edit like a diagram change: applied at once, with its own
+  // undo entry (not merged into the debounced typing history).
+  const handleApplyValidationFix = useCallback(
+    (fix: ValidationFix) => {
+      const current = useEditorStore.getState().content;
+      const fixed = applyValidationFix(current, fix);
+      if (fixed !== current) handleSCXMLChangeFromDiagram(fixed, 'property');
+    },
+    [handleSCXMLChangeFromDiagram]
   );
 
   const handleErrorClick = useCallback((error: ValidationError) => {
@@ -304,6 +316,7 @@ export default function Home() {
                     editorRef={editorRef}
                     onContentChange={handleContentChange}
                     onErrorClick={handleErrorClick}
+                    onApplyValidationFix={handleApplyValidationFix}
                     validationPanelTab={validationPanelTab}
                     onValidationTabChange={setValidationPanelTab}
                     onValidationClose={handleValidationClose}
@@ -325,6 +338,7 @@ export default function Home() {
                 validationPanelTab={validationPanelTab}
                 onValidationTabChange={setValidationPanelTab}
                 onValidationClose={handleValidationClose}
+                onApplyValidationFix={handleApplyValidationFix}
                 onNavigateToLine={(line, column) => {
                   pendingNavigateRef.current = { line, column };
                 }}
