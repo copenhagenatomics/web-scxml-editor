@@ -160,16 +160,31 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
     },
     {
       tab: "visual" as const,
+      content: (
+        <>
+          <kbd className='px-1.5 py-0.5 bg-muted rounded text-default font-mono'>
+            Shift+Click
+          </kbd>{" "}
+          near a state's edge to add a connection point;{" "}
+          <kbd className='px-1.5 py-0.5 bg-muted rounded text-default font-mono'>
+            Alt+Click
+          </kbd>{" "}
+          (Mac:{" "}
+          <kbd className='px-1.5 py-0.5 bg-muted rounded text-default font-mono'>
+            Option+Click
+          </kbd>
+          ) a connection point to remove it
+        </>
+      ),
+    },
+    {
+      tab: "visual" as const,
       content: "Click the plus icon on a simple state to add a child state.",
     },
     {
       tab: "visual" as const,
       content:
         "Click the down arrow on a compound state to navigate inside it.",
-    },
-    {
-      tab: "visual" as const,
-      content: "Click the network icon for auto-layout options",
     },
     {
       tab: "visual" as const,
