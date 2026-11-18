@@ -87,6 +87,7 @@ Create/paste/reparent mutate the parsed object tree directly (not via Commands, 
 ## Things that must NOT be changed
 
 - Do not "clean up" the Windows pinch-zoom or scroll-drift workarounds without confirming (on real hardware/OS) that the underlying ReactFlow/browser bug they patch has actually been fixed upstream.
+- Do not give a callback in the parse/layout effect's dependency list (the node `data` callbacks built in `parseAndConvert`) a dependency on `nodes`/`edges`/`parsedData`/`activeStates`. Read them through `nodesRef.current` and the other refs. Otherwise every drag frame or selection change triggers a re-parse of stale content, and dragged nodes snap back (project rule 9.10, `decisions/visual-diagram.md` #16).
 - Do not merge the single-node and multi-node drag-to-reparent code paths without preserving both entry points' current behavior — the long comment block in the file explicitly explains why both are needed.
 
 ## Previous design decisions

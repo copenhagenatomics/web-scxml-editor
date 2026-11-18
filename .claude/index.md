@@ -249,6 +249,7 @@ Each file contains multiple numbered decision records, each following the same t
 | ...transitions don't animate | [visual-diagram.md](decisions/visual-diagram.md) #12 (Superseded: animated) |
 | ...a Parallel State group shows no labeled box, just a divider line | [visual-diagram.md](decisions/visual-diagram.md) #13 |
 | ...a Parallel State divider line (or a dragged node) doesn't update until you click elsewhere on the canvas | [visual-diagram.md](decisions/visual-diagram.md) #13, #14 |
+| ...a dragged node snaps back to where it was, or the diagram keeps re-parsing while idle (a node callback depends on `nodes`) | [visual-diagram.md](decisions/visual-diagram.md) #16 |
 | ...every Command re-parses the whole document | [editing.md](decisions/editing.md) #1, [architecture.md](decisions/architecture.md) #5 |
 | ...delete's undo works differently from rename's undo | [editing.md](decisions/editing.md) #2 |
 | ...undoing a state→final conversion doesn't restore its children | [editing.md](decisions/editing.md) #3 (Inferred defect) |

@@ -355,3 +355,42 @@ Converting `isUpdatingPositionRef` from a plain ref to `React.useState` (so clea
 
 ### Status
 Accepted.
+
+---
+
+## 15. (Not on this branch)
+
+Final-state (`<final>`) rendering lives on the parallel line (`main`) only; `<final>` support is out of scope for `release/no-parallel`. The number is kept so decision numbers match across both branches.
+
+---
+
+## 16. Callbacks the parse/layout effect depends on must not depend on live canvas state (`nodes`/`edges`); read it through refs
+
+### Context
+`visual-diagram.tsx`'s parse/layout effect (`parseAndConvert`) re-parses `scxmlContent`, runs ELK, and rebuilds `parsedData`. Its dependency list includes the node callbacks it wires into each node's `data` (`handleNodeLabelChange`, `handleNodeActionsChange`, `handleNodeStateTypeChange`, `handleNodeDelete`, `handleNodeResize`, `handleNoteTextChange`). That means it re-runs whenever one of those callbacks gets a new identity, not only when the content changes.
+
+Commit `d03e7f3` (2026-11-18, "add validation for this_ channel types") changed `handleNodeActionsChange` to read a node's previous actions from `nodes`, so it could scope `this_` channel syncing to just the rows that were edited, and added `nodes` to its `useCallback` dependencies. The callback then got a new identity on every `nodes` update: every drag frame, every selection change, every `setNodes`. Each one re-ran the parse effect against the **last committed** SCXML, which doesn't have the in-flight position yet. The user-visible regression was that **a dragged node snaps back to its original position on release**:
+1. Releasing the mouse updates `nodes`, which starts a re-parse of the old content.
+2. `handleNodeDragStop` clears `draggingNodeIdsRef`.
+3. The position commit is still waiting on its 150ms debounce, so `isUpdatingPositionRef` is still false.
+4. When the stale parse lands, the resync effect finds both guards open and calls `setNodes(enhancedNodes)` with the old positions.
+
+If the stale parse also produces a `layout-init` write-back (for example, an edge that never gets explicit handles), the content change clears `positionUpdateTimeoutRef`, which cancels the drag commit for good. The loop also feeds itself (`setNodes` → new `nodes` → new callback → re-parse → `setNodes`), so ELK runs continuously while the canvas is idle.
+
+### Decision
+A callback in the parse/layout effect's dependency list, or any callback it calls, must not list `nodes`, `edges`, `parsedData`, `activeStates` or any other state that changes during a canvas gesture as a `useCallback` dependency. When it needs the current canvas state at the moment it runs, it reads it through the existing refs (`nodesRef.current`, `parsedDataRef.current`, `scxmlContentRef.current`). Those refs are always current at call time and don't change the callback's identity (project rule 2.6). The callback's identity may change only when `scxmlContent`, `onSCXMLChange` or another value that changes only on a committed edit changes.
+
+### Reason
+Requested by the developer (2026-11-18) after the drag snap-back regression above, to stop the same class of bug from recurring. The effect's guards (`isUpdatingPositionRef`, `draggingNodeIdsRef`, the parse-generation check, decision #14's retry) all assume that a re-parse only happens after `scxmlContent` changes. A re-parse triggered by a callback's identity changing breaks that assumption, and at drag-end none of those guards is closed.
+
+### Constraints
+- This applies to all six callbacks in the effect's dependency list and to anything they call. When adding a new callback to node `data` inside `parseAndConvert`, keep its dependencies down to values that change only on a committed edit.
+- Reading `nodes` directly inside such a callback gets a stale closure, so use `nodesRef.current` instead, not the closed-over value and not a new dependency.
+- The same applies to `handleNodeInternalEventsChange`. It isn't in the effect's dependency list today, but it has the same `nodes` dependency and would cause the same bug if it were ever wired into node `data`.
+- Symptoms that point to a violation: a node snaps back after drag or resize; the selection highlight resets right after a click; the parse effect fires repeatedly while the canvas is idle (a `console.log` at the top of `parseAndConvert` shows it).
+
+### Evidence
+`src/components/diagram/visual-diagram.tsx`: `handleNodeActionsChange` (around line 430; its deps were `[scxmlContent, onSCXMLChange, nodes]` from `d03e7f3` until the fix), `handleNodeInternalEventsChange` (around line 569), the parse effect's dependency list and the guard comment above it (around line 2519), the resync effect (around lines 3374–3402), `handleNodeDragStop` (around line 3110), and the 150ms position-commit debounce in `handleNodesChange` (around line 1679). Before `d03e7f3` the callback's deps were `[scxmlContent, onSCXMLChange]` and dragging worked. A data-pipeline reproduction (position command → editor-store normalization → `SCXMLParser.parse` → `convertToReactFlow`) showed the committed position surviving intact, which isolated the bug to the React effect layer.
+
+### Status
+Accepted. The violation was fixed on 2026-11-18: both handlers now read `nodesRef.current` and depend only on `[scxmlContent, onSCXMLChange]`. There's no automated regression test, because no test renders `VisualDiagram` itself (see `features/diagram-interaction.md` "Tests"); the guard comment on the parse effect's dependency list is the in-code reminder.
