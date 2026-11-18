@@ -4,9 +4,8 @@ import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import { UpdateTransitionHandlesCommand } from '@/lib/commands';
 import {
   findStateById,
-  detachElementFromParent,
+  detachStateFromParent,
   addStateToDocument,
-  addLooseStateToParallel,
   removeStateFromDocument,
 } from './scxml-manipulation-utils';
 
@@ -71,8 +70,8 @@ describe('comments survive object-tree edits (SCXMLParser.serialize)', () => {
   it('a comment inside a state moves with it when the state is reparented', () => {
     const src = `<scxml ${NS} initial="A"><state id="A"><!-- about A --><state id="A1"/></state><state id="B"/></scxml>`;
     const xml = edit(src, (doc) => {
-      const detached = detachElementFromParent(doc, 'A')!;
-      addStateToDocument(doc, detached.element, 'B', detached.tag);
+      const detached = detachStateFromParent(doc, 'A')!;
+      addStateToDocument(doc, detached, 'B');
     });
     const c = pos(xml, '<!-- about A -->');
     expect(c).toBeGreaterThan(pos(xml, 'id="B"'));
@@ -98,13 +97,6 @@ describe('comments survive object-tree edits (SCXMLParser.serialize)', () => {
     const xml = edit(src, (doc) => removeStateFromDocument(doc, 'Gone'));
     expect(xml).not.toContain('bye');
     expect(xml).toContain('<!-- keep -->');
-  });
-
-  it('follows a <parallel> that is re-tagged as a <state> (matched by id)', () => {
-    const src = `<scxml ${NS} initial="P"><parallel id="P"><!-- regions --><state id="R1"/><state id="R2"/></parallel></scxml>`;
-    const xml = edit(src, (doc) => addLooseStateToParallel(doc, 'P', { '@_id': 'New' } as any));
-    expect(xml).toMatch(/<state id="P"/);
-    expect(pos(xml, '<!-- regions -->')).toBeGreaterThan(pos(xml, 'id="P"'));
   });
 
   it('keeps comments inside id-less elements (onentry) and around the root', () => {

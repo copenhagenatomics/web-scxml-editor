@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
-import type { ValidationError } from '@/types/common';
+import { AlertCircle, AlertTriangle, CheckCircle, Info, Wrench, X } from 'lucide-react';
+import type { ValidationError, ValidationFix } from '@/types/common';
 import type { HostErrorItem } from '@/types/host-api';
 
 interface ValidationPanelProps {
@@ -13,6 +13,8 @@ interface ValidationPanelProps {
   onClose: () => void;
   onTabChange: (tab: 'validation' | 'host-alerts') => void;
   onErrorClick?: (error: ValidationError) => void;
+  /** Applies an error's one-click fix; without it, fixes aren't offered. */
+  onApplyFix?: (fix: ValidationFix) => void;
   onDismissHostError: (id: string) => void;
   onClearHostErrors: () => void;
   supportsStateHighlight?: boolean;
@@ -26,6 +28,7 @@ export function ValidationPanel({
   onClose,
   onTabChange,
   onErrorClick,
+  onApplyFix,
   onDismissHostError,
   onClearHostErrors,
   supportsStateHighlight,
@@ -80,7 +83,12 @@ export function ValidationPanel({
 
       <div className='p-4 flex-1 overflow-y-auto scrollbar-thin'>
         {!showTabs || activeTab === 'validation' ? (
-          <ValidationTab errors={errors} onErrorClick={onErrorClick} supportsStateHighlight={supportsStateHighlight} />
+          <ValidationTab
+            errors={errors}
+            onErrorClick={onErrorClick}
+            onApplyFix={onApplyFix}
+            supportsStateHighlight={supportsStateHighlight}
+          />
         ) : (
           <HostAlertsTab
             hostErrors={hostErrors}
@@ -100,10 +108,11 @@ export function ValidationPanel({
 interface ValidationTabProps {
   errors: ValidationError[];
   onErrorClick?: (error: ValidationError) => void;
+  onApplyFix?: (fix: ValidationFix) => void;
   supportsStateHighlight?: boolean;
 }
 
-function ValidationTab({ errors, onErrorClick, supportsStateHighlight }: ValidationTabProps) {
+function ValidationTab({ errors, onErrorClick, onApplyFix, supportsStateHighlight }: ValidationTabProps) {
   const errorCount = errors.filter(e => e.severity === 'error').length;
   const warningCount = errors.filter(e => e.severity === 'warning').length;
   const sortedErrors = [...errors].sort((a, b) => {
@@ -139,7 +148,13 @@ function ValidationTab({ errors, onErrorClick, supportsStateHighlight }: Validat
       </div>
       <div className='space-y-2'>
         {sortedErrors.map((error, index) => (
-          <ValidationErrorItem key={index} error={error} onClick={onErrorClick} supportsStateHighlight={supportsStateHighlight} />
+          <ValidationErrorItem
+            key={index}
+            error={error}
+            onClick={onErrorClick}
+            onApplyFix={onApplyFix}
+            supportsStateHighlight={supportsStateHighlight}
+          />
         ))}
       </div>
     </div>
@@ -235,10 +250,11 @@ function HostErrorCard({ item, onDismiss }: HostErrorCardProps) {
 interface ValidationErrorItemProps {
   error: ValidationError;
   onClick?: (error: ValidationError) => void;
+  onApplyFix?: (fix: ValidationFix) => void;
   supportsStateHighlight?: boolean;
 }
 
-function ValidationErrorItem({ error, onClick, supportsStateHighlight }: ValidationErrorItemProps) {
+function ValidationErrorItem({ error, onClick, onApplyFix, supportsStateHighlight }: ValidationErrorItemProps) {
   const isError = error.severity === 'error';
   const hasLocation = Boolean(error.line && error.column);
   const canHighlightState = Boolean(supportsStateHighlight && error.stateId);
@@ -295,6 +311,25 @@ function ValidationErrorItem({ error, onClick, supportsStateHighlight }: Validat
             <p className={`text-xs mt-1 font-mono ${isError ? 'text-red-500' : 'text-yellow-500'}`}>
               Code: {error.code}
             </p>
+          )}
+          {error.fix && onApplyFix && (
+            <button
+              type='button'
+              // Inside the clickable card: applying the fix must not also navigate.
+              onClick={(e) => {
+                e.stopPropagation();
+                onApplyFix(error.fix!);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${
+                isError
+                  ? 'bg-red-600 text-white hover:bg-red-500 active:bg-red-700 focus-visible:ring-red-400'
+                  : 'bg-yellow-500 text-yellow-950 hover:bg-yellow-400 active:bg-yellow-600 focus-visible:ring-yellow-300'
+              }`}
+            >
+              <Wrench className='h-3 w-3' />
+              Fix: {error.fix.label}
+            </button>
           )}
         </div>
       </div>

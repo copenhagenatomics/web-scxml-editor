@@ -10,7 +10,7 @@ import { Panel, Badge } from "@/components/ui/primitives";
 import { formatInitialTooltip, HIERARCHY_ROOT_KEY } from "@/lib/utils/hierarchy-initial-info";
 import { ValidationPanel } from "@/components/ui";
 import { usePanelStore } from "@/stores/panel-store";
-import type { ValidationError } from "@/types/common";
+import type { ValidationError, ValidationFix } from "@/types/common";
 
 /** Set at build time by next.config.ts (release tag, or the nearest tag locally, e.g. v0.3.9). */
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION;
@@ -32,6 +32,7 @@ interface TwoTabLayoutProps {
   onValidationTabChange: (tab: 'validation' | 'host-alerts') => void;
   onValidationClose: () => void;
   onNavigateToLine: (line: number, column: number) => void;
+  onApplyValidationFix?: (fix: ValidationFix) => void;
 }
 
 export type TabType = "code" | "visual";
@@ -45,6 +46,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
   onValidationTabChange,
   onValidationClose,
   onNavigateToLine,
+  onApplyValidationFix,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>(
     () => useHostAPIStore.getState().requestedTab ?? "code"
@@ -402,6 +404,7 @@ export const TwoTabLayout: React.FC<TwoTabLayoutProps> = ({
                   onClose={onValidationClose}
                   onTabChange={onValidationTabChange}
                   onErrorClick={handleVisualErrorClick}
+                  onApplyFix={onApplyValidationFix}
                   supportsStateHighlight={true}
                   onDismissHostError={dismissHostError}
                   onClearHostErrors={clearHostErrors}

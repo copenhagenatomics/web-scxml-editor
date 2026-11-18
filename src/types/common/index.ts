@@ -9,6 +9,20 @@ export interface ValidationError {
   code?: string;
   stateId?: string;
   targetStateId?: string;
+  /** A one-click fix the Validation panel offers as a button (see applyValidationFix). */
+  fix?: ValidationFix;
+}
+
+/**
+ * A document change that resolves a validation problem. Plain data rather than a callback, so
+ * errors stay serializable: 'add-data' declares `<data id={dataId} expr={expr}>`, and
+ * 'set-data-expr' changes an existing `<data id={dataId}>`'s expr.
+ */
+export interface ValidationFix {
+  label: string;
+  kind: 'add-data' | 'set-data-expr';
+  dataId: string;
+  expr: string;
 }
 
 export interface ParseResult<T> {

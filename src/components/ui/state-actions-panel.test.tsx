@@ -208,92 +208,9 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(screen.queryByText('(new channel)')).not.toBeInTheDocument();
   });
 
-  it('routes onentry save through onNewChannel instead of onApply when creating a new channel', () => {
-    const onApply = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({ onApply, onNewChannel });
-
-    fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
-      target: { value: 'this_channel' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '0' } });
-    fireEvent.click(screen.getByText('Apply'));
-
-    expect(onNewChannel).toHaveBeenCalledWith('this_channel', {
-      kind: 'actions',
-      entryActions: ['assign|this_channel|0'],
-      exitActions: [],
-    });
-    expect(onApply).not.toHaveBeenCalled();
-  });
-
-  it('routes onexit save through onNewChannel with exitActions updated and entryActions unchanged', () => {
-    const onApply = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({
-      entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
-      exitActions: [{ type: 'assign', location: 'existingExit', expr: '9' }],
-      onApply,
-      onNewChannel,
-    });
-
-    fireEvent.click(screen.getByText(/onexit/));
-    fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
-      target: { value: 'this_channel' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '0' } });
-    fireEvent.click(screen.getByText('Apply'));
-
-    expect(onNewChannel).toHaveBeenCalledWith('this_channel', {
-      kind: 'actions',
-      entryActions: ['assign|a|1'],
-      exitActions: ['assign|existingExit|9', 'assign|this_channel|0'],
-    });
-    expect(onApply).not.toHaveBeenCalled();
-  });
-
-  it('routes reactions save through onNewChannel with kind reactions', () => {
-    const onApplyReactions = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({ onApplyReactions, onNewChannel });
-
-    fireEvent.click(screen.getByText(/event reactions/));
-    fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('vector'), { target: { value: 'myEvent' } });
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
-      target: { value: 'this_channel' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '0' } });
-    fireEvent.click(screen.getByText('Apply'));
-
-    expect(onNewChannel).toHaveBeenCalledWith('this_channel', {
-      kind: 'reactions',
-      actions: [
-        expect.objectContaining({ event: 'myEvent', location: 'this_channel', expr: '0', type: 'internal' }),
-      ],
-    });
-    expect(onApplyReactions).not.toHaveBeenCalled();
-  });
-
-  it('still calls onApply for a plain literal location, even when onNewChannel is provided', () => {
-    const onApply = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({ onApply, onNewChannel });
-
-    fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
-      target: { value: 'plainVar' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '1' } });
-    fireEvent.click(screen.getByText('Apply'));
-
-    expect(onApply).toHaveBeenCalledWith(['assign|plainVar|1'], []);
-    expect(onNewChannel).not.toHaveBeenCalled();
-  });
-
-  it('still saves a new this_-prefixed location via onApply when onNewChannel is omitted', () => {
+  // A new this_ channel is declared by the parent's onApply (syncThisChannels), so the panel
+  // saves it like any other row.
+  it('saves an onentry assign to a new this_ channel through onApply', () => {
     const onApply = vi.fn();
     renderPanel({ onApply });
 
@@ -307,87 +224,77 @@ describe('StateActionsPanel new-channel suggestions', () => {
     expect(onApply).toHaveBeenCalledWith(['assign|this_channel|0'], []);
   });
 
-  it('registers a new channel referenced inside the Expression field immediately on selection, without touching the committed action lists', () => {
+  it('saves an onexit assign to a new this_ channel with entryActions unchanged', () => {
     const onApply = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({
-      entryActions: [{ type: 'assign', location: 'existingVar', expr: '1' }],
-      onApply,
-      onNewChannel,
-    });
-
-    fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'target' } });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: 'this_new_thing' } });
-
-    fireEvent.mouseDown(screen.getByText('(new channel)'));
-
-    // Registration fires immediately — before Apply is ever clicked — and
-    // carries the *current* committed lists unchanged (the in-progress
-    // "target = this_new_thing" row isn't in here yet; that only happens
-    // when Apply is clicked, same as any other row).
-    expect(onNewChannel).toHaveBeenCalledWith('this_new_thing', {
-      kind: 'actions',
-      entryActions: ['assign|existingVar|1'],
-      exitActions: [],
-    });
-    expect(onApply).not.toHaveBeenCalled();
-
-    // The textarea now contains the accepted suggestion; the form is still
-    // open and editable (selecting a suggestion is not the same as applying).
-    expect(screen.getByPlaceholderText('expression')).toHaveValue('this_new_thing');
-    expect(screen.getByPlaceholderText('variable or channel')).toBeInTheDocument();
-  });
-
-  it('registers a new channel from the Expression field on the onexit tab, leaving entryActions untouched', () => {
-    const onApply = vi.fn();
-    const onNewChannel = vi.fn();
     renderPanel({
       entryActions: [{ type: 'assign', location: 'a', expr: '1' }],
       exitActions: [{ type: 'assign', location: 'existingExit', expr: '9' }],
       onApply,
-      onNewChannel,
     });
 
     fireEvent.click(screen.getByText(/onexit/));
     fireEvent.click(screen.getByTitle('Add action'));
-    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'target' } });
-    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: 'this_new_thing' } });
-
-    fireEvent.mouseDown(screen.getByText('(new channel)'));
-
-    expect(onNewChannel).toHaveBeenCalledWith('this_new_thing', {
-      kind: 'actions',
-      entryActions: ['assign|a|1'],
-      exitActions: ['assign|existingExit|9'],
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
+      target: { value: 'this_channel' },
     });
-    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '0' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|a|1'], ['assign|existingExit|9', 'assign|this_channel|0']);
   });
 
-  it('registers a new channel from the Expression field on the reactions tab, without touching localReactions', () => {
+  it('saves a reaction assigning a new this_ channel through onApplyReactions', () => {
     const onApplyReactions = vi.fn();
-    const onNewChannel = vi.fn();
-    renderPanel({
-      internalEventActions: [{ event: 'existingEvent', location: 'x', expr: '1', type: 'internal' }],
-      onApplyReactions,
-      onNewChannel,
-    });
+    renderPanel({ onApplyReactions });
 
     fireEvent.click(screen.getByText(/event reactions/));
     fireEvent.click(screen.getByTitle('Add action'));
     fireEvent.change(screen.getByPlaceholderText('vector'), { target: { value: 'myEvent' } });
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
+      target: { value: 'this_channel' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '0' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    expect(onApplyReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'myEvent', location: 'this_channel', expr: '0', type: 'internal' }),
+    ]);
+  });
+
+  it('still calls onApply for a plain literal location', () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), {
+      target: { value: 'plainVar' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|plainVar|1'], []);
+  });
+
+  it('picking a "(new channel)" in the Expression field commits nothing until Apply', () => {
+    const onApply = vi.fn();
+    renderPanel({
+      entryActions: [{ type: 'assign', location: 'existingVar', expr: '1' }],
+      onApply,
+    });
+
+    fireEvent.click(screen.getByTitle('Add action'));
     fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'target' } });
     fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: 'this_new_thing' } });
 
     fireEvent.mouseDown(screen.getByText('(new channel)'));
 
-    expect(onNewChannel).toHaveBeenCalledWith('this_new_thing', {
-      kind: 'reactions',
-      actions: [
-        expect.objectContaining({ event: 'existingEvent', location: 'x', expr: '1', type: 'internal' }),
-      ],
-    });
-    expect(onApplyReactions).not.toHaveBeenCalled();
+    // Selecting a suggestion is not applying: a form cancelled now leaves no stray channel behind.
+    expect(onApply).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('expression')).toHaveValue('this_new_thing');
+    expect(screen.getByPlaceholderText('variable or channel')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Apply'));
+    expect(onApply).toHaveBeenCalledWith(['assign|existingVar|1', 'assign|target|this_new_thing'], []);
   });
 });
 

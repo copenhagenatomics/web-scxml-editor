@@ -52,7 +52,7 @@ function inferType(value: string): ConfigField['type'] {
   return 'int';
 }
 
-type ExprType = 'bool' | 'double' | 'int' | 'unknown';
+export type ExprType = 'bool' | 'double' | 'int' | 'unknown';
 
 /** Blanks out everything inside quotes and brackets (and the brackets themselves), keeping only top-level text. */
 function maskNested(expr: string): string {
@@ -102,14 +102,16 @@ function mergeTypes(types: ExprType[]): ExprType {
 /**
  * Infers the result type of a JS expression from its outermost operator. An operator alone does
  * not decide the type: comparisons and "!" always give a bool, but "||"/"&&" return one of their
- * operands (so "0 || 1" is a number) and "?:" returns one of its branches.
+ * operands (so "0 || 1" is a number) and "?:" returns one of its branches. A bare variable name
+ * has the type it has in `known` (see declaredVariableTypes), and is unknown otherwise.
  */
-function inferExprType(raw: string): ExprType {
+function inferExprType(raw: string, known?: ReadonlyMap<string, ExprType>): ExprType {
+  const infer = (part: string) => inferExprType(part, known);
   const expr = raw.trim();
   if (!expr) return 'unknown';
   const masked = maskNested(expr);
 
-  if (/^\(/.test(expr) && !masked.trim()) return inferExprType(expr.slice(1, -1));
+  if (/^\(/.test(expr) && !masked.trim()) return infer(expr.slice(1, -1));
 
   // ternary: type of the branches
   const q = masked.search(/\?(?![.?])/);
@@ -118,14 +120,14 @@ function inferExprType(raw: string): ExprType {
     for (let i = q + 1; i < masked.length; i++) {
       if (masked[i] === '?' && masked[i + 1] !== '?' && masked[i - 1] !== '?') level++;
       else if (masked[i] === ':' && --level === 0) {
-        return mergeTypes([inferExprType(expr.slice(q + 1, i)), inferExprType(expr.slice(i + 1))]);
+        return mergeTypes([infer(expr.slice(q + 1, i)), infer(expr.slice(i + 1))]);
       }
     }
   }
 
   // logical: type of the operands; bare variables on both sides are assumed to be bool flags
   if (/\|\||&&/.test(masked)) {
-    const t = mergeTypes(splitAtTopLevel(expr, masked, /\|\||&&/g).map(inferExprType));
+    const t = mergeTypes(splitAtTopLevel(expr, masked, /\|\||&&/g).map(infer));
     return t === 'unknown' && !/[+\-*/%]/.test(expr) ? 'bool' : t;
   }
 
@@ -137,7 +139,7 @@ function inferExprType(raw: string): ExprType {
 
   if (/[+\-*/%]/.test(masked)) {
     // any double makes the result double; otherwise an operand of unknown type could still be one
-    const operands = splitAtTopLevel(expr, masked, /[+\-*/%]/g).filter((p) => p.trim()).map(inferExprType);
+    const operands = splitAtTopLevel(expr, masked, /[+\-*/%]/g).filter((p) => p.trim()).map(infer);
     if (operands.includes('double')) return 'double';
     return operands.includes('unknown') ? 'unknown' : 'int';
   }
@@ -145,7 +147,30 @@ function inferExprType(raw: string): ExprType {
   if (expr === 'true' || expr === 'false') return 'bool';
   if (/^\d*\.\d+$/.test(expr)) return 'double';
   if (/^\d+$/.test(expr)) return 'int';
-  return 'unknown';
+  return known?.get(expr) ?? 'unknown';
+}
+
+/**
+ * The type of every <data> variable whose declaration shows one: a conf_ field's explicit
+ * confType, otherwise the type of its initial value literal ("true" -> bool, "12.5" -> double,
+ * "0" -> int). The generated C# field has this type, so it is also the type an expression
+ * reading the variable has. Strings and non-literal initial values are left out (unknown).
+ */
+function declaredVariableTypes(dataNodes: Array<Record<string, string>>): Map<string, ExprType> {
+  const types = new Map<string, ExprType>();
+  for (const node of dataNodes) {
+    const id = node['@_id'];
+    if (!id) continue;
+    const confType = node['@_confType'];
+    const type: ExprType =
+      confType === 'bool' || confType === 'int' || confType === 'double'
+        ? confType
+        : confType === 'string'
+          ? 'unknown'
+          : inferExprType(node['@_expr'] ?? '');
+    if (type !== 'unknown') types.set(id, type);
+  }
+  return types;
 }
 
 /**
@@ -157,8 +182,11 @@ function inferExprType(raw: string): ExprType {
  * values, while assigning a double to an int field fails to compile. Non-config string fields
  * are rejected by the generator whichever type is declared.
  */
-export function inferChannelInitialExpr(assignedValue: string | undefined): string {
-  switch (inferExprType(assignedValue ?? '')) {
+export function inferChannelInitialExpr(
+  assignedValue: string | undefined,
+  known?: ReadonlyMap<string, ExprType>
+): string {
+  switch (inferExprType(assignedValue ?? '', known)) {
     case 'bool': return 'false';
     case 'int': return '0';
     default: return '0.0';
@@ -167,54 +195,312 @@ export function inferChannelInitialExpr(assignedValue: string | undefined): stri
 
 const AUTO_CHANNEL_EXPRS: ReadonlySet<string> = new Set(['false', '0.0', '0']);
 
+/** Marks a channel used as a number of unknown int/double type (e.g. compared to a literal). */
+const NUMERIC_USE = 'number';
+
+const THIS_CHANNEL_ID = /^this_\w+$/;
+/** A this_ identifier that is not a property access (foo.this_x) or part of a longer name. */
+const THIS_CHANNEL_REF = /(?<![\w$.])this_\w+/g;
+
+/** Strips parentheses that wrap the whole expression, e.g. "((a))" -> "a". */
+function stripOuterParens(raw: string): string {
+  let expr = raw.trim();
+  while (expr.startsWith('(') && !maskNested(expr).trim()) expr = expr.slice(1, -1).trim();
+  return expr;
+}
+
+/** Every this_ identifier referenced in an expression, ignoring ones inside string literals. */
+export function findThisChannelRefs(expr: string): string[] {
+  const unquoted = expr.replace(/'[^']*'|"[^"]*"/g, (s) => ' '.repeat(s.length));
+  return Array.from(unquoted.matchAll(THIS_CHANNEL_REF), (m) => m[0]);
+}
+
 /**
- * Finds this_ channels whose <data expr> no longer matches the values assigned to them. Only
- * channels still holding a generated zero value are considered (a hand-written initial value is
- * left alone), and only when every <assign> to the channel agrees on one type; conflicting
- * assigns have no single correct type, so they are skipped. So are assigns whose type cannot be
- * determined, and a double is never narrowed to int: variable types are unknown here, and the
- * generated C# rejects assigning a double to an int field but accepts an int in a double field.
+ * Records the type an expression implies for the this_ channels it reads, as a <data expr> zero
+ * value. Only unambiguous uses count: a channel used as a whole boolean operand (the whole cond,
+ * negated, or next to && / ||) is a bool; a channel compared to a bool literal is a bool, and one
+ * compared to a number is NUMERIC_USE (some number: C# compares int and double fields alike).
+ * A comparison with a declared variable counts as one with a value of that variable's type
+ * (`known`). Everything else (arithmetic, comparing untyped names, ternary branches) says nothing.
  */
+function collectUsageTypes(
+  raw: string,
+  boolContext: boolean,
+  record: (id: string, expr: string) => void,
+  known: ReadonlyMap<string, ExprType>
+): void {
+  const collect = (part: string, inBoolContext: boolean) => collectUsageTypes(part, inBoolContext, record, known);
+  const expr = stripOuterParens(raw);
+  if (!expr) return;
+  const masked = maskNested(expr);
+
+  const q = masked.search(/\?(?![.?])/);
+  if (q >= 0) {
+    collect(expr.slice(0, q), true);
+    return;
+  }
+
+  if (/\|\||&&/.test(masked)) {
+    for (const part of splitAtTopLevel(expr, masked, /\|\||&&/g)) collect(part, true);
+    return;
+  }
+
+  const noShifts = masked.replace(/<<|>>>|>>|=>/g, (s) => ' '.repeat(s.length));
+  const cmp = /[!=]==?|[<>]=?/.exec(noShifts);
+  if (cmp) {
+    const sides = [expr.slice(0, cmp.index), expr.slice(cmp.index + cmp[0].length)];
+    sides.forEach((side, i) => {
+      const id = stripOuterParens(side);
+      if (THIS_CHANNEL_ID.test(id)) {
+        const otherType = inferExprType(sides[1 - i], known);
+        if (otherType === 'bool') record(id, 'false');
+        else if (otherType !== 'unknown') record(id, NUMERIC_USE);
+      } else {
+        collect(side, false);
+      }
+    });
+    return;
+  }
+
+  if (expr.startsWith('!') && !/[-+*/%&|^]/.test(masked)) {
+    collect(expr.slice(1), true);
+    return;
+  }
+
+  if (boolContext && THIS_CHANNEL_ID.test(expr)) record(expr, 'false');
+}
+
+/**
+ * Reduces the types implied for one channel to a single <data expr> zero value, NUMERIC_USE when
+ * it is only known to be some number, or null when the uses disagree or one is undeterminable.
+ */
+function resolveChannelExpr(types: Set<string> | undefined): string | null {
+  if (!types || types.size === 0 || types.has('unknown')) return null;
+  if (types.has('false')) return types.size === 1 ? 'false' : null;
+  if (types.has('0.0')) return '0.0'; // int and double together fit a double
+  if (types.has('0')) return '0';
+  return NUMERIC_USE;
+}
+
+/**
+ * Works out what the datamodel needs for this_ channels to match how they are used in conditions
+ * (any `cond` attribute) and <assign> elements:
+ *
+ * - `missing`: this_ channels referenced but not declared, with the <data expr> to create them with
+ *   (a double when the type cannot be determined, as for inferChannelInitialExpr).
+ * - `retypes`: declared this_ channels whose <data expr> no longer matches their usage. Only
+ *   channels still holding a generated zero value are considered (a hand-written initial value is
+ *   left alone), and only when every use agrees on one type; conflicting uses have no single
+ *   correct type, so they are skipped. So are channels assigned a value whose type cannot be
+ *   determined, and a double is never narrowed to int: an untyped operand could still be a double,
+ *   and the generated C# rejects assigning a double to an int field but accepts an int in a
+ *   double field.
+ *
+ * Variables are typed from their declarations (declaredVariableTypes), so `this_v = conf_enabled`
+ * makes this_v a bool when conf_enabled is declared "true". A this_ channel retyped here can change
+ * the type of channels assigned from it, so callers wanting a settled datamodel apply the changes
+ * and run this again until it returns none (see syncThisChannels).
+ */
+export function inferThisChannelChanges(xmlContent: string): {
+  missing: Array<{ id: string; expr: string }>;
+  retypes: Array<{ id: string; expr: string }>;
+} {
+  const analysis = analyzeThisChannels(xmlContent);
+  if (!analysis) return { missing: [], retypes: [] };
+  const { dataNodes, referenceSites, usages } = analysis;
+  const typesOf = (id: string) => new Set(usages.get(id)?.map((u) => u.type));
+
+  const declared = new Set<string>();
+  const retypes: Array<{ id: string; expr: string }> = [];
+  for (const node of dataNodes) {
+    const id = node['@_id'];
+    if (!id) continue;
+    declared.add(id);
+    const current = node['@_expr'] ?? '';
+    if (!id.startsWith('this_') || !AUTO_CHANNEL_EXPRS.has(current)) continue;
+    let inferred = resolveChannelExpr(typesOf(id));
+    // Some number: an int or double channel already fits, only a bool needs changing.
+    if (inferred === NUMERIC_USE) inferred = current === 'false' ? '0.0' : null;
+    if (!inferred || (current === '0.0' && inferred === '0')) continue;
+    if (inferred !== current) retypes.push({ id, expr: inferred });
+  }
+
+  const missing = Array.from(referenceSites.keys())
+    .filter((id) => !declared.has(id))
+    .map((id) => ({ id, expr: initialExprForMissing(typesOf(id)) }));
+
+  return { missing, retypes };
+}
+
+/** The `retypes` half of inferThisChannelChanges. */
 export function inferChannelRetypes(xmlContent: string): Array<{ id: string; expr: string }> {
+  return inferThisChannelChanges(xmlContent).retypes;
+}
+
+/** Where a this_ channel is referenced: a condition (on a transition, or an <if>) or an <assign>. */
+export type ThisChannelSite =
+  | { kind: 'cond'; stateId?: string; targetId?: string }
+  | { kind: 'assign'; stateId?: string };
+
+interface ThisChannelUsage {
+  /** A <data expr> zero value ('false', '0', '0.0'), NUMERIC_USE, or 'unknown'. */
+  type: string;
+  site: ThisChannelSite;
+}
+
+const STATE_TAGS: ReadonlySet<string> = new Set(['state', 'parallel', 'final']);
+
+/**
+ * Collects every this_ channel reference in conditions and <assign>s, with the type each use
+ * implies (see collectUsageTypes) and where it is. Null when the document doesn't parse.
+ */
+function analyzeThisChannels(xmlContent: string): {
+  dataNodes: Array<Record<string, string>>;
+  known: Map<string, ExprType>;
+  referenceSites: Map<string, ThisChannelSite[]>;
+  usages: Map<string, ThisChannelUsage[]>;
+} | null {
   let parsed: unknown;
   try {
     parsed = xmlParser.parse(xmlContent);
   } catch {
-    return [];
+    return null;
   }
 
-  const assignedTypes = new Map<string, Set<string>>();
-  function collectAssigns(node: unknown): void {
+  const dataNodes = parseDataNodes(xmlContent);
+  const known = declaredVariableTypes(dataNodes);
+  const referenceSites = new Map<string, ThisChannelSite[]>();
+  const usages = new Map<string, ThisChannelUsage[]>();
+  const push = <T>(map: Map<string, T[]>, id: string, item: T) => map.set(id, [...(map.get(id) ?? []), item]);
+
+  function collect(node: unknown, tag: string, stateId: string | undefined): void {
     if (!node || typeof node !== 'object') return;
-    for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
-      if (key === 'assign') {
-        for (const item of Array.isArray(val) ? val : [val]) {
-          const location = item?.['@_location'];
-          const expr = item?.['@_expr'];
-          if (typeof location !== 'string' || typeof expr !== 'string') continue;
-          const types = assignedTypes.get(location) ?? new Set<string>();
-          types.add(inferExprType(expr) === 'unknown' ? 'unknown' : inferChannelInitialExpr(expr));
-          assignedTypes.set(location, types);
+    if (Array.isArray(node)) {
+      node.forEach((item) => collect(item, tag, stateId));
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    const ownId = obj['@_id'];
+    const here = STATE_TAGS.has(tag) && typeof ownId === 'string' ? ownId : stateId;
+
+    const cond = obj['@_cond'];
+    if (typeof cond === 'string') {
+      const target = obj['@_target'];
+      const site: ThisChannelSite = {
+        kind: 'cond',
+        stateId: here,
+        targetId: tag === 'transition' && typeof target === 'string' ? target : undefined,
+      };
+      findThisChannelRefs(cond).forEach((id) => push(referenceSites, id, site));
+      collectUsageTypes(cond, true, (id, type) => push(usages, id, { type, site }), known);
+    }
+
+    for (const [key, val] of Object.entries(obj)) {
+      if (key.startsWith('@_')) continue;
+      if (key !== 'assign') {
+        collect(val, key, here);
+        continue;
+      }
+      for (const item of Array.isArray(val) ? val : [val]) {
+        const site: ThisChannelSite = { kind: 'assign', stateId: here };
+        const record = (id: string, type: string) => push(usages, id, { type, site });
+        const location = item?.['@_location'];
+        const expr = item?.['@_expr'];
+        if (typeof expr === 'string') {
+          findThisChannelRefs(expr).forEach((id) => push(referenceSites, id, site));
+          collectUsageTypes(expr, false, record, known);
         }
-      } else {
-        collectAssigns(val);
+        if (typeof location !== 'string') continue;
+        if (THIS_CHANNEL_ID.test(location)) push(referenceSites, location, site);
+        if (typeof expr === 'string') {
+          record(location, inferExprType(expr, known) === 'unknown' ? 'unknown' : inferChannelInitialExpr(expr, known));
+        }
       }
     }
   }
-  collectAssigns(parsed);
+  collect(parsed, '', undefined);
 
-  const retypes: Array<{ id: string; expr: string }> = [];
-  for (const node of parseDataNodes(xmlContent)) {
-    const id = node['@_id'];
-    const current = node['@_expr'] ?? '';
-    if (!id?.startsWith('this_') || !AUTO_CHANNEL_EXPRS.has(current)) continue;
-    const types = assignedTypes.get(id);
-    if (types?.size !== 1 || types.has('unknown')) continue;
-    const [inferred] = types;
-    if (current === '0.0' && inferred === '0') continue;
-    if (inferred !== current) retypes.push({ id, expr: inferred });
+  return { dataNodes, known, referenceSites, usages };
+}
+
+/** The <data expr> to declare a missing channel with: its inferred type, else a double. */
+function initialExprForMissing(types: Set<string>): string {
+  const inferred = resolveChannelExpr(types);
+  return !inferred || inferred === NUMERIC_USE ? '0.0' : inferred;
+}
+
+/** A this_ channel problem the Validation panel reports (see validateThisChannelTypes). */
+export type ThisChannelIssue =
+  /** Referenced but not declared; `expr` is what declaring it would use. */
+  | { kind: 'undeclared'; id: string; expr: string; site: ThisChannelSite }
+  /** Used as a bool in one place and as a number in another: no one type fits both. */
+  | { kind: 'conflict'; id: string; boolSite: ThisChannelSite; numberSite: ThisChannelSite }
+  /**
+   * Declared with a type its uses contradict. `current` is the declared <data expr>, `expected`
+   * the zero value its uses need, and `use` the type of the use at `site`.
+   */
+  | {
+      kind: 'mismatch';
+      id: string;
+      current: string;
+      expected: string;
+      use: 'bool' | 'number' | 'double';
+      site: ThisChannelSite;
+    };
+
+/**
+ * Finds this_ channels whose declaration can't work with how they are used — what the generated
+ * C# would reject. Unlike inferThisChannelChanges, this looks at every declared value (hand-written
+ * ones and edits made in the code editor too), and counts the uses it can type even when another
+ * use's type is unknown: those uses are wrong for the declared type whatever the unknown one is.
+ *
+ * - `undeclared`: referenced but not declared.
+ * - `conflict`: used both as a bool and as a number.
+ * - `mismatch`: used as a bool but declared a number, used as a number but declared a bool, or
+ *   assigned a double while declared an int. An int value in a double channel is fine.
+ *
+ * Channels whose declared value has no recognizable type (e.g. a function call) are skipped.
+ */
+export function findThisChannelTypeIssues(xmlContent: string): ThisChannelIssue[] {
+  const analysis = analyzeThisChannels(xmlContent);
+  if (!analysis) return [];
+  const { dataNodes, known, referenceSites, usages } = analysis;
+  const issues: ThisChannelIssue[] = [];
+
+  const declared = new Set(dataNodes.map((node) => node['@_id']).filter(Boolean));
+  for (const [id, sites] of referenceSites) {
+    if (declared.has(id)) continue;
+    const types = new Set(usages.get(id)?.map((u) => u.type));
+    issues.push({ kind: 'undeclared', id, expr: initialExprForMissing(types), site: sites[0] });
   }
-  return retypes;
+
+  for (const node of dataNodes) {
+    const id = node['@_id'];
+    if (!id?.startsWith('this_')) continue;
+    const typed = (usages.get(id) ?? []).filter((u) => u.type !== 'unknown');
+    const boolUse = typed.find((u) => u.type === 'false');
+    const numberUses = typed.filter((u) => u.type !== 'false');
+    if (boolUse && numberUses.length > 0) {
+      issues.push({ kind: 'conflict', id, boolSite: boolUse.site, numberSite: numberUses[0].site });
+      continue;
+    }
+
+    const declaredType = known.get(id);
+    const current = node['@_expr'] ?? '';
+    if (boolUse && (declaredType === 'int' || declaredType === 'double')) {
+      issues.push({ kind: 'mismatch', id, current, expected: 'false', use: 'bool', site: boolUse.site });
+    } else if (numberUses.length > 0 && declaredType === 'bool') {
+      const doubleUse = numberUses.find((u) => u.type === '0.0');
+      const expected = doubleUse || !numberUses.some((u) => u.type === '0') ? '0.0' : '0';
+      issues.push({ kind: 'mismatch', id, current, expected, use: 'number', site: numberUses[0].site });
+    } else if (declaredType === 'int') {
+      const doubleUse = numberUses.find((u) => u.type === '0.0');
+      if (doubleUse) {
+        issues.push({ kind: 'mismatch', id, current, expected: '0.0', use: 'double', site: doubleUse.site });
+      }
+    }
+  }
+  return issues;
 }
 
 const VALID_CONF_TYPES:ReadonlySet<string> = new Set(['int', 'double', 'bool', 'string']);
