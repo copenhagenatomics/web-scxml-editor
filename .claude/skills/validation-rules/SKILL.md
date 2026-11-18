@@ -49,6 +49,6 @@ Adding a new validation check; changing an existing rule's message, severity, or
 ## Common mistakes to avoid
 
 - Adding the rule only to the validator when the concept also needs live UI blocking (or vice versa) — see the `state-machine-semantics` skill for the dual-enforcement pattern this applies to.
-- Assuming your new check will fire on `<parallel>`-nested content the same way it does on `<state>`-nested content — several existing checks (`validateCompoundStates`, `validateStateChildren`) confirmed do not, and a new check copying their traversal pattern would inherit the same gap.
+- Assuming your new check will fire on `<parallel>`-nested content the same way it does on `<state>`-nested content — existing checks have had this gap (`validateCompoundStates` until Nov 2026; `validateStateChildren`), and a new check copying their traversal pattern would inherit the same gap.
 - Reordering the 17 passes without checking what depends on what.
 - Writing a check that only works against the in-memory `.executable[]` editing shape rather than the real parser's raw tag-name-property output.

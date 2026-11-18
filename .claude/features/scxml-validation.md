@@ -31,6 +31,7 @@ Two fully independent stages, chained but not coupled:
    4. Required-attribute walk (missing `id`, missing `target` unless internal, `<initial>` must contain a `<transition>`, a `<final>` must not contain any `<transition>` (error; reaches finals at any depth, including inside `<parallel>` regions), etc. — `w3c-validator.ts` + `attribute-schemas.ts`).
    5–6. W3C document compliance (`xmlns`, `version`, `datamodel` enum as warning, `binding` enum as error) + a largely-superseded structural pass.
    7. Semantic checks: unreachable-state BFS from initial (warning), duplicate state ids (error), duplicate `<data>` ids across every nested `<datamodel>` (error, position = **last** occurrence, deliberately), `main_`-prefix portability warning (one warning **per occurrence**, not deduplicated per identifier).
+   7b. Compound states without an initial (`validateCompoundStates`, its own `run` pass): an **error** for every `<state>` with `<state>`/`<parallel>`/`<final>`/`<history>` children but no `@initial` and no `<initial>` child. It covers any depth, through `<parallel>` regions too; a `<parallel>` itself is exempt. The position is exact (path-based) on the `<state` tag. Before Nov 2026 it only walked `state → state`, so regions of a `<parallel>` were never checked.
    8. Transition semantics: `type` must be internal/external; internal may only self-target; event-name syntax (comma, not space, separates multi-event lists) as warning.
    9. Transition-slot conflicts (`transition-slot-validator.ts`) — static counterpart of live connect/edit blocking.
    10. Executable-content sanity (`<script>` needs `src` or text).
@@ -69,9 +70,8 @@ Validates the parsed object tree, not the raw XML text. `fast-xml-parser` doesn'
 ## Validation rules
 
 Full rule catalogue: `.claude/project/scxml-rules.md`. Confirmed **gaps** (do not assume symmetric coverage across similar cases):
-- `validateCompoundStates` only recurses `state → state`, never `state → parallel → state` — a compound state nested inside a `<parallel>` missing `@initial` is not flagged.
 - `validateInitialStates`'s dedicated message only fires for **root-level** `state/@initial`; nested levels are only indirectly covered via the unreachable-state BFS, with a generic message, not the parent-aware one.
-- Position lookup is exact (path-based) only for required-attribute and unknown-attribute errors. Other passes (unreachable/duplicate states — which navigate by `stateId` instead — transition semantics, `<script>` content) still have no line or use type-and-line helpers.
+- Position lookup is exact (path-based) only for required-attribute, unknown-attribute and compound-state-initial errors. Other passes (unreachable/duplicate states — which navigate by `stateId` instead — transition semantics, `<script>` content) still have no line or use type-and-line helpers.
 - Several of the 7 downstream-C#-generator pitfalls documented in `docs/invalid-event-identifiers.md` (empty `event=""`, C# reserved words, digit-leading event names, wildcard `assign` locations, event-name sanitization collisions) have **no corresponding automated rule yet** — see `.claude/project/scxml-rules.md`.
 
 ## Related features
