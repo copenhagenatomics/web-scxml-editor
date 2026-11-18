@@ -20,7 +20,7 @@ Audience: backend developers who consume SCXML produced by the SCXML Visual Edit
 ## 1. What the editor supports
 
 ### 1.1 Document root
-- Root is `<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0" datamodel="ecmascript" name="main" initial="main_region">` for a new document, with one empty `<state id="main_region">` (`src/lib/consts/default_scxml_template.ts`).
+- Root is `<scxml xmlns="http://www.w3.org/2005/07/scxml" xmlns:viz="http://visual-scxml-editor/metadata" version="1.0" datamodel="ecmascript" name="main" initial="main_region">` for a new document, with one `<state id="main_region" initial="state_1">` containing a single `<state id="state_1"/>`, so the new document compiles in the downstream generator as-is, which requires main_region to have an initial transition targeting a state (`src/lib/consts/default_scxml_template.ts`).
 - Schema-recognised root attributes: `xmlns, version, datamodel, initial, name, binding, exmode` (`attribute-schemas.ts`).
 
 ### 1.2 Elements the editor can **create** through the UI
