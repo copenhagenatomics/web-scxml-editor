@@ -110,6 +110,8 @@ export class SCXMLValidator {
     run('state machine semantics', () =>
       this.validateStateMachineSemanticsInternal(scxml, stateIds, errors)
     );
+    // Compound states (at any depth, including inside <parallel>) need an initial child
+    run('compound states', () => validateCompoundStates(scxml, errors, sourceIndex));
     run('transition semantics', () => validateTransitionSemantics(scxml, stateIds, errors));
     run('transition slots', () =>
       validateTransitionSlotConflicts(scxml, this.xmlContent, errors)
@@ -307,8 +309,5 @@ export class SCXMLValidator {
         });
       });
     });
-
-    // Validate compound state requirements
-    validateCompoundStates(scxml, errors);
   }
 }

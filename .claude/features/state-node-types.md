@@ -47,7 +47,7 @@ None directly — type/flags flow through the node's `data` object, sourced from
 
 ## Validation rules
 
-`validateCompoundStates` requires any state with children to declare `@initial` or an `<initial>` element — but **only recurses through `state → state`, not through `<parallel>`**, so a compound state nested inside a parallel region missing this can go unflagged (see `.claude/project/scxml-rules.md`).
+`validateCompoundStates` requires any state with children to declare `@initial` or an `<initial>` element, at any depth, including the regions of a `<parallel>` and anything nested inside them (a `<parallel>` itself is exempt).
 
 ## Related features
 

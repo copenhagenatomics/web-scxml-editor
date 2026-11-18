@@ -41,10 +41,9 @@ Authored as `after 2s` / `after 714ms` / `after (expr) s` in the Transition pane
 
 ## Validation summary (16 ordered passes — full detail in `.claude/features/scxml-validation.md`)
 
-1. Position/hierarchy index build. 2. State/target reference resolution. 3. Root-level initial-state reference check. 4. Required-attribute walk. 5–6. W3C document-level compliance + structural pass. 7. Semantic checks (unreachable states, duplicate ids, `main_` prefix warning). 8. Transition semantics (type, internal self-target-only, event-name syntax). 9. Transition-slot conflicts. 10. Executable-content sanity. 11. Unknown-attribute/typo detection. 12. Cross-hierarchy rule. 13. Initial-State-group conflicts.
+1. Position/hierarchy index build. 2. State/target reference resolution. 3. Root-level initial-state reference check. 4. Required-attribute walk. 5–6. W3C document-level compliance + structural pass. 7. Semantic checks (unreachable states, duplicate ids, `main_` prefix warning) + compound states without an initial, at any depth including `<parallel>` regions. 8. Transition semantics (type, internal self-target-only, event-name syntax). 9. Transition-slot conflicts. 10. Executable-content sanity. 11. Unknown-attribute/typo detection. 12. Cross-hierarchy rule. 13. Initial-State-group conflicts.
 
 **Known validation coverage gaps** (do not assume these are covered just because a sibling case is):
-- Compound states nested inside a `<parallel>` are not checked for a missing `@initial` (the recursive walk only follows `state → state`, not `state → parallel → state`).
 - `<onentry>`/`<onexit>` unknown-attribute checks are effectively dead for files loaded from disk (they read a `.executable[]` shape the real parser doesn't produce — only the app's own in-memory editing code produces that shape). Required-attribute checks for the same content work correctly, since they read differently.
 - Several of the 7 downstream-C#-generator pitfalls in `docs/invalid-event-identifiers.md` (empty `event=""`, C# reserved words, digit-leading event names, wildcard `assign` locations, event-name sanitization collisions) do not have a corresponding automated validator rule yet.
 

@@ -17,7 +17,7 @@ import type {
   DataModelElement,
 } from '@/types/scxml';
 import type { ValidationError } from '@/types/common';
-import { parseStateIdList } from './validator-utils';
+import { parseStateIdList, type SourceElement } from './validator-utils';
 
 /**
  * Collect all state IDs from the SCXML document
@@ -437,38 +437,52 @@ export function findMainPrefixedDataIds(scxml: SCXMLElement): string[] {
 }
 
 /**
- * Validate compound states have initial attributes or elements
+ * Validate compound states have initial attributes or elements.
+ *
+ * Walks every <state> at any depth, through <parallel> regions too — a region
+ * of a <parallel> (and anything nested inside one) is a compound state like
+ * any other. A <parallel> itself is exempt: all its children are entered.
+ *
+ * `sourceIndex` (from buildSourceElementIndex) gives the exact `<state` tag
+ * position; paths follow the same `scxml.state[0].parallel[0].state[1]` shape.
  */
 export function validateCompoundStates(
   scxml: SCXMLElement,
-  errors: ValidationError[]
+  errors: ValidationError[],
+  sourceIndex?: Map<string, SourceElement>
 ): void {
-  const validateCompoundState = (state: StateElement) => {
-    const hasChildren =
-      state.state || state.parallel || state.final || state.history;
+  const asArray = <T>(value: T | T[] | undefined): T[] =>
+    value === undefined ? [] : Array.isArray(value) ? value : [value];
 
-    if (hasChildren) {
-      // Compound state must have initial attribute or initial element
-      if (!state['@_initial'] && !state.initial) {
-        errors.push({
-          message: `Compound state '${state['@_id']}' must have either an 'initial' attribute or an <initial> child element`,
-          severity: 'error',
-          stateId: state['@_id'],
-        });
-      }
-    }
-
-    // Recursively validate nested states
-    if (state.state) {
-      const states = Array.isArray(state.state) ? state.state : [state.state];
-      states.forEach((nestedState) => validateCompoundState(nestedState));
-    }
+  const visitChildren = (element: SCXMLElement | StateElement | ParallelElement, path: string) => {
+    asArray(element.state).forEach((state, i) => visitState(state, `${path}.state[${i}]`));
+    asArray(element.parallel).forEach((parallel, i) =>
+      visitChildren(parallel, `${path}.parallel[${i}]`)
+    );
   };
 
-  if (scxml.state) {
-    const states = Array.isArray(scxml.state) ? scxml.state : [scxml.state];
-    states.forEach((state) => validateCompoundState(state));
-  }
+  const visitState = (state: StateElement, path: string) => {
+    const hasChildren = state.state || state.parallel || state.final || state.history;
+
+    // Compound state must have initial attribute or initial element
+    if (hasChildren && !state['@_initial'] && !state.initial) {
+      const position = sourceIndex?.get(path)?.range;
+      const id = state['@_id'];
+      errors.push({
+        message: `Compound state '${id ?? 'unnamed'}' must have either an 'initial' attribute or an <initial> child element`,
+        severity: 'error',
+        line: position?.line,
+        column: position?.column,
+        endLine: position?.endLine,
+        endColumn: position?.endColumn,
+        stateId: id,
+      });
+    }
+
+    visitChildren(state, path);
+  };
+
+  visitChildren(scxml, 'scxml');
 }
 
 /**
