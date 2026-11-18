@@ -19,6 +19,11 @@ import {
 import { isTimerGeneratedActionString } from '@/lib/utils/time-transition';
 import { MAX_ANCHORS_PER_SIDE } from '@/lib/converters/converter-modules/visual-metadata';
 import { useHostAPIStore } from '@/stores/host-api-store';
+import { parseHandleId } from '@/lib/layout/edge-obstacle-utils';
+import {
+  ANCHOR_IN_USE_MESSAGE,
+  LAST_ANCHOR_MESSAGE,
+} from '@/lib/commands/remove-anchor-point-command';
 
 export const ANCHOR_LIMIT_MESSAGE = `This side already has the maximum of ${MAX_ANCHORS_PER_SIDE} connection points.`;
 
@@ -28,9 +33,20 @@ export const ANCHOR_LIMIT_MESSAGE = `This side already has the maximum of ${MAX_
  * Reads the store imperatively so state nodes don't subscribe to it.
  */
 export function warnAnchorLimitReached(): void {
+  warnOnce(ANCHOR_LIMIT_MESSAGE);
+}
+
+/** Shows a warning toast unless an identical one is already on screen. */
+function warnOnce(message: string): void {
   const { feedbackQueue, showFeedback } = useHostAPIStore.getState();
-  if (feedbackQueue.some((f) => f.message === ANCHOR_LIMIT_MESSAGE)) return;
-  showFeedback(ANCHOR_LIMIT_MESSAGE, 'warning');
+  if (feedbackQueue.some((f) => f.message === message)) return;
+  showFeedback(message, 'warning');
+}
+
+/** The connection-point handle element (if any) an event landed on. */
+function handleIdFromEvent(e: React.MouseEvent): string | null {
+  const el = (e.target as Element | null)?.closest?.('.react-flow__handle');
+  return el?.getAttribute('data-handleid') ?? null;
 }
 
 export interface VisualStyles {
@@ -80,6 +96,8 @@ export interface SCXMLStateNodeData {
   anchors?: Partial<Record<'top' | 'bottom' | 'left' | 'right', number>>;
   // Shift-click near a side's border adds another anchor point there.
   onAddAnchor?: (side: 'top' | 'bottom' | 'left' | 'right') => void;
+  // Alt-click on a connection point removes it (index as in the handle id).
+  onRemoveAnchor?: (side: 'top' | 'bottom' | 'left' | 'right', index: number) => void;
 }
 
 const HANDLE_SIDES = ['top', 'bottom', 'left', 'right'] as const;
@@ -163,6 +181,7 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
       isDropTarget = false,
       anchors,
       onAddAnchor,
+      onRemoveAnchor,
     } = data;
 
     // Final-ness comes only from the SCXML element (<final>), never the name.
@@ -198,6 +217,39 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
     };
     const sideHasRoom = (side: HandleSideName) =>
       (anchors?.[side] ?? 1) < MAX_ANCHORS_PER_SIDE;
+
+    // Alt-click on a connection point removes it. Handled in the capture
+    // phase so the handle's own ReactFlow listeners (click-to-connect, drag
+    // to connect) and the node drag never see the event. A side's last
+    // point, or one a transition is attached to, is refused with a toast —
+    // the rendered edges are checked here (that's what the user sees,
+    // including auto-assigned handles); the command re-checks saved handles.
+    const altHandleTarget = (e: React.MouseEvent) =>
+      e.altKey && onRemoveAnchor ? handleIdFromEvent(e) : null;
+    const handleNodeMouseDownCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (altHandleTarget(e)) e.stopPropagation();
+    };
+    const handleNodeClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+      const handleId = altHandleTarget(e);
+      if (!handleId || !onRemoveAnchor) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const { side, index } = parseHandleId(handleId);
+      if ((anchors?.[side] ?? 1) <= 1) {
+        warnOnce(LAST_ANCHOR_MESSAGE);
+        return;
+      }
+      const inUse = edges.some(
+        (edge) =>
+          (edge.source === id && edge.sourceHandle === handleId) ||
+          (edge.target === id && edge.targetHandle === handleId)
+      );
+      if (inUse) {
+        warnOnce(ANCHOR_IN_USE_MESSAGE);
+        return;
+      }
+      onRemoveAnchor(side, index);
+    };
 
     // While Shift is held and the pointer is within the add-anchor zone,
     // switch the cursor to a crosshair so the gesture is discoverable before
@@ -556,11 +608,15 @@ export const SCXMLStateNode = memo<NodeProps<SCXMLStateNodeData>>(
             cursor: nearAddableBorder ? 'crosshair' : undefined,
           }}
           onClick={handleNodeClick}
+          onClickCapture={handleNodeClickCapture}
+          onMouseDownCapture={handleNodeMouseDownCapture}
           onMouseMove={handleNodeMouseMove}
           onMouseLeave={handleNodeMouseLeave}
           title={
             onAddAnchor
-              ? 'Shift-click near an edge to add a connection point'
+              ? onRemoveAnchor
+                ? 'Shift-click near an edge to add a connection point; Alt-click a connection point to remove it'
+                : 'Shift-click near an edge to add a connection point'
               : undefined
           }
         >

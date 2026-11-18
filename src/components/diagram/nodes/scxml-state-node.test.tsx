@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { ReactFlowProvider } from 'reactflow';
+import React from 'react';
+import { ReactFlowProvider, useStoreApi } from 'reactflow';
 import {
   SCXMLStateNode,
   ANCHOR_LIMIT_MESSAGE,
@@ -8,6 +9,10 @@ import {
 } from './scxml-state-node';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { MAX_ANCHORS_PER_SIDE } from '@/lib/converters/converter-modules/visual-metadata';
+import {
+  ANCHOR_IN_USE_MESSAGE,
+  LAST_ANCHOR_MESSAGE,
+} from '@/lib/commands/remove-anchor-point-command';
 
 const baseProps = {
   selected: false,
@@ -107,5 +112,80 @@ describe('SCXMLStateNode — shift-click add anchor', () => {
     const shown = warnings();
     expect(shown).toHaveLength(1);
     expect(shown[0].level).toBe('warning');
+  });
+});
+
+describe('SCXMLStateNode — alt-click remove anchor', () => {
+  afterEach(() => {
+    cleanup();
+    useHostAPIStore.setState({ feedbackQueue: [] });
+  });
+
+  const handleById = (container: HTMLElement, id: string) =>
+    container.querySelector(`.react-flow__handle.target[data-handleid="${id}"]`) as HTMLElement;
+
+  const toasts = (message: string) =>
+    useHostAPIStore.getState().feedbackQueue.filter((f) => f.message === message);
+
+  it('removes the alt-clicked connection point', () => {
+    const onRemoveAnchor = vi.fn();
+    const onAddAnchor = vi.fn();
+    const { container } = renderNode('A', {
+      label: 'A',
+      stateType: 'simple',
+      anchors: { bottom: 3 },
+      onAddAnchor,
+      onRemoveAnchor,
+    });
+    fireEvent.click(handleById(container, 'bottom-2'), { altKey: true, shiftKey: true });
+    expect(onRemoveAnchor).toHaveBeenCalledWith('bottom', 2);
+    expect(onAddAnchor).not.toHaveBeenCalled();
+  });
+
+  it('ignores a plain click on a connection point', () => {
+    const onRemoveAnchor = vi.fn();
+    const { container } = renderNode('A', {
+      label: 'A',
+      stateType: 'simple',
+      anchors: { bottom: 3 },
+      onRemoveAnchor,
+    });
+    fireEvent.click(handleById(container, 'bottom-1'));
+    expect(onRemoveAnchor).not.toHaveBeenCalled();
+  });
+
+  it("warns instead of removing a side's only connection point", () => {
+    const onRemoveAnchor = vi.fn();
+    const { container } = renderNode('A', { label: 'A', stateType: 'simple', onRemoveAnchor });
+    fireEvent.click(handleById(container, 'top'), { altKey: true });
+    expect(onRemoveAnchor).not.toHaveBeenCalled();
+    expect(toasts(LAST_ANCHOR_MESSAGE)).toHaveLength(1);
+  });
+
+  it('warns instead of removing a connection point a transition uses', () => {
+    const onRemoveAnchor = vi.fn();
+    const edges = [
+      { id: 'e1', source: 'A', target: 'B', sourceHandle: 'bottom-1', targetHandle: 'top' },
+    ];
+    // This ReactFlow version's provider has no initialEdges prop — seed the
+    // store from inside it instead.
+    const SeedEdges = () => {
+      const store = useStoreApi();
+      React.useLayoutEffect(() => store.setState({ edges }), [store]);
+      return null;
+    };
+    const { container } = render(
+      <ReactFlowProvider>
+        <SeedEdges />
+        <SCXMLStateNode
+          {...baseProps}
+          id='A'
+          data={{ label: 'A', stateType: 'simple', anchors: { bottom: 2 }, onRemoveAnchor }}
+        />
+      </ReactFlowProvider>
+    );
+    fireEvent.click(handleById(container, 'bottom-1'), { altKey: true });
+    expect(onRemoveAnchor).not.toHaveBeenCalled();
+    expect(toasts(ANCHOR_IN_USE_MESSAGE)).toHaveLength(1);
   });
 });

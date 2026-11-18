@@ -25,3 +25,8 @@ export { UpdateDataExprCommand } from './update-data-expr-command';
 export { UpdateInternalEventsCommand, type InternalEventAction } from './update-internal-events-command';
 export { ToggleInitialStateCommand } from './toggle-initial-state-command';
 export { AddAnchorPointCommand } from './add-anchor-point-command';
+export {
+  RemoveAnchorPointCommand,
+  ANCHOR_IN_USE_MESSAGE,
+  LAST_ANCHOR_MESSAGE,
+} from './remove-anchor-point-command';

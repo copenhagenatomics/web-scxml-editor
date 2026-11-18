@@ -885,6 +885,33 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     [onSCXMLChange]
   );
 
+  const handleRemoveAnchor = React.useCallback(
+    (nodeId: string, side: HandleSide, index: number) => {
+      const currentScxmlContent = scxmlContentRef.current;
+      if (!onSCXMLChange || !currentScxmlContent) return;
+
+      try {
+        const { RemoveAnchorPointCommand } = require('@/lib/commands');
+        const result = new RemoveAnchorPointCommand(nodeId, side, index).execute(
+          currentScxmlContent
+        );
+
+        if (result.success) {
+          previousScxmlRef.current = result.newContent;
+          onSCXMLChange(result.newContent, 'property');
+        } else {
+          // Expected refusals (point still in use by a transition that isn't
+          // drawn at this level, last point on the side) — tell the user
+          // rather than console.error, which the dev overlay shows as a crash.
+          showFeedback(result.error || 'Could not remove the connection point.', 'warning');
+        }
+      } catch (error) {
+        console.error('Failed to remove anchor point:', error);
+      }
+    },
+    [onSCXMLChange, showFeedback]
+  );
+
   // ==================== EDGE HANDLERS ====================
   const handleTransitionLabelChange = React.useCallback(
     (
@@ -2294,6 +2321,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               onResize: (x: number, y: number, width: number, height: number) =>
                 handleNodeResize(node.id, x, y, width, height),
               onAddAnchor: (side: HandleSide) => handleAddAnchor(node.id, side),
+              onRemoveAnchor: (side: HandleSide, index: number) =>
+                handleRemoveAnchor(node.id, side, index),
             };
 
             return nodeUpdate;
