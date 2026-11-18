@@ -209,6 +209,9 @@ Do not revert either without confirming the underlying preference has changed. S
 
 **9.9 — Do not remove the Windows trackpad pinch-zoom fix (`d3Zoom.wheelDelta` override) or the post-`ControlButton`-click scroll-drift correction without verifying (on real Windows hardware, and by testing marquee-select) that the underlying bugs they patch are actually fixed upstream in ReactFlow.** [EXPLICIT — both are responses to specific, real, previously-reported bugs]
 
+**9.10 — Callbacks the parse/layout effect in `visual-diagram.tsx` depends on (`handleNodeLabelChange`, `handleNodeActionsChange`, `handleNodeStateTypeChange`, `handleNodeDelete`, `handleNodeResize`, `handleNoteTextChange`) must never take `nodes`/`edges`/`parsedData`/`activeStates` as `useCallback` dependencies. They read live canvas state through `nodesRef.current`/`parsedDataRef.current` instead (rule 2.6).** [EXPLICIT — traced to the drag snap-back regression from `d03e7f3`]
+If such a callback depends on `nodes`, every drag frame or selection change re-parses the last committed SCXML, and the stale result snaps dragged nodes back to their old position. Before adding a dependency to any callback in `visual-diagram.tsx`, check whether that callback appears in the parse effect's dependency list, directly or through another callback. See `decisions/visual-diagram.md` #16.
+
 ---
 
 ## 10. State/Node Relationships

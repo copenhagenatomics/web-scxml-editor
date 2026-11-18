@@ -53,5 +53,6 @@ Per `.claude/project/project-rules.md` rule 17.5 and `.claude/decisions/testing.
 - Removing the Windows pinch-zoom or scroll-drift workarounds as apparent dead code.
 - Adding a right-click context menu for one feature in isolation, when none exists anywhere else in the app.
 - Forgetting that the Monaco editor is hardcoded to `vs-dark` regardless of the app's light/dark theme — a known, confirmed inconsistency, not something to assume is "supposed to" follow the theme toggle without deliberately fixing it as its own task.
+- Adding `nodes` (or `edges`/`parsedData`/`activeStates`) to the dependencies of a `visual-diagram.tsx` callback without checking whether the parse/layout effect depends on it. If it does, every drag frame re-parses stale SCXML and dragged nodes snap back. Read `nodesRef.current` instead (project rule 9.10, `decisions/visual-diagram.md` #16). The hooks lint rule will *suggest* adding the dependency, so don't accept that suggestion blindly in this file.
 - Starting `npm run dev` "just to check" — that responsibility belongs to the developer for this project; report automated-check results and a verification checklist instead.
 - Saying or implying a UI change "works" or "is verified" before the developer has actually confirmed it.

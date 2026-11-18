@@ -445,7 +445,9 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         if (result.success) {
           // Declare/re-type only the this_ channels in the rows this edit added or changed — the
           // panel sends the whole list, so untouched rows' channels must not be swept along.
-          const previous = nodes.find((n) => n.id === nodeId)?.data;
+          // Read through nodesRef, not `nodes`: the parse/layout effect depends on this callback,
+          // so a `nodes` dependency would re-parse on every drag frame (project rule 9.10).
+          const previous = nodesRef.current.find((n) => n.id === nodeId)?.data;
           const changed = [
             ...changedItems<string>(previous?.entryActions ?? [], entryActions),
             ...changedItems<string>(previous?.exitActions ?? [], exitActions),
@@ -458,7 +460,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         console.error('Failed to sync actions change:', error);
       }
     },
-    [scxmlContent, onSCXMLChange, nodes]
+    [scxmlContent, onSCXMLChange]
   );
 
   const handleTransitionApply = React.useCallback(
@@ -573,7 +575,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         const result = command.execute(scxmlContent);
         if (result.success) {
           // Declare/re-type only the this_ channels in the reactions this edit added or changed
-          const previous = nodes.find((n) => n.id === nodeId)?.data.internalEventActions ?? [];
+          // nodesRef, not `nodes`, keeps this callback stable across drags (project rule 9.10)
+          const previous = nodesRef.current.find((n) => n.id === nodeId)?.data.internalEventActions ?? [];
           const changed = changedItems(previous, actions, (a) => `${a.event}|${a.location}|${a.expr}|${a.type}`);
           const channels = thisChannelRefsIn(changed.flatMap((a) => [a.location, a.expr]));
           onSCXMLChange(syncThisChannels(result.newContent, channels), 'property');
@@ -584,7 +587,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
         console.error('Failed to update internal event reactions:', error);
       }
     },
-    [scxmlContent, onSCXMLChange, nodes]
+    [scxmlContent, onSCXMLChange]
   );
 
   // Pre-check for the State Actions panel: a done.state.<id> reaction would be inserted
@@ -2513,6 +2516,10 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     return () => {
       isMounted = false;
     };
+    // Every callback below must keep a stable identity across drags/selection: none may depend on
+    // nodes/edges/parsedData/activeStates (read those via refs). One that does re-runs this effect
+    // on every `nodes` change, re-parsing the last committed SCXML, and the resync effect then snaps
+    // dragged nodes back to their old positions (project rule 9.10, decisions/visual-diagram.md #16).
   }, [
     scxmlContent,
     handleNodeLabelChange,

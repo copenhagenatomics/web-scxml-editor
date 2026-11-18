@@ -52,5 +52,6 @@ Any request to add something that doesn't exist yet: a new panel, a new toolbar 
 - Building a new mutation path that bypasses both established strategies (Commands and the direct object-tree edit path) — see `.claude/decisions/architecture.md` #2.
 - Adding a new host-bridge data type without deciding its ownership model (SCXML-persisted vs. host-store-only vs. transient) — see `.claude/decisions/integrations.md` #4.
 - Forgetting `clearWaypointsForTouchingTransitions` when the new feature can change a state's rendered size.
+- Making a `visual-diagram.tsx` node callback read `nodes` and adding `nodes` to its `useCallback` deps when the callback is one the parse/layout effect depends on. Use `nodesRef.current` instead. A feature that wasn't about the canvas at all (`this_` channel syncing) broke dragging exactly this way (project rule 9.10, `decisions/visual-diagram.md` #16).
 - Skipping the "does this already exist under a different name" check and re-implementing something (this repo already has one confirmed instance of a duplicated, drifted implementation: `visual-metadata-export.tsx` vs. `use-download.ts`).
 - Not adding a `.claude/features/*.md` doc (and an `index.md` registry entry) for a feature substantial enough to need one — see the `knowledge-maintenance` skill.
