@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { StateActionsPanel } from './state-actions-panel';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { useActionClipboardStore } from '@/stores/action-clipboard-store';
@@ -317,6 +317,300 @@ describe('StateActionsPanel click-outside-to-discard', () => {
     fireEvent.mouseDown(screen.getByPlaceholderText('variable or channel'));
 
     expect(screen.getByPlaceholderText('variable or channel')).toBeInTheDocument();
+  });
+});
+
+describe('StateActionsPanel Location → Expression keyboard flow', () => {
+  it('moves focus to Expression after accepting a Location suggestion with Tab', async () => {
+    renderPanel({ scxmlContent: scxmlWithData('speed') });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'spe' } });
+    fireEvent.keyDown(location, { key: 'Tab' });
+
+    expect(location).toHaveValue('speed');
+    await waitFor(() => expect(screen.getByPlaceholderText('expression')).toHaveFocus());
+  });
+
+  it('moves focus to Expression after picking a Location suggestion with the mouse', async () => {
+    renderPanel({ scxmlContent: scxmlWithData('speed') });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'spe' } });
+    fireEvent.mouseDown(screen.getByText('speed'));
+
+    expect(location).toHaveValue('speed');
+    await waitFor(() => expect(screen.getByPlaceholderText('expression')).toHaveFocus());
+  });
+
+  it('Enter in Location (no dropdown open) moves to Expression without applying; Enter there applies', async () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'plainVar' } });
+    fireEvent.keyDown(location, { key: 'Enter' });
+
+    expect(onApply).not.toHaveBeenCalled();
+    const expr = screen.getByPlaceholderText('expression');
+    await waitFor(() => expect(expr).toHaveFocus());
+
+    fireEvent.change(expr, { target: { value: '1' } });
+    fireEvent.keyDown(expr, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(['assign|plainVar|1'], []);
+  });
+
+  it('places the caret at the end of an existing expression when editing a row', async () => {
+    renderPanel({
+      scxmlContent: scxmlWithData('speed'),
+      entryActions: [{ type: 'assign', location: 'speed', expr: 'b + 1' }],
+    });
+
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'speed = b + 1'),
+    );
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'spe' } });
+    fireEvent.keyDown(location, { key: 'Tab' });
+
+    const expr = screen.getByPlaceholderText('expression') as HTMLTextAreaElement;
+    await waitFor(() => expect(expr).toHaveFocus());
+    expect(expr.selectionStart).toBe('b + 1'.length);
+  });
+
+  it('Enter on a Location suggestion with an empty Expression moves to Expression without applying', async () => {
+    const onApply = vi.fn();
+    renderPanel({ scxmlContent: scxmlWithData('speed'), onApply });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'spe' } });
+    fireEvent.keyDown(location, { key: 'Enter' });
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(location).toHaveValue('speed');
+    await waitFor(() => expect(screen.getByPlaceholderText('expression')).toHaveFocus());
+  });
+});
+
+describe('StateActionsPanel autosave on leaving the form', () => {
+  const panelEl = (overrides: Partial<Props>) => (
+    <StateActionsPanel
+      isVisible
+      onClose={noop}
+      stateId='StateA'
+      entryActions={[]}
+      exitActions={[]}
+      internalEventActions={[]}
+      scxmlContent='<scxml xmlns="http://www.w3.org/2005/07/scxml"><state id="StateA"/><state id="StateB"/></scxml>'
+      stateType='simple'
+      isInitial={false}
+      canMarkInitial
+      onToggleInitial={noop}
+      onApply={noop}
+      onApplyReactions={noop}
+      {...overrides}
+    />
+  );
+
+  const fillNewAssign = (location: string, expr: string) => {
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: location } });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: expr } });
+  };
+
+  afterEach(() => useHostAPIStore.setState({ feedbackQueue: [] }));
+
+  it('saves a complete form when clicking elsewhere in the panel', () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fillNewAssign('x', '1');
+    fireEvent.mouseDown(screen.getByText('StateA'));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|x|1'], []);
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+
+  it('saves when switching tabs', () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fillNewAssign('x', '1');
+    fireEvent.click(screen.getByText(/event reactions/));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|x|1'], []);
+  });
+
+  it('saves to the state being edited when another state is selected', () => {
+    const onApplyA = vi.fn();
+    const onApplyB = vi.fn();
+    const { rerender } = render(panelEl({ onApply: onApplyA }));
+
+    fillNewAssign('x', '1');
+    rerender(panelEl({ stateId: 'StateB', onApply: onApplyB }));
+
+    expect(onApplyA).toHaveBeenCalledWith(['assign|x|1'], []);
+    expect(onApplyB).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+
+  it('saves when the panel is hidden', () => {
+    const onApply = vi.fn();
+    const { rerender } = render(panelEl({ onApply }));
+
+    fillNewAssign('x', '1');
+    rerender(panelEl({ onApply, isVisible: false }));
+
+    expect(onApply).toHaveBeenCalledWith(['assign|x|1'], []);
+  });
+
+  it('does not save, toast or create an undo entry for a row opened and left unchanged', () => {
+    const onApply = vi.fn();
+    renderPanel({ entryActions: [{ type: 'assign', location: 'a', expr: '1' }], onApply });
+
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'a = 1'),
+    );
+    fireEvent.mouseDown(screen.getByText('StateA'));
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue).toEqual([]);
+  });
+
+  it('drops an incomplete form on leave and says so', () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'x' } });
+    fireEvent.mouseDown(screen.getByText('StateA'));
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue.map((f) => [f.message, f.level])).toEqual([
+      ['Incomplete action not saved.', 'warning'],
+    ]);
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+
+  it('drops an untouched new form silently', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.mouseDown(screen.getByText('StateA'));
+
+    expect(useHostAPIStore.getState().feedbackQueue).toEqual([]);
+  });
+
+  it('Discard still throws the edit away', () => {
+    const onApply = vi.fn();
+    renderPanel({ onApply });
+
+    fillNewAssign('x', '1');
+    fireEvent.click(screen.getByText('Discard'));
+
+    expect(onApply).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+});
+
+describe('StateActionsPanel Enter to save', () => {
+  it('tells the user in the form that Enter saves and Esc discards', () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByTitle('Add action'));
+
+    expect(screen.getByTestId('form-key-hints')).toHaveTextContent('Enter to save · Esc to discard');
+    expect(screen.getByText('Apply')).toHaveAttribute('title', 'Apply (Enter)');
+    expect(screen.getByText('Discard')).toHaveAttribute('title', 'Discard (Esc)');
+  });
+
+  const twoVars =
+    '<scxml xmlns="http://www.w3.org/2005/07/scxml"><datamodel><data id="maxspeed" expr="0"/><data id="speed" expr="0"/></datamodel><state id="StateA"/></scxml>';
+
+  it('Enter in Location saves an edited row when Expression is already filled', () => {
+    const onApply = vi.fn();
+    renderPanel({ entryActions: [{ type: 'assign', location: 'a', expr: '1' }], onApply });
+
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'a = 1'),
+    );
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'b' } });
+    fireEvent.keyDown(location, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(['assign|b|1'], []);
+    expect(screen.queryByPlaceholderText('variable or channel')).not.toBeInTheDocument();
+  });
+
+  it('Enter with the suggestion list open saves the exact typed name, not a longer one listed first', () => {
+    const onApply = vi.fn();
+    renderPanel({
+      scxmlContent: twoVars,
+      entryActions: [{ type: 'assign', location: 'speed', expr: '1' }],
+      onApply,
+    });
+
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'speed = 1'),
+    );
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'speed' } });
+    // Both names contain "speed" and maxspeed is listed first.
+    expect(screen.getByText('maxspeed')).toBeInTheDocument();
+    fireEvent.keyDown(location, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(['assign|speed|1'], []);
+  });
+
+  it('Enter with a highlighted suggestion saves that suggestion when Expression is filled', () => {
+    const onApply = vi.fn();
+    renderPanel({
+      scxmlContent: twoVars,
+      entryActions: [{ type: 'assign', location: 'speed', expr: '1' }],
+      onApply,
+    });
+
+    fireEvent.click(
+      screen.getByText((_, element) => element?.tagName.toLowerCase() === 'span' && element.textContent === 'speed = 1'),
+    );
+    const location = screen.getByPlaceholderText('variable or channel');
+    fireEvent.change(location, { target: { value: 'speed' } });
+    fireEvent.keyDown(location, { key: 'ArrowDown' }); // highlights maxspeed
+    fireEvent.keyDown(location, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(['assign|maxspeed|1'], []);
+  });
+
+  it('Enter in the Event field does not save a reaction with empty Location/Expression', () => {
+    const onApplyReactions = vi.fn();
+    renderPanel({ onApplyReactions });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.keyDown(screen.getByPlaceholderText('vector'), { key: 'Enter' });
+
+    expect(onApplyReactions).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('vector')).toBeInTheDocument();
+  });
+
+  it('Enter in Event saves a complete reaction', () => {
+    const onApplyReactions = vi.fn();
+    renderPanel({ onApplyReactions });
+
+    fireEvent.click(screen.getByText(/event reactions/));
+    fireEvent.click(screen.getByTitle('Add action'));
+    fireEvent.change(screen.getByPlaceholderText('variable or channel'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByPlaceholderText('expression'), { target: { value: '1' } });
+    fireEvent.keyDown(screen.getByPlaceholderText('vector'), { key: 'Enter' });
+
+    expect(onApplyReactions).toHaveBeenCalledWith([
+      expect.objectContaining({ event: 'vector', location: 'x', expr: '1', type: 'internal' }),
+    ]);
   });
 });
 

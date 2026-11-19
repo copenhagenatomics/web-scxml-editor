@@ -330,14 +330,23 @@ export function StateActionsPanel({
     setExprActiveIndex(-1);
   }, []);
 
-  // Reset local lists and form when the selected state changes
+  // Points at the *previous* render's leaveForm when the effect below runs:
+  // it's refreshed by an effect declared after that one, and effects run in
+  // declaration order. That closure still holds the old state's form and the
+  // parent's onApply/onApplyReactions bound to the old state, so autosave on a
+  // state switch writes to the state the user was editing, not the new one.
+  const leaveFormRef = React.useRef<() => void>(() => {});
+
+  // On a state switch, or when the panel is closed/hidden (it stays mounted),
+  // autosave the open form, then reset local lists and the form.
   React.useEffect(() => {
+    leaveFormRef.current();
     setLocalEntry(withRowIds(initialEntry));
     setLocalExit(withRowIds(initialExit));
     setLocalReactions(withRowIds(initialReactions));
     resetForm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stateId]);
+  }, [stateId, isVisible]);
 
   // The onexit tab is only shown while onexit actions exist (see tab bar
   // below); if it empties out — the last row was removed, or a state switch
@@ -376,11 +385,39 @@ export function StateActionsPanel({
 
   const showSuggestions = isOpen && suggestions.length > 0;
 
+  // Moves the caret to the end of the Expression field so the user can go
+  // from Location to Expression without clicking. Deferred a frame because a
+  // mouse-picked suggestion fires on mousedown, whose default action would
+  // otherwise blur the textarea right after we focus it.
+  const focusExpression = () => {
+    requestAnimationFrame(() => {
+      const el = exprTextareaRef.current;
+      if (!el) return;
+      const end = el.value.length;
+      el.focus();
+      el.setSelectionRange(end, end);
+      setExprCursorPos(end);
+    });
+  };
+
   const selectSuggestion = (s: Suggestion) => {
     setFormLocation(s.label);
     setIsOpen(false);
     setActiveIndex(-1);
+    focusExpression();
   };
+
+  // The suggestion Tab/Enter accepts: the highlighted one, else an exact match
+  // for what's typed (so Enter on an unchanged existing row keeps its value
+  // instead of swapping in a longer name that merely contains it), else the first.
+  const pickSuggestion = (): Suggestion =>
+    activeIndex >= 0
+      ? suggestions[activeIndex]
+      : (suggestions.find((s) => s.label === formLocation) ?? suggestions[0]);
+
+  // `location` lets a caller check a value it's about to set, before state updates.
+  const isFormComplete = (location: string = formLocation) =>
+    Boolean(location && formExpr && (activeTab !== 'reactions' || formEvent));
 
   const exprSuggestionResult = React.useMemo(() => {
     if (formMode === 'idle') return { suggestions: [] as ExpressionSuggestion[], tokenStart: 0, tokenEnd: 0 };
@@ -426,8 +463,24 @@ export function StateActionsPanel({
     // onApply/onApplyReactions declares every this_ channel the actions reference).
   };
 
-  const handleApply = () => {
-    if (formMode === 'idle') return;
+  type SaveResult = 'saved' | 'incomplete';
+
+  /** True when the row being edited still has exactly its saved values. */
+  const isEditUnchanged = (): boolean => {
+    if (formMode !== 'editing' || editingRowIndex === null) return false;
+    if (activeTab === 'reactions') {
+      const r = localReactions[editingRowIndex];
+      return !!r && r.event === formEvent && r.location === formLocation && r.expr === formExpr && r.type === formReactionType;
+    }
+    const r = currentList[editingRowIndex];
+    return !!r && r.type === 'assign' && r.location === formLocation && r.expr === formExpr;
+  };
+
+  // Every save path (Apply button, Enter in any field, leaving the form) goes
+  // through here, so the completeness check also stops Enter from saving a
+  // half-filled form.
+  const handleApply = (location: string = formLocation): SaveResult => {
+    if (formMode === 'idle' || !isFormComplete(location)) return 'incomplete';
 
     if (activeTab === 'reactions') {
       const rowId = formMode === 'editing' && editingRowIndex !== null
@@ -436,7 +489,7 @@ export function StateActionsPanel({
       const newRow: WithRowId<InternalEventActionRow> = {
         _rowId: rowId,
         event: formEvent,
-        location: formLocation,
+        location,
         expr: formExpr,
         type: formReactionType,
       };
@@ -448,13 +501,13 @@ export function StateActionsPanel({
       onApplyReactions(updatedList);
       resetForm();
       showFeedback('Reaction saved.', 'info');
-      return;
+      return 'saved';
     }
 
     const rowId = formMode === 'editing' && editingRowIndex !== null
       ? currentList[editingRowIndex]._rowId
       : uuidv4();
-    const newRow: WithRowId<AssignActionRow> = { _rowId: rowId, type: 'assign', location: formLocation, expr: formExpr };
+    const newRow: WithRowId<AssignActionRow> = { _rowId: rowId, type: 'assign', location, expr: formExpr };
 
     const updatedList: WithRowId<ActionRow>[] = formMode === 'adding'
       ? [...currentList, newRow]
@@ -470,7 +523,34 @@ export function StateActionsPanel({
 
     resetForm();
     showFeedback('Action saved.', 'info');
+    return 'saved';
   };
+
+  // Autosave (client request, 2026-11-19): leaving an open form — clicking
+  // elsewhere in the panel, switching tab or state, closing or hiding the
+  // panel — saves it instead of discarding it. Only Discard/Esc throw edits
+  // away on purpose. A form that can't be saved is dropped with a message
+  // saying so, since the user is moving on and can't fix it in place.
+  const leaveForm = () => {
+    if (formMode === 'idle') return;
+    if (isEditUnchanged()) {
+      // Opened a row just to look at it: no save, no toast, no undo entry.
+      resetForm();
+      return;
+    }
+    const result = handleApply();
+    if (result === 'saved') return;
+    // An untouched new form is dropped silently; anything else gets a message.
+    if (result === 'incomplete' && (formMode === 'editing' || formLocation || formExpr)) {
+      showFeedback('Incomplete action not saved.', 'warning');
+    }
+    resetForm();
+  };
+
+  // Must stay declared after the state-switch effect above (see leaveFormRef).
+  React.useEffect(() => {
+    leaveFormRef.current = leaveForm;
+  });
 
   const handleDelete = (index: number) => {
     if (formMode === 'editing' && editingRowIndex === index) resetForm();
@@ -613,9 +693,19 @@ export function StateActionsPanel({
         setActiveIndex((p) => (p > 0 ? p - 1 : suggestions.length - 1));
         return;
       }
+      // Tab accepts and moves to Expression. Enter accepts and saves when the
+      // form is then complete (e.g. editing an existing row), else it moves on too.
       if (e.key === 'Tab' || e.key === 'Enter') {
         e.preventDefault();
-        selectSuggestion(suggestions[activeIndex >= 0 ? activeIndex : 0]);
+        const pick = pickSuggestion();
+        if (e.key === 'Enter' && isFormComplete(pick.label)) {
+          setFormLocation(pick.label); // kept if the save is blocked and the form stays open
+          setIsOpen(false);
+          setActiveIndex(-1);
+          handleApply(pick.label);
+          return;
+        }
+        selectSuggestion(pick);
         return;
       }
       if (e.key === 'Escape') {
@@ -624,23 +714,26 @@ export function StateActionsPanel({
         return;
       }
     }
-    if (e.key === 'Enter') handleApply();
+    // Enter saves a complete form; on a half-filled one it advances to Expression.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isFormComplete()) handleApply();
+      else focusExpression();
+    }
     if (e.key === 'Escape') resetForm();
   };
 
-  // Discard an in-progress add/edit when the user clicks anywhere in the
-  // panel outside the inline form itself (e.g. another tab's blank area,
-  // the sub-header, or empty list space) — mirrors clicking Discard.
+  // Autosave an in-progress add/edit when the user clicks anywhere in the
+  // panel outside the inline form itself (another tab, another row, the
+  // sub-header, empty list space) — see leaveForm.
   const handlePanelMouseDown = (e: React.MouseEvent) => {
     if (formMode === 'idle') return;
     if (formRef.current && !formRef.current.contains(e.target as Node)) {
-      resetForm();
+      leaveForm();
     }
   };
 
-  const isApplyDisabled =
-    (activeTab === 'reactions' && (!formEvent || !formLocation || !formExpr)) ||
-    (activeTab !== 'reactions' && (!formLocation || !formExpr));
+  const isApplyDisabled = !isFormComplete();
 
   // Inline form shared between expanded rows and the new-action form
   const inlineForm = (
@@ -685,7 +778,7 @@ export function StateActionsPanel({
 
       {/* assign fields (also used by reactions tab for location + expr) */}
       <div className='relative'>
-        <label className='text-[10px] text-muted block mb-0.5'>Location</label>
+        <label className='text-[10px] text-muted block mb-0.5'>Channel</label>
         <input
           autoFocus
           type='text'
@@ -809,9 +902,10 @@ export function StateActionsPanel({
       </div>
 
       <FormActions
-        onApply={handleApply}
+        onApply={() => handleApply()}
         onDiscard={resetForm}
         applyDisabled={isApplyDisabled}
+        showKeyHints
         className='justify-end'
       />
     </div>
@@ -886,8 +980,10 @@ export function StateActionsPanel({
             <button
               key={tab}
               onClick={() => {
-                setActiveTab(tab);
+                // Usually already left on mousedown; this covers keyboard activation.
+                leaveForm();
                 resetForm();
+                setActiveTab(tab);
               }}
               className={`flex-1 py-1.5 text-[10px] font-medium transition-colors whitespace-nowrap ${
                 activeTab === tab
