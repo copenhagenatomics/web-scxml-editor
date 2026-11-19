@@ -75,6 +75,9 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   const [selectionMode, setSelectionMode] = React.useState<'event' | 'cond'>(initSelectionMode);
   const [applyError, setApplyError] = React.useState<string | null>(null);
   const [rawValue, setRawValue] = React.useState(initRawValue);
+  // Caret position in the textarea — cond-mode suggestions match the token under the caret,
+  // not the end of the text, so editing the left operand of "isValid == true" still completes.
+  const [cursorPos, setCursorPos] = React.useState(initRawValue.length);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [isOpen, setIsOpen] = React.useState(false);
   const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,12 +115,12 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   // render body via `displayValue`, so it must stay cheap).
   const condExpressionResult = React.useMemo(() => {
     if (selectionMode !== 'cond' || rawValue.trimStart().startsWith('after')) return null;
-    return getExpressionSuggestions(rawValue, rawValue.length, {
+    return getExpressionSuggestions(rawValue, cursorPos, {
       variables: extractDatamodelVariables(scxmlContent),
       channels,
       channelMappings,
     });
-  }, [rawValue, channels, channelMappings, scxmlContent, selectionMode]);
+  }, [rawValue, cursorPos, channels, channelMappings, scxmlContent, selectionMode]);
 
   // ── main search suggestions ──
   const suggestions: Suggestion[] = React.useMemo(() => {
@@ -141,11 +144,12 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     return condExpressionResult?.suggestions ?? [];
   }, [rawValue, events, selectionMode, condExpressionResult]);
 
-  const buildCondValue = (label: string) => {
-    if (!condExpressionResult) return rawValue;
+  const applyCondSuggestion = (label: string) => {
+    if (!condExpressionResult) return { newText: rawValue, newCursorPos: cursorPos };
     const { tokenStart, tokenEnd } = condExpressionResult;
-    return applyExpressionSuggestion(rawValue, tokenStart, tokenEnd, label).newText;
+    return applyExpressionSuggestion(rawValue, tokenStart, tokenEnd, label);
   };
+  const buildCondValue = (label: string) => applyCondSuggestion(label).newText;
 
   // Merged transitions carry a comma-separated event list. Appends a new event after a
   // trailing comma, or replaces the segment currently being typed — never the whole field.
@@ -159,13 +163,20 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   };
 
   const acceptSuggestion = (s: Suggestion) => {
-    if (selectionMode === 'cond') {
-      setRawValue(buildCondValue(s.label));
-    } else {
-      setRawValue(buildEventValue(s.label));
-    }
+    const { newText, newCursorPos } = selectionMode === 'cond'
+      ? applyCondSuggestion(s.label)
+      : { newText: buildEventValue(s.label), newCursorPos: undefined };
+    const caret = newCursorPos ?? newText.length;
+    setRawValue(newText);
+    setCursorPos(caret);
     setIsOpen(false);
     setActiveIndex(-1);
+    // Put the caret right after the inserted token (mid-expression edits keep the rest intact),
+    // deferred so it lands after React commits the new value.
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(caret, caret);
+    });
   };
 
   const reportApplyResult = (result: TransitionApplyResult) => {
@@ -275,6 +286,8 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       }
       if (e.key === 'Escape') { setIsOpen(false); setActiveIndex(-1); return; }
     }
+    // Moving the caret cancels a preview: revert to the real text, then let the key move it.
+    if (activeIndex >= 0 && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) setActiveIndex(-1);
     // Prevent inserting a newline — Enter always submits/accepts, never breaks the line.
     if (e.key === 'Enter') { e.preventDefault(); handleApply(); return; }
     if (e.key === 'Escape') { onClose(); return; }
@@ -287,8 +300,14 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s  ·  after (expression) ms';
     }
     if (selectionMode === 'event' || suggestions.length > 0) return null;
+    // Only a typed identifier can fail to match — not an operand slot ("x == "), a number
+    // ("x == 2") or an operator, which are deliberately suggestion-free.
+    const typedToken = condExpressionResult
+      ? rawValue.slice(condExpressionResult.tokenStart, cursorPos)
+      : '';
+    if (!/^[a-zA-Z_]/.test(typedToken)) return null;
     return 'No match — type "this_" to create a new channel, or "after Xs" for a time transition';
-  }, [isOpen, rawValue, selectionMode, suggestions]);
+  }, [isOpen, rawValue, selectionMode, suggestions, condExpressionResult, cursorPos]);
 
   const showSuggestions = isOpen && suggestions.length > 0;
   const showDropdown = showSuggestions || hintMessage !== null;
@@ -314,6 +333,23 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight + borderAdjustment, MAX_TEXTAREA_HEIGHT)}px`;
   }, [displayValue]);
+
+  // Writing a new value into the textarea (preview swap/revert, accepting) makes the browser
+  // jump the caret to the end. Put it back: after the previewed token while previewing a
+  // condition suggestion, else at cursorPos.
+  const previewActive = activeIndex >= 0 && suggestions[activeIndex] !== undefined;
+  const caretTarget = previewActive
+    ? selectionMode === 'cond' && condExpressionResult
+      ? condExpressionResult.tokenStart + suggestions[activeIndex].label.length
+      : displayValue.length
+    : Math.min(cursorPos, displayValue.length);
+  React.useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el || document.activeElement !== el) return;
+    if (el.selectionStart !== caretTarget || el.selectionEnd !== caretTarget) {
+      el.setSelectionRange(caretTarget, caretTarget);
+    }
+  }, [displayValue, caretTarget]);
 
   const renderBadge = (s: Suggestion) => {
     if (s.kind === 'mapped-channel') {
@@ -381,10 +417,19 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
             onChange={(e) => {
               const v = e.target.value;
               setRawValue(v);
+              setCursorPos(e.target.selectionStart ?? v.length);
               setIsOpen(true);
               setActiveIndex(-1);
               setApplyError(null);
             }}
+            onSelect={(e) => {
+              // Caret moves without typing (click, arrow keys, Home/End) — re-target suggestions.
+              // Ignored while previewing a highlighted suggestion: the preview swaps the value,
+              // which would otherwise drag cursorPos to the end of the previewed text.
+              if (activeIndex >= 0) return;
+              setCursorPos(e.currentTarget.selectionStart ?? 0);
+            }}
+            onMouseDown={() => { if (activeIndex >= 0) setActiveIndex(-1); }}
             onFocus={() => setIsOpen(true)}
             onBlur={() => { blurTimerRef.current = setTimeout(() => setIsOpen(false), 100); }}
             onKeyDown={handleKeyDown}
@@ -397,7 +442,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
                 <div className='px-3 py-2 text-xs text-dimmed italic select-none'>{hintMessage}</div>
               )}
               {suggestions.map((s, i) => (
-                <div key={s.label} onMouseDown={() => acceptSuggestion(s)}
+                <div key={s.label} onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(s); }}
                   className={`px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 ${
                     s.kind === 'new-channel' ? 'bg-amber-50 text-amber-800 border-l-2 border-amber-400'
                     : i === activeIndex ? 'bg-primary text-primary-fg' : 'hover:bg-primary-muted text-default'}`}>

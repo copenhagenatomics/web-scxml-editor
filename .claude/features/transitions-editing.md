@@ -34,7 +34,7 @@ Let a user create, edit, and visually understand transitions (SCXML's core contr
 
 ## Relevant state/store
 
-Selection state (`selectedTransitions`, `selectedEdgeForEdit`) lives locally in `visual-diagram.tsx`, not a Zustand store. `useHostAPIStore.channels`/`events` feed the Transition panel's autocomplete.
+Selection state (`selectedTransitions`, `selectedEdgeForEdit`) lives locally in `visual-diagram.tsx`, not a Zustand store. `useHostAPIStore.channels`/`events` feed the Transition panel's autocomplete. In Condition mode the panel tracks the textarea caret (`cursorPos`, updated on change/select), so suggestions match the token under the caret, not the end of the text. That is what lets you edit the left operand of `isValid == true` (user feedback, 2026-11-19). Accepting a suggestion puts the caret right after the inserted token.
 
 ## Relevant utilities
 

@@ -65,9 +65,14 @@ export function getExpressionSuggestions(
     const prevToken = findPrevToken(text, cursorPos);
     // Only whitespace so far — nothing typed yet, so nothing to suggest.
     if (prevToken === '') return { suggestions: [], tokenStart, tokenEnd };
-    if (OPERATOR_SET.has(prevToken)) {
-      return { suggestions: allNames.map((n) => ({ label: n, kind: kindOf(n) })), tokenStart, tokenEnd };
-    }
+    // Operand position ("x == |"): the user may be about to type a number
+    // ("x == 2"), so popping the full name list here gets in the way. Names
+    // are only offered once a letter/underscore is typed (handled below).
+    if (OPERATOR_SET.has(prevToken)) return { suggestions: [], tokenStart, tokenEnd };
+    // Operator position, but only after an identifier operand ("x ", "(x) ",
+    // "!x ") — not after a numeric literal ("2 ", "0.5 ") or a lone "+".
+    const lastOperand = prevToken.replace(/\)+$/, '').match(/[a-zA-Z0-9_.]+$/)?.[0];
+    if (!lastOperand || !/^[a-zA-Z_]/.test(lastOperand)) return { suggestions: [], tokenStart, tokenEnd };
     return { suggestions: OPERATORS.map((op) => ({ label: op, kind: 'operator' as const })), tokenStart, tokenEnd };
   }
 
