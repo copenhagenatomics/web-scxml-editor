@@ -24,7 +24,6 @@ import {
   applyExpressionSuggestion,
   type ExpressionSuggestion,
 } from '@/lib/utils/expression-autocomplete';
-import { getCaretCoordinates } from '@/lib/utils/textarea-caret';
 import type { ChannelInfo, ChannelMapping } from '@/types/host-api';
 
 export interface AssignActionRow { type: 'assign'; location: string; expr: string; }
@@ -184,8 +183,6 @@ function SortableActionRow({
 }
 
 interface ExpressionSuggestionDropdownProps {
-  textareaEl: HTMLTextAreaElement | null;
-  cursorPos: number;
   suggestions: ExpressionSuggestion[];
   activeIndex: number;
   channels: ChannelInfo[];
@@ -193,39 +190,17 @@ interface ExpressionSuggestionDropdownProps {
   onSelect: (s: ExpressionSuggestion) => void;
 }
 
+// Docked directly under the Expression textarea at its full width, like the
+// Location field's dropdown — not floated at the caret (user feedback,
+// 2026-11-19: a caret-anchored 200px box covered the text being typed and
+// clipped long names behind a horizontal scrollbar).
 function ExpressionSuggestionDropdown({
-  textareaEl,
-  cursorPos,
   suggestions,
   activeIndex,
   channels,
   channelMappings,
   onSelect,
 }: ExpressionSuggestionDropdownProps) {
-  const caret = textareaEl ? getCaretCoordinates(textareaEl, cursorPos) : null;
-
-  // Caret coordinates are relative to the textarea, but the dropdown is
-  // positioned against the wrapper, which also holds the field's label —
-  // shift by the textarea's own offset so the dropdown sits below the caret
-  // line instead of a label-height above it (covering the text being typed).
-  const offsetTop = textareaEl?.offsetTop ?? 0;
-  const offsetLeft = textareaEl?.offsetLeft ?? 0;
-
-  // Assumed dropdown width for clamping, matching the max-w set on the
-  // dropdown's own class below — keeps it from overflowing the panel's
-  // right edge when the caret is near the end of a long line.
-  const DROPDOWN_WIDTH = 200;
-  const containerWidth = textareaEl?.clientWidth ?? 0;
-  const clampedLeft = caret
-    ? offsetLeft + Math.max(0, Math.min(caret.left, containerWidth - DROPDOWN_WIDTH))
-    : 0;
-
-  const positionStyle: React.CSSProperties = caret
-    ? { top: offsetTop + caret.top + caret.height + 4, left: clampedLeft }
-    : {};
-  const positionClassName = caret
-    ? 'absolute z-50 bg-elevated border border-default rounded shadow-lg max-h-36 w-[200px] overflow-y-auto'
-    : 'absolute top-full left-0 right-0 mt-1 z-50 bg-elevated border border-default rounded shadow-lg max-h-36 overflow-y-auto';
 
   const renderBadge = (s: ExpressionSuggestion) => {
     if (s.kind === 'operator' || s.kind === 'new-channel') return null;
@@ -238,7 +213,7 @@ function ExpressionSuggestionDropdown({
     if (!type) return null;
     return (
       <span
-        className='text-xs px-1 rounded font-mono text-black'
+        className='text-xs px-1 rounded font-mono text-black shrink-0'
         style={{ backgroundColor: BADGE_COLORS[type] }}
       >
         {type}
@@ -247,11 +222,17 @@ function ExpressionSuggestionDropdown({
   };
 
   return (
-    <div className={positionClassName} style={positionStyle}>
+    <div className='absolute top-full left-0 right-0 mt-1 z-50 bg-elevated border border-default rounded shadow-lg max-h-36 overflow-y-auto overflow-x-hidden'>
       {suggestions.map((s, i) => (
         <div
           key={`${s.kind}-${s.label}`}
-          onMouseDown={() => onSelect(s)}
+          onMouseDown={(e) => {
+            // Keep focus in the textarea, so the caret stays put and no blur
+            // closes the list mid-pick.
+            e.preventDefault();
+            onSelect(s);
+          }}
+          title={s.label}
           className={`px-2 py-1 text-xs cursor-pointer flex items-center gap-2 ${
             s.kind === 'new-channel'
               ? 'bg-amber-50 text-amber-800 border-l-2 border-amber-400'
@@ -262,9 +243,9 @@ function ExpressionSuggestionDropdown({
         >
           {s.kind === 'new-channel' && <span className='text-xs text-amber-600'>(new channel)</span>}
           {renderBadge(s)}
-          <span>{s.label}</span>
+          <span className='truncate min-w-0'>{s.label}</span>
           {s.kind === 'mapped-channel' && (
-            <span className='text-xs text-muted ml-1'>→ {channelMappings.find((m) => m.scxmlRef === s.label)?.mappedChannel}</span>
+            <span className='text-xs text-muted ml-1 truncate min-w-0'>→ {channelMappings.find((m) => m.scxmlRef === s.label)?.mappedChannel}</span>
           )}
         </div>
       ))}
@@ -472,6 +453,24 @@ export function StateActionsPanel({
         ).newText
       : formExpr;
 
+  // Writing a new value into the textarea (preview swap, preview revert,
+  // accepting a suggestion) makes the browser jump the caret to the end, and
+  // that jump comes back through onSelect as if the user moved it — which
+  // re-targeted suggestions at the last token ("true" in "Main == true").
+  // Put the caret back where it belongs: after the previewed token while
+  // previewing, else at exprCursorPos.
+  const exprPreviewActive = exprActiveIndex >= 0 && exprSuggestions[exprActiveIndex] !== undefined;
+  const exprCaretTarget = exprPreviewActive
+    ? exprSuggestionResult.tokenStart + exprSuggestions[exprActiveIndex].label.length
+    : Math.min(exprCursorPos, exprDisplayValue.length);
+  React.useLayoutEffect(() => {
+    const el = exprTextareaRef.current;
+    if (!el || document.activeElement !== el) return;
+    if (el.selectionStart !== exprCaretTarget || el.selectionEnd !== exprCaretTarget) {
+      el.setSelectionRange(exprCaretTarget, exprCaretTarget);
+    }
+  }, [exprDisplayValue, exprCaretTarget]);
+
   const selectExprSuggestion = (s: ExpressionSuggestion) => {
     const { newText, newCursorPos } = applyExpressionSuggestion(
       formExpr,
@@ -480,6 +479,7 @@ export function StateActionsPanel({
       s.label
     );
     setFormExpr(newText);
+    setExprCursorPos(newCursorPos);
     setIsExprOpen(false);
     setExprActiveIndex(-1);
     requestAnimationFrame(() => {
@@ -889,7 +889,15 @@ export function StateActionsPanel({
             // Without this, exprCursorPos goes stale once the user moves the
             // caret without editing, and the suggestion dropdown detaches from
             // where the caret actually is until the next keystroke self-corrects it.
+            // Ignored while previewing: the caret then sits in the previewed text,
+            // whose positions don't map onto formExpr.
+            if (exprPreviewActive) return;
             setExprCursorPos(e.currentTarget.selectionStart ?? 0);
+          }}
+          onMouseDown={() => {
+            // Clicking into the text drops the preview first, so the click lands
+            // in the real text, not the previewed one.
+            if (exprActiveIndex >= 0) setExprActiveIndex(-1);
           }}
           onBlur={() => {
             exprBlurTimerRef.current = setTimeout(() => setIsExprOpen(false), 100);
@@ -917,6 +925,11 @@ export function StateActionsPanel({
                 return;
               }
             }
+            // Moving the caret cancels a preview: revert to the real text (the
+            // layout effect puts the caret back), then let the key move it.
+            if (exprActiveIndex >= 0 && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+              setExprActiveIndex(-1);
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               handleApply();
@@ -929,8 +942,6 @@ export function StateActionsPanel({
         />
         {showExprSuggestions && (
           <ExpressionSuggestionDropdown
-            textareaEl={exprTextareaRef.current}
-            cursorPos={exprCursorPos}
             suggestions={exprSuggestions}
             activeIndex={exprActiveIndex}
             channels={channels}

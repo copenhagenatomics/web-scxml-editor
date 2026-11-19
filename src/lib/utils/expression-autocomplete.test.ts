@@ -48,21 +48,46 @@ describe('getExpressionSuggestions', () => {
     ]);
   });
 
-  it('suggests variables/channels right after a ternary "?" or ":" followed by a space, same as any other operator', () => {
-    const conditionText = 'this_blink_timbuff <= 0.001 ? ';
-    const { suggestions: afterQuestion } = getExpressionSuggestions(conditionText, conditionText.length, ctx);
-    expect(afterQuestion.map((s) => s.label)).toEqual(expect.arrayContaining(['MainLight_color', 'conf_red']));
-
-    const branchText = 'this_blink_timbuff <= 0.001 ? MainLight_color : ';
-    const { suggestions: afterColon } = getExpressionSuggestions(branchText, branchText.length, ctx);
-    expect(afterColon.map((s) => s.label)).toEqual(expect.arrayContaining(['MainLight_color', 'conf_red']));
+  it('offers nothing right after an operator followed by a space — the operand may be a number', () => {
+    for (const text of ['MainLight_color == ', 'this_blink_timbuff <= 0.001 ? ', 'x ? MainLight_color : ', '! ']) {
+      const { suggestions } = getExpressionSuggestions(text, text.length, ctx);
+      expect(suggestions).toEqual([]);
+    }
   });
 
-  it('suggests variables/channels right after an operator followed by a space', () => {
-    const text = 'MainLight_color == ';
+  it('suggests variables/channels once a letter is typed after an operator', () => {
+    const text = 'MainLight_color == c';
     const { suggestions } = getExpressionSuggestions(text, text.length, ctx);
-    const labels = suggestions.map((s) => s.label);
-    expect(labels).toEqual(expect.arrayContaining(['MainLight_color', 'conf_red', 'mapped_ref']));
+    expect(suggestions.map((s) => s.label)).toEqual(expect.arrayContaining(['MainLight_color', 'conf_red']));
+
+    const ternary = 'this_blink_timbuff <= 0.001 ? Main';
+    expect(getExpressionSuggestions(ternary, ternary.length, ctx).suggestions).toEqual([
+      { label: 'MainLight_color', kind: 'variable' },
+    ]);
+  });
+
+  it('does not suggest operators after a numeric literal followed by a space', () => {
+    for (const text of ['2 ', 'x == 2 ', '0.5 ', 'f(2) ', 'x + ']) {
+      const { suggestions } = getExpressionSuggestions(text, text.length, ctx);
+      expect(suggestions).toEqual([]);
+    }
+  });
+
+  it('still suggests operators after a parenthesised or negated identifier', () => {
+    for (const text of ['(a) ', '!isValid ']) {
+      const { suggestions } = getExpressionSuggestions(text, text.length, ctx);
+      expect(suggestions[0]).toEqual({ label: '==', kind: 'operator' });
+    }
+  });
+
+  it('suggests names for the left operand when editing it with the rest of the expression intact', () => {
+    // "isValid == true" → user deletes "isValid" and types "Main" in its place.
+    const text = 'Main == true';
+    const { suggestions, tokenStart, tokenEnd } = getExpressionSuggestions(text, 'Main'.length, ctx);
+    expect(suggestions).toEqual([{ label: 'MainLight_color', kind: 'variable' }]);
+    expect(applyExpressionSuggestion(text, tokenStart, tokenEnd, 'MainLight_color').newText).toBe(
+      'MainLight_color == true'
+    );
   });
 
   it('offers a new-channel suggestion for an unmatched this_-prefixed token', () => {

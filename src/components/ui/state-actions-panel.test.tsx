@@ -801,6 +801,61 @@ describe('StateActionsPanel expression field autocomplete', () => {
     expect(textarea.value).toBe('MainLight_color == 1');
   });
 
+  // Regression (user report, 2026-11-19): with "Main == true" and the caret
+  // after "Main", previewing a suggestion swapped the textarea value, the
+  // browser jumped the caret to the end, and that jump came back through
+  // onSelect — re-targeting suggestions at "true". The preview vanished, the
+  // text stayed "Main == true", and the stale highlight later spliced
+  // suggestions into "true" as the caret moved through it.
+  const editLeftOperand = () => {
+    renderPanel({ scxmlContent: scxmlWithData('main_state') });
+    fireEvent.click(screen.getByTitle('Add action'));
+    const textarea = screen.getByPlaceholderText('expression') as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'Main == true', selectionStart: 4, selectionEnd: 4 } });
+    return textarea;
+  };
+  // Writing a new value already jumps the caret to the end (browser and jsdom
+  // alike); the browser then reports it with an async select event.
+  const simulateBrowserCaretJump = (textarea: HTMLTextAreaElement) => {
+    fireEvent.select(textarea);
+  };
+
+  it('keeps targeting the left operand when previewing a suggestion moves the caret', () => {
+    const textarea = editLeftOperand();
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    simulateBrowserCaretJump(textarea);
+
+    expect(textarea.value).toBe('main_state == true');
+    expect(textarea.selectionStart).toBe('main_state'.length);
+
+    fireEvent.keyDown(textarea, { key: 'Tab' });
+    expect(textarea.value).toBe('main_state == true');
+  });
+
+  it('accepts a clicked suggestion into the left operand and keeps the caret after it', () => {
+    const textarea = editLeftOperand();
+    fireEvent.mouseDown(within(textarea.parentElement as HTMLElement).getByText('main_state'));
+    simulateBrowserCaretJump(textarea);
+
+    expect(textarea.value).toBe('main_state == true');
+    expect(textarea.selectionStart).toBe('main_state'.length);
+  });
+
+  it('drops the preview when the caret moves, instead of splicing suggestions into other tokens', () => {
+    const textarea = editLeftOperand();
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    fireEvent.keyDown(textarea, { key: 'ArrowRight' });
+    expect(textarea.value).toBe('Main == true');
+
+    // Walk the caret through "true": the text must not change by itself.
+    for (let pos = 'Main == '.length; pos <= 'Main == true'.length; pos++) {
+      textarea.setSelectionRange(pos, pos);
+      fireEvent.select(textarea);
+      expect(textarea.value).toBe('Main == true');
+    }
+  });
+
   it('offers a "(new channel)" suggestion for an unmatched this_-prefixed token in the Expression field', () => {
     renderPanel();
 

@@ -45,13 +45,33 @@ describe('TransitionPanel condition-mode suggestions (characterization)', () => 
     expect(screen.getByText('==')).toBeInTheDocument();
   });
 
-  it('suggests variables again right after an operator followed by a space', () => {
+  it('waits for a letter after an operator instead of listing every name (operand may be numeric)', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
-    fireEvent.change(screen.getByPlaceholderText('Enter condition'), { target: { value: 'MainLight_color == ' } });
+    const input = screen.getByPlaceholderText('Enter condition');
+    fireEvent.change(input, { target: { value: 'MainLight_color == ' } });
 
-    expect(screen.getByText('MainLight_color')).toBeInTheDocument();
+    expect(screen.queryByText('conf_red')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No match/)).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'MainLight_color == 2' } });
+    expect(screen.queryByText(/No match/)).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'MainLight_color == co' } });
     expect(screen.getByText('conf_red')).toBeInTheDocument();
+  });
+
+  it('suggests for the token under the caret when editing the left operand of an existing condition', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
+    const input = screen.getByPlaceholderText('Enter condition') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Main == true' } });
+    input.setSelectionRange(4, 4);
+    fireEvent.select(input);
+
+    const option = screen.getByText('MainLight_color');
+    fireEvent.mouseDown(option);
+    expect(input.value).toBe('MainLight_color == true');
   });
 
   it('offers a new-channel suggestion for an unmatched this_-prefixed token', () => {
