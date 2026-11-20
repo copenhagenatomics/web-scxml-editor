@@ -1,5 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { useHostAPIStore } from './host-api-store';
+import { useEditorStore } from './editor-store';
+import { validateScxmlContent } from '@/lib/validators/validate-content';
 
 const initialState = useHostAPIStore.getState();
 
@@ -107,5 +109,107 @@ describe('host-api-store executeCommand error handling', () => {
     const { hostErrors, requestedValidationTab } = useHostAPIStore.getState();
     expect(hostErrors).toHaveLength(0);
     expect(requestedValidationTab).toBeNull();
+  });
+});
+
+const SCXML_HEAD = '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A">';
+const CLEAN_SCXML = `${SCXML_HEAD}<state id="A"><transition event="go" target="B"/></state><state id="B"/></scxml>`;
+// Unreachable state -> a warning, no errors.
+const WARNING_ONLY_SCXML = `${SCXML_HEAD}<state id="A"><transition event="go" target="B"/></state><state id="B"/><state id="Orphan"/></scxml>`;
+// Unresolved transition target -> an error.
+const ERROR_SCXML = `${SCXML_HEAD}<state id="A"><transition event="go" target="Missing"/></state></scxml>`;
+
+describe('host-api-store executeCommand requiresValidScxml gate', () => {
+  afterEach(() => {
+    useHostAPIStore.setState(initialState, true);
+    useEditorStore.getState().reset();
+  });
+
+  const registerApply = (requiresValidScxml?: 'errors' | 'errors-and-warnings') => {
+    const run = vi.fn();
+    useHostAPIStore.getState().registerCommand({ id: 'apply', label: 'Apply', order: 0, requiresValidScxml, run });
+    return run;
+  };
+
+  it('fixtures produce the issue mix the tests rely on', () => {
+    const severities = (xml: string) => validateScxmlContent(xml).map(i => i.severity);
+    expect(severities(CLEAN_SCXML)).toEqual([]);
+    expect(severities(WARNING_ONLY_SCXML).length).toBeGreaterThan(0);
+    expect(severities(WARNING_ONLY_SCXML)).not.toContain('error');
+    expect(severities(ERROR_SCXML)).toContain('error');
+  });
+
+  it('does not run the command when the document has errors, and points the user at the Validation tab', async () => {
+    useEditorStore.getState().setContent(ERROR_SCXML);
+    const run = registerApply('errors');
+
+    await useHostAPIStore.getState().executeCommand('apply');
+
+    expect(run).not.toHaveBeenCalled();
+    const { feedbackQueue, requestedValidationTab, hostErrors, commands } = useHostAPIStore.getState();
+    expect(requestedValidationTab).toBe('validation');
+    expect(feedbackQueue).toHaveLength(1);
+    expect(feedbackQueue[0].level).toBe('warning');
+    expect(feedbackQueue[0].message).toMatch(/^Fix \d+ errors? before Apply\.$/);
+    expect(hostErrors).toHaveLength(0);
+    expect(commands[0].isExecuting).toBe(false);
+  });
+
+  it('re-validates at click time instead of trusting stale debounced errors', async () => {
+    // Store says clean (debounce has not fired yet) but the content is broken.
+    useEditorStore.getState().setContent(ERROR_SCXML);
+    useEditorStore.getState().setErrors([]);
+    const blockedRun = registerApply('errors');
+    await useHostAPIStore.getState().executeCommand('apply');
+    expect(blockedRun).not.toHaveBeenCalled();
+    // The fresh result is published so the Validation panel shows what blocked Apply.
+    expect(useEditorStore.getState().errors.some(e => e.severity === 'error')).toBe(true);
+
+    // And the reverse: stale errors left over from before a fix must not block.
+    useEditorStore.getState().setContent(CLEAN_SCXML);
+    useEditorStore.getState().setErrors([{ message: 'stale', severity: 'error' }]);
+    const run = registerApply('errors');
+    await useHostAPIStore.getState().executeCommand('apply');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(useEditorStore.getState().errors).toEqual([]);
+  });
+
+  it("'errors' mode lets a warnings-only document through", async () => {
+    useEditorStore.getState().setContent(WARNING_ONLY_SCXML);
+    const run = registerApply('errors');
+
+    await useHostAPIStore.getState().executeCommand('apply');
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("'errors-and-warnings' mode blocks on warnings too", async () => {
+    useEditorStore.getState().setContent(WARNING_ONLY_SCXML);
+    const run = registerApply('errors-and-warnings');
+
+    await useHostAPIStore.getState().executeCommand('apply');
+
+    expect(run).not.toHaveBeenCalled();
+    expect(useHostAPIStore.getState().feedbackQueue[0].message).toMatch(/^Fix \d+ warnings? before Apply\.$/);
+  });
+
+  it('runs when the document is clean, even with Host Alerts present (those are the host report, not ours)', async () => {
+    useEditorStore.getState().setContent(CLEAN_SCXML);
+    useHostAPIStore.getState().showErrors([{ message: 'server rejected last apply', level: 'error' }]);
+    const run = registerApply('errors-and-warnings');
+
+    await useHostAPIStore.getState().executeCommand('apply');
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves commands without the flag ungated', async () => {
+    useEditorStore.getState().setContent(ERROR_SCXML);
+    const run = registerApply();
+
+    await useHostAPIStore.getState().executeCommand('apply');
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(useHostAPIStore.getState().feedbackQueue).toHaveLength(0);
   });
 });
