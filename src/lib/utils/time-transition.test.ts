@@ -7,7 +7,72 @@ import {
   mergeHiddenActions,
   findTimeEventToken,
   resolveTimeEventDisplay,
+  getAfterExpressionSuggestions,
 } from './time-transition';
+
+describe('getAfterExpressionSuggestions', () => {
+  const ctx = {
+    variables: ['MainLight_color'],
+    channels: [{ name: 'this_timeout', type: 'number' }, { name: 'conf_delay', type: 'cf' }],
+    channelMappings: [{ scxmlRef: 'this_mapped_delay', mappedChannel: 'Delay' }],
+  } as unknown as Parameters<typeof getAfterExpressionSuggestions>[2];
+  const at = (text: string, caret = text.length) => getAfterExpressionSuggestions(text, caret, ctx);
+  const labels = (text: string, caret?: number) => at(text, caret)?.suggestions.map((s) => s.label);
+
+  it('suggests channels, mapped channels and variables by substring in a bare expression', () => {
+    expect(labels('after del')).toEqual(['conf_delay', 'this_mapped_delay']);
+    expect(at('after time')?.suggestions).toEqual([{ label: 'this_timeout', kind: 'channel' }]);
+    expect(at('after mapped')?.suggestions).toEqual([{ label: 'this_mapped_delay', kind: 'mapped-channel' }]);
+    expect(at('after color')?.suggestions).toEqual([{ label: 'MainLight_color', kind: 'variable' }]);
+  });
+
+  it('suggests inside a parenthesised expression and after an arithmetic operator', () => {
+    expect(labels('after (time')).toEqual(['this_timeout']);
+    expect(labels('after (this_timeout + conf')).toEqual(['conf_delay']);
+  });
+
+  it('returns absolute token bounds for the token under the caret', () => {
+    const text = 'after this_ti s';
+    expect(at(text, 'after this_ti'.length)).toMatchObject({ tokenStart: 6, tokenEnd: 13 });
+  });
+
+  it('returns null when the caret is not inside an "after " expression', () => {
+    expect(at('')).toBeNull();
+    expect(at('time')).toBeNull();
+    expect(at('after')).toBeNull();
+    expect(at('aft', 3)).toBeNull();
+    expect(at('afterwards')).toBeNull();
+    expect(at('after time s', 3)).toBeNull(); // caret on the keyword
+  });
+
+  it('suggests nothing at the unit position after a completed operand', () => {
+    expect(labels('after this_timeout s')).toEqual([]);
+    expect(labels('after this_timeout m')).toEqual([]);
+    expect(labels('after (conf_delay) ms')).toEqual([]);
+    expect(labels('after 2 s')).toEqual([]);
+  });
+
+  it('never offers operators or a new-channel row', () => {
+    expect(labels('after this_timeout ')).toEqual([]);
+    expect(labels('after this_brand_new')).toEqual([]);
+  });
+
+  it('suggests nothing for a numeric delay or an empty expression', () => {
+    expect(labels('after 2')).toEqual([]);
+    expect(labels('after 2s')).toEqual([]);
+    expect(labels('after ')).toEqual([]);
+  });
+
+  it('works on the "after" segment of a merged event list, but not on other segments', () => {
+    expect(labels('foo, after time')).toEqual(['this_timeout']);
+    expect(at('after this_timeout s, foo')).toBeNull();
+    expect(at('foo, after time s', 2)).toBeNull();
+  });
+
+  it('keeps commas inside parentheses within the same expression', () => {
+    expect(labels('after (Math.max(this_timeout, conf')).toEqual(['conf_delay']);
+  });
+});
 
 describe('parseAfterSyntax', () => {
   it('parses a plain delay in seconds', () => {
@@ -80,6 +145,71 @@ describe('parseAfterSyntax', () => {
 
   it('rejects a comma-merged event list', () => {
     expect(parseAfterSyntax('after 2s, skippurge')).toBeNull();
+  });
+
+  // Regression: "after x * 5s" used to fail to parse and was saved as a literal event name.
+  it('accepts a unit glued to the expression\'s trailing number, converting s to ms', () => {
+    expect(parseAfterSyntax('after saurabh_newprocessGCMemoryMB * 5s')).toEqual({
+      type: 'delayexpr',
+      value: 'saurabh_newprocessGCMemoryMB * 5 * 1000',
+    });
+    expect(parseAfterSyntax('after x*2.5s')).toEqual({ type: 'delayexpr', value: 'x*2.5 * 1000' });
+    expect(parseAfterSyntax('after (this_a + 1) * 3s')).toEqual({ type: 'delayexpr', value: '(this_a + 1) * 3 * 1000' });
+  });
+
+  it('accepts ms glued to the expression\'s trailing number, without conversion', () => {
+    expect(parseAfterSyntax('after x * 5ms')).toEqual({ type: 'delayexpr', value: 'x * 5' });
+  });
+
+  it('round-trips a glued-unit expression through formatAfterSyntax', () => {
+    const parsed = parseAfterSyntax('after x * 5s')!;
+    expect(formatAfterSyntax(parsed.type, parsed.value)).toBe('after x * 5 s');
+    expect(parseAfterSyntax(formatAfterSyntax(parsed.type, parsed.value))).toEqual(parsed);
+  });
+
+  // Regression: "* 1000" used to be appended without parentheses, so it only multiplied the
+  // last operand of a lower-precedence expression ("a + b" → "a + b * 1000").
+  it.each([
+    ['after (a + b) s', '(a + b) * 1000'],
+    ['after a + b s', '(a + b) * 1000'],
+    ['after (eStopOk ? 5 : 0) s', '(eStopOk ? 5 : 0) * 1000'],
+    ['after (this_a - 1) s', '(this_a - 1) * 1000'],
+    ['after x + 5s', '(x + 5) * 1000'],
+    ['after (x > 1 && y) s', '(x > 1 && y) * 1000'],
+  ])('parenthesizes %j before converting seconds to ms', (input, value) => {
+    expect(parseAfterSyntax(input)).toEqual({ type: 'delayexpr', value });
+  });
+
+  it.each([
+    ['after this.abc s', 'this.abc * 1000'],
+    ['after x * 5 s', 'x * 5 * 1000'],
+    ['after (a / b) s', 'a / b * 1000'],
+    ['after -x s', '-x * 1000'],
+    ['after Math.max(a, b + 1) s', 'Math.max(a, b + 1) * 1000'],
+  ])('keeps %j unparenthesized when "* 1000" already multiplies all of it', (input, value) => {
+    expect(parseAfterSyntax(input)).toEqual({ type: 'delayexpr', value });
+  });
+
+  it('does not strip outer parens that do not enclose the whole expression', () => {
+    expect(parseAfterSyntax('after (a) * (b) s')).toEqual({ type: 'delayexpr', value: '(a) * (b) * 1000' });
+    expect(parseAfterSyntax('after (a) + (b) ms')).toEqual({ type: 'delayexpr', value: '(a) + (b)' });
+  });
+
+  it('leaves ms expressions verbatim, compound or not', () => {
+    expect(parseAfterSyntax('after (eStopOk ? 5000 : 0) ms')).toEqual({ type: 'delayexpr', value: 'eStopOk ? 5000 : 0' });
+  });
+
+  it.each([['after (a + b) s'], ['after (eStopOk ? 5 : 0) s'], ['after x * 5 s'], ['after (a) * (b) s']])(
+    'round-trips %j through formatAfterSyntax and back',
+    (input) => {
+      const parsed = parseAfterSyntax(input)!;
+      expect(parseAfterSyntax(formatAfterSyntax(parsed.type, parsed.value))).toEqual(parsed);
+    }
+  );
+
+  it('rejects digit+unit glued to an identifier', () => {
+    expect(parseAfterSyntax('after conf_hat5s')).toBeNull();
+    expect(parseAfterSyntax('after this.v2ms')).toBeNull();
   });
 });
 
@@ -233,6 +363,22 @@ describe('formatAfterSyntax', () => {
 
   it('formats a delayexpr with no ms conversion present as milliseconds', () => {
     expect(formatAfterSyntax('delayexpr', 'conf_wait * 60')).toBe('after conf_wait * 60 ms');
+  });
+
+  it('shows a parenthesized conversion as seconds, keeping the parens', () => {
+    expect(formatAfterSyntax('delayexpr', '(a + b) * 1000')).toBe('after (a + b) s');
+  });
+
+  // Saved before the parenthesization fix: "* 1000" only multiplies "b", so "after a + b s"
+  // would misrepresent it. Shown verbatim as ms so the label matches what actually runs.
+  it('shows a legacy unparenthesized compound conversion verbatim as ms, not as seconds', () => {
+    expect(formatAfterSyntax('delayexpr', 'a + b * 1000')).toBe('after a + b * 1000 ms');
+    expect(formatAfterSyntax('delayexpr', 'eStopOk ? 5 : 0 * 1000')).toBe('after eStopOk ? 5 : 0 * 1000 ms');
+  });
+
+  it('re-saving a legacy compound conversion leaves the stored value unchanged', () => {
+    const display = formatAfterSyntax('delayexpr', 'a + b * 1000');
+    expect(parseAfterSyntax(display)).toEqual({ type: 'delayexpr', value: 'a + b * 1000' });
   });
 
   it('round-trips a fresh delayexpr through parse then format without exposing the ms conversion', () => {

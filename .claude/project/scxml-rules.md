@@ -30,7 +30,7 @@ See `.claude/project/terminology.md`. These are pure naming conventions, not sch
 
 ### "after X" timer shorthand
 
-Authored as `after 2s` / `after 714ms` / `after (expr) s` in the Transition panel UI; stored as native `<send>`/`<cancel>` with `delay`/`delayexpr` plus a synthetic event named `{stateId}_t_{N}_timeEvent_{N}`. **The runtime interprets a bare `delayexpr` as raw milliseconds with no unit conversion** — so an expression authored in seconds gets `* 1000` baked into the stored `delayexpr` value; the UI reverses this for display so the user never sees the injected multiplication. This is a hard runtime constraint, not a display preference — don't remove the multiplication without also changing what the generator/runtime expects.
+Authored as `after 2s` / `after 714ms` / `after (expr) s` / `after (expr) ms` (parentheses optional for expressions) in the Transition panel UI; stored as native `<send>`/`<cancel>` with `delay`/`delayexpr` plus a synthetic event named `{stateId}_t_{N}_timeEvent_{N}`. **The runtime interprets a bare `delayexpr` as raw milliseconds with no unit conversion** — so an expression authored in seconds gets `* 1000` baked into the stored `delayexpr` value; the UI reverses this for display so the user never sees the injected multiplication. This is a hard runtime constraint, not a display preference — don't remove the multiplication without also changing what the generator/runtime expects.
 
 ## Product-specific structural rules (not W3C requirements)
 

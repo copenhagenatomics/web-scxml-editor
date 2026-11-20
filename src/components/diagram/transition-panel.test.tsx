@@ -98,7 +98,7 @@ describe('TransitionPanel condition-mode suggestions (characterization)', () => 
     }
   );
 
-  it('replaces the token being typed with the selected suggestion (buildCondValue)', () => {
+  it('replaces the token being typed with the selected suggestion (buildExpressionValue)', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
     const textarea = screen.getByPlaceholderText('Enter condition') as HTMLTextAreaElement;
@@ -109,7 +109,7 @@ describe('TransitionPanel condition-mode suggestions (characterization)', () => 
     expect(textarea).toHaveValue('MainLight_color');
   });
 
-  it('appends the selected suggestion after a trailing space rather than replacing prior text (buildCondValue)', () => {
+  it('appends the selected suggestion after a trailing space rather than replacing prior text (buildExpressionValue)', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
     const textarea = screen.getByPlaceholderText('Enter condition') as HTMLTextAreaElement;
@@ -118,5 +118,108 @@ describe('TransitionPanel condition-mode suggestions (characterization)', () => 
     fireEvent.mouseDown(screen.getByText('=='));
 
     expect(textarea).toHaveValue('MainLight_color ==');
+  });
+});
+
+describe('TransitionPanel "after X" expression suggestions', () => {
+  const EVENT_PLACEHOLDER = 'Enter event, or "after Xs"...';
+
+  it('suggests channels and variables while typing an "after" delay expression', () => {
+    renderPanel();
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'after conf' } });
+    expect(screen.getByText('conf_red')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'after (color' } });
+    expect(screen.getByText('MainLight_color')).toBeInTheDocument();
+  });
+
+  it('also suggests in Condition mode, since "after X" is parsed in either mode', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('tab', { name: 'Condition' }));
+    fireEvent.change(screen.getByPlaceholderText('Enter condition'), { target: { value: 'after conf' } });
+    expect(screen.getByText('conf_red')).toBeInTheDocument();
+  });
+
+  it('replaces only the token under the caret when a suggestion is accepted', () => {
+    renderPanel();
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'after co s' } });
+    // Earlier tests end on a bare mouseDown (accepting a suggestion), which leaves React's
+    // onSelect plugin thinking the mouse is still held and swallowing select events. A real
+    // click always finishes with a mouseup, so release it before moving the caret.
+    fireEvent.mouseUp(input);
+    input.setSelectionRange('after co'.length, 'after co'.length);
+    fireEvent.select(input);
+
+    fireEvent.mouseDown(screen.getByText('conf_red'));
+    expect(input.value).toBe('after conf_red s');
+  });
+
+  it('shows no suggestions at the unit position, so Enter saves the time transition', () => {
+    const onApply = vi.fn(() => undefined);
+    renderPanel({ onApply });
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'after conf_red s' } });
+
+    expect(screen.queryByText('MainLight_color')).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      editingField: 'event',
+      delay: { type: 'delayexpr', value: 'conf_red * 1000' },
+    }));
+  });
+
+  // Regression: "after x * 5s" used to be saved as a literal event name with no send/cancel.
+  it('saves "after <expr> * 5s" as a time transition, not a plain event', () => {
+    const onApply = vi.fn(() => undefined);
+    renderPanel({ onApply });
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'after MainLight_color * 5s' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      newValue: 'StateA_t_0_timeEvent_0',
+      delay: { type: 'delayexpr', value: 'MainLight_color * 5 * 1000' },
+      cancelSendId: 'StateA_t_0_timeEvent_0',
+    }));
+  });
+
+  it.each([['after MainLight_color * 5 sec'], ['foo, after MainLight_color']])(
+    'refuses to save %j as a plain event and shows the accepted formats',
+    (value) => {
+      const onApply = vi.fn(() => undefined);
+      renderPanel({ onApply });
+      const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+      fireEvent.change(input, { target: { value } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      expect(onApply).not.toHaveBeenCalled();
+      expect(screen.getByText(/is not a valid time transition/)).toBeInTheDocument();
+    }
+  );
+
+  it('still saves an event whose name merely starts with "after"', () => {
+    const onApply = vi.fn(() => undefined);
+    renderPanel({ onApply });
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'afterSave' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ newValue: 'afterSave', editingField: 'event' }));
+  });
+
+  it('does not offer a new-channel row for an unknown this_ name in a delay', () => {
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(EVENT_PLACEHOLDER), { target: { value: 'after this_brand_new' } });
+    expect(screen.queryByText('(new channel)')).not.toBeInTheDocument();
+  });
+
+  it('suggests for the "after" segment of a merged event list', () => {
+    useHostAPIStore.setState({ events: [{ name: 'foo', type: 'cf' }] as never });
+    renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(EVENT_PLACEHOLDER), { target: { value: 'foo, after conf' } });
+    expect(screen.getByText('conf_red')).toBeInTheDocument();
+    expect(screen.queryByText('foo')).not.toBeInTheDocument();
   });
 });
