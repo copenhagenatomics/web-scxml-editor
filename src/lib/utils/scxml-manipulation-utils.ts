@@ -7,6 +7,52 @@ import type {
   OnEntryElement,
   OnExitElement,
 } from '@/types/scxml';
+import { collectStateIds } from '@/lib/validators/state-validator';
+
+/** Which tag an element is filed under in its parent: `.state`, `.parallel` or `.final`. */
+export type StateTag = 'state' | 'parallel' | 'final';
+
+const STATE_TAGS = ['state', 'parallel', 'final'] as const;
+
+function asList<T>(v: T | T[] | undefined): T[] {
+  if (!v) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+/**
+ * Find a <state>, <parallel> or <final> by its ID anywhere in the document,
+ * along with its tag — so callers that move or re-insert it keep its tag.
+ */
+export function findElementById(
+  scxmlDoc: SCXMLDocument,
+  stateId: string
+): { element: StateElement; tag: StateTag } | null {
+  function search(container: any): { element: StateElement; tag: StateTag } | null {
+    for (const tag of STATE_TAGS) {
+      for (const child of asList<any>(container[tag])) {
+        if (child['@_id'] === stateId) return { element: child, tag };
+        const found = search(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return search(scxmlDoc.scxml);
+}
+
+/**
+ * Every id already taken — each state anywhere in the document, plus any
+ * extra ids (e.g. rendered diagram nodes such as sticky notes). Use this,
+ * not just the rendered nodes, when minting a new id.
+ */
+export function collectExistingIds(
+  scxmlDoc: SCXMLDocument,
+  extraNodes: ReadonlyArray<{ id: string }> = []
+): Set<string> {
+  const ids = new Set<string>(extraNodes.map((n) => n.id));
+  collectStateIds(scxmlDoc.scxml, ids);
+  return ids;
+}
 
 /**
  * Find a state element by its ID in the SCXML document. Also searches
