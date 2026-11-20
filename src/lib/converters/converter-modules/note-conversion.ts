@@ -7,12 +7,12 @@
  * container determines the hierarchy level it appears at in the diagram,
  * the same mechanism regular child states use.
  * Notes bypass ELK layout entirely: they always carry an explicit position
- * and the fixed note size (legacy custom sizes are ignored — migration).
+ * and their stored (user-resizable) base size.
  */
 
 import type { Node } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
-import { VISUAL_METADATA_CONSTANTS } from '@/types/visual-metadata';
+import { VISUAL_METADATA_CONSTANTS, clampNoteSize } from '@/types/visual-metadata';
 import { getAttribute } from './visual-metadata';
 
 const NOTE = VISUAL_METADATA_CONSTANTS.NOTE;
@@ -62,19 +62,26 @@ export function extractNoteNodes(scxml: any): Node[] {
 
     let x = 100;
     let y = 100;
+    let storedWidth: number | undefined;
+    let storedHeight: number | undefined;
     const vizXywh = getAttribute(note, 'viz:xywh');
     if (vizXywh && typeof vizXywh === 'string') {
       const parts = vizXywh
         .trim()
         .split(',')
         .map((p) => parseFloat(p.trim()));
-      // Use only x,y — stored width/height are ignored so legacy
-      // arbitrarily-sized notes migrate to the fixed size.
       if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         x = parts[0];
         y = parts[1];
       }
+      if (parts.length >= 4) {
+        storedWidth = parts[2];
+        storedHeight = parts[3];
+      }
     }
+    // The stored size is the note's base box (user-resizable); it's clamped
+    // to the resize bounds so legacy or hand-edited sizes stay sane.
+    const { width, height } = clampNoteSize(storedWidth, storedHeight);
 
     // fast-xml-parser coerces digit-only text content to a number
     const text = note?.['#text'] != null ? String(note['#text']) : '';
@@ -88,7 +95,7 @@ export function extractNoteNodes(scxml: any): Node[] {
       // mechanism regular child states use (hierarchy nav filters on this).
       parentId,
       zIndex: -1,
-      data: { text },
+      data: { text, width, height },
     };
   });
 }

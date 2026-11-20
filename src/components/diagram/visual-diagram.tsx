@@ -2088,8 +2088,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
 
           const enhancedNodes = nodes.map((node) => {
-            // Notes keep the converter's position and fixed size; they only
-            // need delete and text-edit callbacks (no visual styles, resize
+            // Notes keep the converter's position and stored size; they only
+            // need delete, text-edit and resize callbacks (no visual styles
             // or label wiring)
             if (node.type === 'scxmlNote') {
               return {
@@ -2099,6 +2099,8 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
                   onDelete: () => handleNodeDelete(node.id),
                   onTextChange: (newText: string) =>
                     handleNoteTextChange(node.id, newText),
+                  onResize: (x: number, y: number, width: number, height: number) =>
+                    handleNodeResize(node.id, x, y, width, height),
                 },
               };
             }

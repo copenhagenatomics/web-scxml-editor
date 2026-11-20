@@ -350,10 +350,15 @@ export const VISUAL_METADATA_CONSTANTS = {
   },
   /** Post-it note annotation settings */
   NOTE: {
-    /** Fixed note width in px (notes are not user-resizable) */
+    /** Default width in px of a new note (user-resizable afterwards) */
     WIDTH: 500,
-    /** Base note height in px */
+    /** Default base height in px of a new note (user-resizable afterwards) */
     HEIGHT: 250,
+    /** Resize bounds in px — the maximum keeps the "note is full" cap meaningful */
+    MIN_WIDTH: 200,
+    MIN_HEIGHT: 100,
+    MAX_WIDTH: 1200,
+    MAX_HEIGHT: 1200,
     /** Font size used until text overflows, in px */
     FONT_SIZE_LARGE: 28,
     /** Font size used after large-font overflow, in px */
@@ -372,4 +377,23 @@ export const VISUAL_METADATA_CONSTANTS = {
  */
 export function isNoteId(id: string): boolean {
   return id.startsWith(VISUAL_METADATA_CONSTANTS.NOTE.ID_PREFIX);
+}
+
+/**
+ * Clamp a note's base size to the allowed resize bounds. Missing/invalid
+ * values fall back to the default size (legacy notes, hand-edited XML).
+ */
+export function clampNoteSize(
+  width: number | undefined,
+  height: number | undefined
+): { width: number; height: number } {
+  const NOTE = VISUAL_METADATA_CONSTANTS.NOTE;
+  const clamp = (v: number | undefined, fallback: number, min: number, max: number) =>
+    v === undefined || !Number.isFinite(v) || v <= 0
+      ? fallback
+      : Math.min(max, Math.max(min, Math.round(v)));
+  return {
+    width: clamp(width, NOTE.WIDTH, NOTE.MIN_WIDTH, NOTE.MAX_WIDTH),
+    height: clamp(height, NOTE.HEIGHT, NOTE.MIN_HEIGHT, NOTE.MAX_HEIGHT),
+  };
 }

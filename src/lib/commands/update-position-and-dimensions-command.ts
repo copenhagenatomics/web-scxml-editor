@@ -1,4 +1,5 @@
 import { BaseCommand, type CommandResult } from './base-command';
+import { clampNoteSize } from '@/types/visual-metadata';
 
 /**
  * UpdatePositionAndDimensionsCommand
@@ -34,13 +35,23 @@ export class UpdatePositionAndDimensionsCommand extends BaseCommand {
     // Ensure viz namespace exists
     this.ensureVizNamespace(doc);
 
-    // Find the state element
-    const stateElement = this.findStateElement(doc, this.nodeId);
+    // Find the state or note element
+    const isNote = this.isNoteId(this.nodeId);
+    const stateElement = isNote
+      ? this.findNoteElement(doc, this.nodeId)
+      : this.findStateElement(doc, this.nodeId);
     if (!stateElement) {
       return this.createFailureResult(
-        `State element not found: ${this.nodeId}`,
+        `${isNote ? 'Note' : 'State'} element not found: ${this.nodeId}`,
         scxmlContent
       );
+    }
+
+    // Notes are clamped to their resize bounds
+    let width = this.newWidth;
+    let height = this.newHeight;
+    if (isNote) {
+      ({ width, height } = clampNoteSize(width, height));
     }
 
     // Parse existing viz:xywh to save for undo
@@ -56,7 +67,7 @@ export class UpdatePositionAndDimensionsCommand extends BaseCommand {
     }
 
     // Update viz:xywh with all four values
-    const newVizXywh = `${Math.round(this.newX)},${Math.round(this.newY)},${Math.round(this.newWidth)},${Math.round(this.newHeight)}`;
+    const newVizXywh = `${Math.round(this.newX)},${Math.round(this.newY)},${Math.round(width)},${Math.round(height)}`;
     stateElement.setAttribute('viz:xywh', newVizXywh);
 
     // Serialize and return

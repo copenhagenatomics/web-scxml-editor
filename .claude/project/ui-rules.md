@@ -37,7 +37,7 @@ Only one hierarchy level is shown on the canvas at any time — clicking into a 
 
 ## Sticky notes
 
-- Fixed 500px width, always. Height grows automatically (font shrinks first, then height expands, then an "note is full" banner blocks further growth) — notes cannot be manually resized via drag-handle, unlike states.
+- New notes are 500×250; when selected (and not being edited) they show yellow resize handles, bounded to 200×100 – 1200×1200. Within the chosen box, the font shrinks first, then height auto-expands up to 2×, then a "note is full" banner blocks further growth.
 - Notes never count as "children" for compound-state/hierarchy-navigation purposes, are excluded from edge obstacle-avoidance routing, and can't be selected via the state-actions single-click flow.
 
 ## Config / Channel Mapping / Events panels

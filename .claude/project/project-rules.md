@@ -198,7 +198,7 @@ See `decisions/visual-diagram.md` #7.
 **9.6 — Edge path rendering follows a strict, mutually-exclusive priority chain: waypoints → self-loop → parallel-offset → obstacle-avoiding A* → plain smoothstep. Do not blend branches (e.g. a self-loop never gets obstacle avoidance).** [EXPLICIT]
 See `decisions/visual-diagram.md` #8.
 
-**9.7 — Sticky notes are always 500px wide, cannot be manually resized, render behind all other elements, and must never push/affect other nodes when moved.** [EXPLICIT — directly traced to explicit user feedback commits]
+**9.7 — Sticky notes render behind all other elements and must never push/affect other nodes when moved.** [EXPLICIT — directly traced to explicit user feedback commits] Notes are user-resizable within `NOTE.MIN_*`/`NOTE.MAX_*` bounds (changed 2026-11-20 at user request; previously fixed 500px wide).
 See `decisions/visual-diagram.md` #9.
 
 **9.8 — Conditional transitions render amber, not red (red was explicitly rejected for reading as an error state). Transitions do not animate (explicitly requested removal).** [EXPLICIT — both traced to specific feedback commits]

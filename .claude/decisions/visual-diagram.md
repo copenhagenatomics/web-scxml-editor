@@ -205,7 +205,7 @@ Accepted.
 
 ---
 
-## 9. Sticky notes are fixed-width and cannot be manually resized
+## 9. Sticky notes are fixed-width and cannot be manually resized (resizing reversed 2026-11-20)
 
 ### Context
 Notes needed some size behavior, and the team received explicit feedback about how notes should interact with the rest of the canvas.
@@ -226,7 +226,7 @@ The "before" state (notes pushing other elements, taller default height) is dire
 Commits `81f2b40`, `3664278`; `src/components/diagram/nodes/sticky-note-node.tsx`, `use-note-sizing.ts`.
 
 ### Status
-Accepted.
+Partially superseded (2026-11-20): at the user's request, notes are now **user-resizable** via `NodeResizer` (bounded 200×100 – 1200×1200, stored in `viz:xywh`); the sizing cascade runs relative to the chosen box. The behind-everything z-order and non-pushing behavior remain Accepted and unchanged.
 
 ---
 
