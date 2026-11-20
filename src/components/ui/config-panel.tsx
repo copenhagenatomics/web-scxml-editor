@@ -187,7 +187,7 @@ export function ConfigPanel({ isVisible, onClose, scxmlContent, onAddField, onFi
                 </div>
               </div>
               <div className='flex items-center gap-1.5'>
-                <span className='text-[10px] text-dimmed whitespace-nowrap shrink-0'>Data Model</span>
+                <span className='text-[10px] text-dimmed whitespace-nowrap shrink-0'>Default Value</span>
                 <input
                   type='text'
                   value={field.defaultValue}
@@ -243,7 +243,7 @@ export function ConfigPanel({ isVisible, onClose, scxmlContent, onAddField, onFi
                 />
               </div>
               <div className='flex items-center gap-1.5 mb-1.5'>
-                <span className='text-[10px] text-dimmed whitespace-nowrap shrink-0'>Data Model</span>
+                <span className='text-[10px] text-dimmed whitespace-nowrap shrink-0'>Default Value</span>
                 <input
                   type='text'
                   value={newDefault}
