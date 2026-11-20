@@ -37,6 +37,7 @@ import {
   describeRemovedTransitions,
   fixTransitionsAfterReparent,
 } from '@/lib/utils/reparent-transition-fix';
+import { groupStatesIntoComposite } from '@/lib/utils/group-into-composite';
 import { resolveFocusTarget } from '@/lib/utils/resolve-focus-target';
 import { computeVisualStyles } from '@/lib/utils/visual-style-utils';
 import {
@@ -2959,6 +2960,62 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
     }
   }, [activeStates, copyActiveStatesToClipboard, handleNodesChange, showFeedback]);
 
+  // ==================== GROUP INTO COMPOSITE STATE ====================
+  // One-click equivalent of adding a state and dragging the selection into it
+  // (same transition rules as drag-to-nest — see groupStatesIntoComposite).
+  const handleGroupSelection = useCallback(() => {
+    if (!onSCXMLChange || !scxmlContent) return;
+    const ids = Array.from(activeStates).filter((id) => !isNoteId(id));
+    if (ids.length === 0) return;
+    const parseResult = parserRef.current?.parse(scxmlContent);
+    if (!parseResult?.success || !parseResult.data) return;
+    const scxmlDoc = parseResult.data as SCXMLDocument;
+    const docBefore = JSON.parse(JSON.stringify(scxmlDoc)) as SCXMLDocument;
+
+    // The new state sits at the selection's top-left corner.
+    const selectedNodes = nodesRef.current.filter((n) => ids.includes(n.id));
+    const x = selectedNodes.length ? Math.min(...selectedNodes.map((n) => n.position.x)) : 100;
+    const y = selectedNodes.length ? Math.min(...selectedNodes.map((n) => n.position.y)) : 100;
+
+    const result = groupStatesIntoComposite(scxmlDoc, ids, { extraNodes: parsedData.nodes });
+    if (!result.ok) {
+      showFeedback(result.error, 'warning');
+      return;
+    }
+    const composite = findStateById(scxmlDoc, result.compositeId);
+    if (composite) {
+      const isInitial = isMarkedInitial(scxmlDoc, result.compositeId);
+      const { width, height } = nodeDimensionCalculator.calculateDimensions(
+        result.compositeId,
+        'compound',
+        0,
+        0,
+        isInitial
+      );
+      (composite as any)['@_viz:xywh'] = `${Math.round(x)},${Math.round(y)},${width},${height}`;
+    }
+
+    const nestingCheck = introducesNestedParallel(docBefore, scxmlDoc);
+    if (nestingCheck.blocked) {
+      showFeedback(nestingCheck.reason || 'Parallel states cannot be nested.', 'warning');
+      return;
+    }
+
+    const updatedSCXML = parserRef.current!.serialize(scxmlDoc, true);
+    onSCXMLChange(updatedSCXML, 'structure');
+    setActiveStates(new Set([result.compositeId]));
+
+    const notice = describeRemovedTransitions(result.removedTransitions);
+    if (notice) {
+      showFeedback(notice, 'warning', { durationMs: 10000 });
+    } else {
+      showFeedback(
+        `Grouped ${ids.length} state${ids.length === 1 ? '' : 's'} into '${result.compositeId}'. Double-click it to rename.`,
+        'info'
+      );
+    }
+  }, [activeStates, scxmlContent, onSCXMLChange, parsedData?.nodes, showFeedback]);
+
   // ==================== DRAG-TO-NEST ====================
   const handleReparent = useCallback(
     (stateIds: string[], targetParentId: string | undefined) => {
@@ -3802,6 +3859,7 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
               count={activeStates.size}
               onCopy={handleCopySelection}
               onCut={handleCutSelection}
+              onGroup={handleGroupSelection}
               onDelete={() => {
                 const ids = Array.from(activeStates);
                 handleNodesChange(ids.map((id) => ({ id, type: 'remove' })));

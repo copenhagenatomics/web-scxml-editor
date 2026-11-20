@@ -84,7 +84,7 @@ Use this table to route a task to the correct doc(s) **before** reading source c
 | serialize, XMLBuilder, XMLSerializer, formatXML, "output looks malformed" | [scxml-serialization.md](features/scxml-serialization.md) |
 | parse, fast-xml-parser, "XML syntax error", malformed tag, unclosed tag | [scxml-parsing.md](features/scxml-parsing.md) |
 | validation error, validator, "why is this flagged", W3C compliance, unreachable state, duplicate id | [scxml-validation.md](features/scxml-validation.md) |
-| dragging a state, moving a node, resize, NodeResizer, multi-select drag | [diagram-interaction.md](features/diagram-interaction.md), [node-positioning.md](features/node-positioning.md) |
+| dragging a state, moving a node, resize, NodeResizer, multi-select drag, group into composite state | [diagram-interaction.md](features/diagram-interaction.md), [node-positioning.md](features/node-positioning.md) |
 | click, select, Ctrl+click, marquee, box-select, "selection doesn't work right" | [selection.md](features/selection.md) |
 | zoom, pan, minimap, fitView, Controls widget, pinch-zoom, trackpad | [zoom-pan-controls.md](features/zoom-pan-controls.md) |
 | right-click, context menu | [context-menus.md](features/context-menus.md) *(verified: does not exist)* |

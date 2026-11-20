@@ -22,6 +22,7 @@ The full set of direct-manipulation gestures on the ReactFlow canvas that let a 
 
 - Selection is visually indicated per-node (not React Flow's default multi-select box UI, except during an actual marquee drag).
 - The selection toolbar (`MultiSelectToolbar`) appears for 1+ selected nodes (single selection included, despite the component's "multi-select" name), so Copy/Cut/Delete are reachable from a single-state selection too. Copy also clears the selection once it completes, matching Cut/Delete's existing behavior of closing the toolbar after their action runs.
+- **Group into composite state** (toolbar "Group" button): wraps the selected states in a new compound `state_N` placed at the selection's top-left corner, in the document position of the first selected state, then selects it. It is the one-click equivalent of adding a state and dragging the selection into it, and follows drag-to-nest's rules (`groupStatesIntoComposite`, `src/lib/utils/group-into-composite.ts`). The new state becomes its parent's Initial if any selected state was. Its own `initial` is the selected Initial state(s), or else the first non-final selected state. Transitions among the grouped states stay. A sibling's transition into the new state's sole Initial child is re-pointed at the new state, which does not change behavior; its `viz:waypoints` are cleared. Every other transition the move makes cross-level is removed and reported, as drag-to-nest does. It is refused for states at different levels or in different regions, and for a parallel's region itself. It is also blocked when it would nest a `<parallel>` (`introducesNestedParallel`). Notes in the selection are ignored.
 - Copy/Cut/Delete each show a transient toast confirming the action (e.g. "State copied.", "3 states cut.", "State deleted.") via `useHostAPIStore`'s `showFeedback` — the same feedback-queue mechanism already used elsewhere in the app (GitHub push/pull, State Actions panel copy/paste, config deletion), rendered by `two-tab-layout.tsx` and auto-dismissed after 4s. `handleNodeDelete` is the single choke point for all deletes (keyboard Delete, per-node delete button, toolbar Delete), so its toast covers all of them; Cut copies via a toast-less internal helper (`copyActiveStatesToClipboard`) so a cut shows one "cut" toast rather than stacking a "copied" toast underneath it.
 - A drop target is highlighted while dragging a node over a potential new parent (reparent affordance).
 
@@ -67,11 +68,11 @@ Create/paste/reparent mutate the parsed object tree directly (not via Commands, 
 
 ## Related files
 
-`src/components/diagram/visual-diagram.tsx`, `src/components/diagram/multi-select-toolbar.tsx`, `src/lib/commands/batch-update-position-command.ts`, `update-position-and-dimensions-command.ts`, `delete-node-command.ts`, `note-commands.ts`, `src/lib/utils/scxml-manipulation-utils.ts`.
+`src/components/diagram/visual-diagram.tsx`, `src/components/diagram/multi-select-toolbar.tsx`, `src/lib/commands/batch-update-position-command.ts`, `update-position-and-dimensions-command.ts`, `delete-node-command.ts`, `note-commands.ts`, `src/lib/utils/scxml-manipulation-utils.ts`, `src/lib/utils/group-into-composite.ts`.
 
 ## Tests
 
-`src/components/diagram/multi-select-toolbar.test.tsx` covers the toolbar component. `src/lib/utils/scxml-manipulation-utils.test.ts` covers the underlying clone/reparent/detach logic. `src/lib/utils/reparent-transition-fix.test.ts` covers the transition repair on reparent (#81), including a check against the real validator. No test directly drives the full drag/drop/marquee interaction inside `visual-diagram.tsx` itself (would require e2e, which this repo doesn't have).
+`src/components/diagram/multi-select-toolbar.test.tsx` covers the toolbar component. `src/lib/utils/scxml-manipulation-utils.test.ts` covers the underlying clone/reparent/detach logic. `src/lib/utils/reparent-transition-fix.test.ts` covers the transition repair on reparent (#81), including a check against the real validator. `src/lib/utils/group-into-composite.test.ts` covers Group into composite state. No test directly drives the full drag/drop/marquee interaction inside `visual-diagram.tsx` itself (would require e2e, which this repo doesn't have).
 
 ## Known limitations
 
