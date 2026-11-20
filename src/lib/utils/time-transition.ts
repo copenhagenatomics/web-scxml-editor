@@ -1,3 +1,9 @@
+import {
+  getExpressionSuggestions,
+  type ExpressionAutocompleteContext,
+  type ExpressionSuggestion,
+} from './expression-autocomplete';
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -9,8 +15,41 @@ function escapeRegExp(s: string): string {
 // so re-applying an unedited time transition never multiplies twice.
 const MS_CONVERSION_SUFFIX = /\*\s*1000\s*$/;
 
+/** True when every ( / [ has a matching close and no close comes before its open. */
+function isBalanced(expr: string): boolean {
+  let depth = 0;
+  for (const ch of expr) {
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') {
+      depth--;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0;
+}
+
+/**
+ * True when appending "* 1000" to `expr` would NOT multiply the whole expression — i.e. it has
+ * an operator binding looser than `*` at the top level (`a + b`, `c ? 5 : 0`, `x > 1 && y`).
+ * Only operands joined by `*`, `/`, `%` (plus a leading unary `-`/`+`/`!`) are safe without
+ * parentheses; anything else at depth 0 needs them. Over-wrapping is harmless, so this errs
+ * toward true (e.g. `1e-3`, `x * -2`).
+ */
+function needsParensForMsConversion(expr: string): boolean {
+  const body = expr.trim().replace(/^[-+!]\s*/, '');
+  if (!isBalanced(body)) return true;
+  let depth = 0;
+  for (const ch of body) {
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
+    else if (depth === 0 && !/[\w.$\s*/%]/.test(ch)) return true;
+  }
+  return false;
+}
+
 function ensureMsConversion(expr: string): string {
-  return MS_CONVERSION_SUFFIX.test(expr) ? expr : `${expr} * 1000`;
+  if (MS_CONVERSION_SUFFIX.test(expr)) return expr;
+  return needsParensForMsConversion(expr) ? `(${expr}) * 1000` : `${expr} * 1000`;
 }
 
 // Inverse of ensureMsConversion, for display: hides the baked-in "* 1000" so the diagram
@@ -31,6 +70,8 @@ function stripMsConversion(expr: string): string {
  *   after (expr) s         → { type: 'delayexpr', value: 'expr * 1000' }  (parenthesized, converted to ms)
  *   after this.abc s      → { type: 'delayexpr', value: 'this.abc * 1000' }  (bare expr, converted to ms)
  *   after this.abc ms     → { type: 'delayexpr', value: 'this.abc' }  (bare expr, already ms — no conversion)
+ *   after x * 5s          → { type: 'delayexpr', value: 'x * 5 * 1000' }  (unit glued to trailing number)
+ *   after x * 5ms         → { type: 'delayexpr', value: 'x * 5' }
  *
  * Bare expressions MUST end with a space + "s"/"ms" so that plain words like
  * "after conf_hats" (no space before the trailing s) are rejected.
@@ -52,9 +93,13 @@ export function parseAfterSyntax(
   const sec = t.match(/^after\s+(\d+(?:\.\d+)?)\s*s$/);
   if (sec) return { type: 'delay', value: `${sec[1]}s` };
 
+  // The parenthesized forms only strip the outer parens when they enclose the whole expression
+  // — "after (a) * (b) s" has a leading "(" and trailing ")" that don't pair up, so it falls
+  // through to the bare forms instead of being cut down to "a) * (b".
+
   // after (expr) ms  — parenthesized, already in milliseconds: stored verbatim, no conversion
   const parenMs = t.match(/^after\s+\((.+)\)\s+ms$/);
-  if (parenMs) return { type: 'delayexpr', value: parenMs[1].trim() };
+  if (parenMs && isBalanced(parenMs[1])) return { type: 'delayexpr', value: parenMs[1].trim() };
 
   // after <expr> ms  — bare expression, already in milliseconds: stored verbatim, no conversion
   const bareMs = t.match(/^after\s+(.+)\s+ms$/);
@@ -62,14 +107,85 @@ export function parseAfterSyntax(
 
   // after (expr) s  — parenthesized form kept for backward compatibility
   const paren = t.match(/^after\s+\((.+)\)\s+s$/);
-  if (paren) return { type: 'delayexpr', value: ensureMsConversion(paren[1].trim()) };
+  if (paren && isBalanced(paren[1])) return { type: 'delayexpr', value: ensureMsConversion(paren[1].trim()) };
 
   // after <expr> s  — bare expression; the mandatory space before "s" prevents
   // plain words ending in "s" (e.g. "after conf_hats") from matching
   const bare = t.match(/^after\s+(.+)\s+s$/);
   if (bare) return { type: 'delayexpr', value: ensureMsConversion(bare[1].trim()) };
 
+  // after <expr><N>ms / after <expr><N>s — the unit glued to the expression's trailing number
+  // ("after x * 5s"). The number must be its own token (preceded by a space, operator or
+  // paren), so a plain word ending in digit+"s" ("after conf_hat5s") is still rejected.
+  const glued = t.match(/^after\s+(.*[^\w.])(\d+(?:\.\d+)?)(ms|s)$/);
+  if (glued) {
+    const expr = `${glued[1]}${glued[2]}`.trim();
+    return { type: 'delayexpr', value: glued[3] === 'ms' ? expr : ensureMsConversion(expr) };
+  }
+
   return null;
+}
+
+/**
+ * Start index of the delay expression of the "after X" segment the caret is in — the text right
+ * after "after " — or null when the caret isn't inside one. A segment starts at the beginning
+ * of the field or after a comma (merged event lists), and a comma at parenthesis depth 0
+ * between the expression start and the caret means the caret has moved on to a later segment.
+ */
+function findAfterExpressionStart(text: string, caret: number): number | null {
+  let start: number | null = null;
+  for (const m of text.matchAll(/(?:^|,)\s*after\s+/g)) {
+    const end = (m.index ?? 0) + m[0].length;
+    if (end > caret) break;
+    start = end;
+  }
+  if (start === null) return null;
+  let depth = 0;
+  for (let i = start; i < caret; i++) {
+    const ch = text[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) return null;
+  }
+  return start;
+}
+
+/**
+ * Channel/variable autocomplete for the delay expression of an "after X" time transition
+ * (e.g. `after this_timeout s`, `after (conf_delay * 2) ms`). Returns null when the caret
+ * isn't inside an "after " expression, so callers can fall back to their own suggestions.
+ * Token bounds are absolute positions in `text`, ready for `applyExpressionSuggestion`.
+ *
+ * Narrower than condition autocomplete:
+ *  - no operator suggestions — the comparison/logical operators don't make sense in a delay;
+ *  - no "(new channel)" row — `syncThisChannels` only declares channels used by conditions and
+ *    `<assign>`s, so an unknown this_ name in a delay would not actually be declared on save;
+ *  - nothing at the unit position — a word typed after a completed operand and a space
+ *    (`after this_x s`, `after (x) ms`) is the unit, not the start of a name.
+ */
+export function getAfterExpressionSuggestions(
+  text: string,
+  rawCursorPos: number,
+  ctx: ExpressionAutocompleteContext
+): { suggestions: ExpressionSuggestion[]; tokenStart: number; tokenEnd: number } | null {
+  const caret = Math.min(Math.max(rawCursorPos, 0), text.length);
+  const exprStart = findAfterExpressionStart(text, caret);
+  if (exprStart === null) return null;
+
+  const region = text.slice(exprStart);
+  const local = getExpressionSuggestions(region, caret - exprStart, ctx);
+  const tokenStart = local.tokenStart + exprStart;
+  const tokenEnd = local.tokenEnd + exprStart;
+
+  const before = region.slice(0, local.tokenStart);
+  const atUnitPosition = /\s$/.test(before) && /[a-zA-Z0-9_.)\]]$/.test(before.trimEnd());
+  if (atUnitPosition) return { suggestions: [], tokenStart, tokenEnd };
+
+  return {
+    suggestions: local.suggestions.filter((s) => s.kind !== 'operator' && s.kind !== 'new-channel'),
+    tokenStart,
+    tokenEnd,
+  };
 }
 
 /**
@@ -83,9 +199,14 @@ export function formatAfterSyntax(
   if (delayType !== 'delayexpr') return `after ${delayValue}`;
   // A "* 1000" suffix means the expression was authored in seconds and converted for
   // runtime; anything else is already milliseconds, matching how the backend reads it.
-  return MS_CONVERSION_SUFFIX.test(delayValue)
-    ? `after ${stripMsConversion(delayValue)} s`
-    : `after ${delayValue} ms`;
+  if (!MS_CONVERSION_SUFFIX.test(delayValue)) return `after ${delayValue} ms`;
+  const seconds = stripMsConversion(delayValue);
+  // Saved before ensureMsConversion parenthesized: "a + b * 1000" multiplies only "b", so
+  // showing "after a + b s" would hide what actually runs. Show the stored ms value verbatim
+  // instead (re-saving it keeps it unchanged); re-typing it as "after (a + b) s" fixes it.
+  return needsParensForMsConversion(seconds)
+    ? `after ${delayValue} ms`
+    : `after ${seconds} s`;
 }
 
 /**

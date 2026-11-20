@@ -137,7 +137,7 @@ Accepted.
 The downstream runtime interprets a bare `delayexpr` value as raw milliseconds with no unit conversion, but users think and author in seconds ("after 2s").
 
 ### Decision
-`after 2s`/`after 714ms`/`after (expr) s` shorthand is translated into a native `<send>` (with `delay`/`delayexpr`) paired with a `<cancel>`, with any seconds-based value multiplied by 1000 and **baked directly into the stored `delayexpr` expression string** — not applied at render/runtime. The UI reverses this transformation for display so the multiplication is invisible to the user.
+`after 2s`/`after 714ms`/`after (expr) s`/`after (expr) ms` shorthand is translated into a native `<send>` (with `delay`/`delayexpr`) paired with a `<cancel>`, with a seconds-based *expression* multiplied by 1000 (parenthesized first when it has a looser-than-`*` top-level operator, e.g. `(a + b) * 1000`) and **baked directly into the stored `delayexpr` expression string** (numeric `delay="2s"` keeps its unit suffix; `ms` expressions are stored verbatim) — not applied at render/runtime. The UI reverses this transformation for display so the multiplication is invisible to the user.
 
 ### Reason
 Explicitly a response to a discovered runtime constraint, not an arbitrary choice — the runtime's `delayexpr` unit interpretation is outside this repo's control, so the workaround had to live in the authoring layer.

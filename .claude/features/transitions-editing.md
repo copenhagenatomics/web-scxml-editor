@@ -7,8 +7,7 @@ Let a user create, edit, and visually understand transitions (SCXML's core contr
 ## User behavior
 
 - Drag from one state's connection handle to another to create a transition.
-- Click a transition to select it and open the Transition panel: switch between Event mode and Condition mode, type an event name or condition expression with autocomplete (channels/events/datamodel variables), or use `after 2s` / `after 714ms` / `after (expr) s` shorthand for a timed transition (see `time-transition-syntax.md`).
-- Attempting to create a second transition that would conflict with an existing one between the same two states (see "Transition slots" below) is **blocked immediately** with a dismissible banner explaining why — the user cannot create the invalid state even temporarily.
+- Click a transition to select it and open the Transition panel: switch between Event mode and Condition mode, type an event name or condition expression with autocomplete (channels/events/datamodel variables), or use `after 2s` / `after 714ms` / `after (expr) s` / `after (expr) ms` shorthand for a timed transition (see `time-transition-syntax.md`).- Attempting to create a second transition that would conflict with an existing one between the same two states (see "Transition slots" below) is **blocked immediately** with a dismissible banner explaining why — the user cannot create the invalid state even temporarily.
 - Shift+Click on an already-selected edge inserts a new waypoint at the nearest point on its current path, for manual routing. Double-click a waypoint to delete it. Drag a waypoint circle to reroute.
 - Dragging an edge's endpoint onto a different state reconnects it.
 

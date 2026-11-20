@@ -10,12 +10,20 @@ import {
   generateTimeEventName,
   findTimeEventToken,
   resolveTimeEventDisplay,
+  getAfterExpressionSuggestions,
 } from '@/lib/utils/time-transition';
 import { getExpressionSuggestions, applyExpressionSuggestion } from '@/lib/utils/expression-autocomplete';
 
 type Suggestion = { label: string; kind: 'channel' | 'event' | 'variable' | 'new-channel' | 'mapped-channel' | 'operator' };
 
 const MAX_TEXTAREA_HEIGHT = 200;
+
+const AFTER_FORMATS = 'after 2s  ·  after 714ms  ·  after (expression) s  ·  after (expression) ms';
+
+// Text that is meant as an "after X" time transition ("after" + whitespace). Never a valid
+// event name — SCXML would split it on spaces into several events — so if it doesn't parse,
+// the panel reports an error instead of saving it as a plain event.
+const looksLikeAfter = (s: string) => /^after\s/.test(s.trim());
 
 export interface TransitionApplyArgs {
   newValue: string;
@@ -122,11 +130,27 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     });
   }, [rawValue, cursorPos, channels, channelMappings, scxmlContent, selectionMode]);
 
+  // The caret is inside an "after X" delay expression (in either mode, including one segment of
+  // a merged event list) — suggest channels/variables for it. Null otherwise.
+  const afterExpressionResult = React.useMemo(
+    () => getAfterExpressionSuggestions(rawValue, cursorPos, {
+      variables: extractDatamodelVariables(scxmlContent),
+      channels,
+      channelMappings,
+    }),
+    [rawValue, cursorPos, channels, channelMappings, scxmlContent]
+  );
+
+  // Whichever expression the caret is in: an "after X" delay expression takes precedence over a
+  // condition. Drives accepting/previewing a suggestion as a token replacement under the caret.
+  const expressionResult = afterExpressionResult ?? condExpressionResult;
+
   // ── main search suggestions ──
   const suggestions: Suggestion[] = React.useMemo(() => {
     const eventNames = events.map((e) => e.name);
 
-    // Suppress suggestions when user is typing an "after X" time transition
+    if (afterExpressionResult) return afterExpressionResult.suggestions;
+    // Caret on the "after" keyword itself, or before the expression — nothing to suggest.
     if (rawValue.trimStart().startsWith('after')) return [];
 
     if (selectionMode === 'event') {
@@ -142,14 +166,14 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     }
 
     return condExpressionResult?.suggestions ?? [];
-  }, [rawValue, events, selectionMode, condExpressionResult]);
+  }, [rawValue, events, selectionMode, condExpressionResult, afterExpressionResult]);
 
-  const applyCondSuggestion = (label: string) => {
-    if (!condExpressionResult) return { newText: rawValue, newCursorPos: cursorPos };
-    const { tokenStart, tokenEnd } = condExpressionResult;
+  const applyExpressionSuggestionAtCaret = (label: string) => {
+    if (!expressionResult) return { newText: rawValue, newCursorPos: cursorPos };
+    const { tokenStart, tokenEnd } = expressionResult;
     return applyExpressionSuggestion(rawValue, tokenStart, tokenEnd, label);
   };
-  const buildCondValue = (label: string) => applyCondSuggestion(label).newText;
+  const buildExpressionValue = (label: string) => applyExpressionSuggestionAtCaret(label).newText;
 
   // Merged transitions carry a comma-separated event list. Appends a new event after a
   // trailing comma, or replaces the segment currently being typed — never the whole field.
@@ -163,8 +187,8 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   };
 
   const acceptSuggestion = (s: Suggestion) => {
-    const { newText, newCursorPos } = selectionMode === 'cond'
-      ? applyCondSuggestion(s.label)
+    const { newText, newCursorPos } = expressionResult
+      ? applyExpressionSuggestionAtCaret(s.label)
       : { newText: buildEventValue(s.label), newCursorPos: undefined };
     const caret = newCursorPos ?? newText.length;
     setRawValue(newText);
@@ -258,6 +282,12 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
       return;
     }
 
+    const invalidAfter = segments.find((s) => looksLikeAfter(s) && parseAfterSyntax(s) === null);
+    if (invalidAfter) {
+      setApplyError(`"${invalidAfter}" is not a valid time transition. Use: ${AFTER_FORMATS}`);
+      return;
+    }
+
     // Regular event or condition — always driven by the explicit switch, never guessed.
     const result = onApply({
       newValue: trimmed,
@@ -297,7 +327,7 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
     if (!isOpen || rawValue.length === 0) return null;
     // Guide user if they've started typing "after" but the format isn't complete yet
     if (rawValue.trimStart().startsWith('after') && parseAfterSyntax(rawValue.trim()) === null) {
-      return 'Time transition format: after 2s  ·  after 714ms  ·  after (expression) s  ·  after (expression) ms';
+      return `Time transition format: ${AFTER_FORMATS}`;
     }
     if (selectionMode === 'event' || suggestions.length > 0) return null;
     // Only a typed identifier can fail to match — not an operand slot ("x == "), a number
@@ -313,9 +343,8 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
   const showDropdown = showSuggestions || hintMessage !== null;
 
   const displayValue = activeIndex >= 0 && suggestions[activeIndex]
-    ? editingField === 'cond' ? buildCondValue(suggestions[activeIndex].label)
-      : editingField === 'event' ? buildEventValue(suggestions[activeIndex].label)
-      : suggestions[activeIndex].label
+    ? expressionResult ? buildExpressionValue(suggestions[activeIndex].label)
+      : buildEventValue(suggestions[activeIndex].label)
     : rawValue;
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -336,11 +365,11 @@ export const TransitionPanel: React.FC<TransitionPanelProps> = ({
 
   // Writing a new value into the textarea (preview swap/revert, accepting) makes the browser
   // jump the caret to the end. Put it back: after the previewed token while previewing a
-  // condition suggestion, else at cursorPos.
+  // condition or "after X" expression suggestion, else at cursorPos.
   const previewActive = activeIndex >= 0 && suggestions[activeIndex] !== undefined;
   const caretTarget = previewActive
-    ? selectionMode === 'cond' && condExpressionResult
-      ? condExpressionResult.tokenStart + suggestions[activeIndex].label.length
+    ? expressionResult
+      ? expressionResult.tokenStart + suggestions[activeIndex].label.length
       : displayValue.length
     : Math.min(cursorPos, displayValue.length);
   React.useLayoutEffect(() => {
