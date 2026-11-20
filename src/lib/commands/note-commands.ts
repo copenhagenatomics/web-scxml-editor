@@ -12,7 +12,8 @@ const NOTE = VISUAL_METADATA_CONSTANTS.NOTE;
  * regular child states), so a note added while drilled into a state stays
  * visible only at that level.
  * Notes live in the viz namespace so SCXML engines ignore them.
- * Dimensions are always the fixed NOTE.WIDTH × NOTE.HEIGHT.
+ * New notes start at the default NOTE.WIDTH × NOTE.HEIGHT; the user can
+ * resize them afterwards (UpdatePositionAndDimensionsCommand).
  */
 export class AddNoteCommand extends BaseCommand {
   constructor(

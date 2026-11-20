@@ -1,5 +1,5 @@
 import { BaseCommand, type CommandResult } from './base-command';
-import { VISUAL_METADATA_CONSTANTS } from '@/types/visual-metadata';
+import { clampNoteSize } from '@/types/visual-metadata';
 
 /**
  * UpdatePositionCommand
@@ -61,10 +61,14 @@ export class UpdatePositionCommand extends BaseCommand {
       }
     }
 
-    // Notes always store the fixed size (also migrates legacy custom sizes)
+    // Notes keep their (user-resized) size, clamped to the resize bounds;
+    // a missing size falls back to the default note size
     if (isNote) {
-      width = VISUAL_METADATA_CONSTANTS.NOTE.WIDTH;
-      height = VISUAL_METADATA_CONSTANTS.NOTE.HEIGHT;
+      const hasSize = vizXywh && vizXywh.split(',').length >= 4;
+      ({ width, height } = clampNoteSize(
+        hasSize ? width : undefined,
+        hasSize ? height : undefined
+      ));
     }
 
     // Update viz:xywh with new position but same dimensions

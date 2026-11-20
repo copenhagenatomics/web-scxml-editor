@@ -2,9 +2,9 @@
 'use client';
 
 import React, { memo } from 'react';
-import { type NodeProps, useReactFlow } from 'reactflow';
+import { type NodeProps, NodeResizer, useReactFlow } from 'reactflow';
 import { Trash2 } from 'lucide-react';
-import { VISUAL_METADATA_CONSTANTS } from '@/types/visual-metadata';
+import { VISUAL_METADATA_CONSTANTS, clampNoteSize } from '@/types/visual-metadata';
 import {
   useNoteSizing,
   NOTE_CONTENT_PADDING,
@@ -18,20 +18,34 @@ const NOTE_FULL_MESSAGE =
 
 export interface StickyNoteNodeData {
   text: string;
+  /** Stored base width/height from viz:xywh (user-resizable) */
+  width?: number;
+  height?: number;
   isEditing?: boolean;
   onTextChange?: (newText: string) => void;
   onDelete?: () => void;
+  onResize?: (x: number, y: number, width: number, height: number) => void;
 }
 
 /**
- * Post-it note annotation node. Fixed width, not resizable, not connectable
- * (no handles). Height is derived from the text by useNoteSizing; the XML
- * always stores the base 500×500 size.
+ * Post-it note annotation node. Resizable via NodeResizer handles while
+ * selected, not connectable (no handles). The stored width × height is the
+ * base box; useNoteSizing shrinks the font and, if needed, grows the height
+ * beyond the base to fit the text (the XML always stores the base size).
  */
 export const StickyNoteNode = memo<NodeProps<StickyNoteNodeData>>(
   ({ data, selected, id }) => {
     const { setNodes } = useReactFlow();
-    const { text, isEditing = false, onTextChange, onDelete } = data;
+    const { text, isEditing = false, onTextChange, onDelete, onResize } = data;
+    const storedSize = clampNoteSize(data.width, data.height);
+
+    // Box under the cursor during an active resize drag; null otherwise
+    const [liveSize, setLiveSize] = React.useState<{
+      width: number;
+      height: number;
+    } | null>(null);
+    const baseWidth = liveSize?.width ?? storedSize.width;
+    const baseHeight = liveSize?.height ?? storedSize.height;
 
     const [editing, setEditing] = React.useState(false);
     const [tempText, setTempText] = React.useState(text);
@@ -50,7 +64,13 @@ export const StickyNoteNode = memo<NodeProps<StickyNoteNodeData>>(
     }, [editing]);
 
     const displayText = editing ? tempText : text;
-    const { fontSize, height, isFull, fits } = useNoteSizing(displayText);
+    // No auto-expansion mid-drag, so the note tracks the resize handles exactly
+    const { fontSize, height, isFull, fits } = useNoteSizing(
+      displayText,
+      baseWidth,
+      baseHeight,
+      liveSize === null
+    );
 
     // Respond to isEditing flag from parent (triggered by double-click on node)
     React.useEffect(() => {
@@ -110,13 +130,59 @@ export const StickyNoteNode = memo<NodeProps<StickyNoteNodeData>>(
     const showFullBanner = isFull || inputBlocked;
 
     return (
+      <>
+      {selected && onResize && !editing && (
+        <NodeResizer
+          onResizeStart={(_event, params) =>
+            setLiveSize({ width: params.width, height: params.height })
+          }
+          onResize={(_event, params) => {
+            setLiveSize({ width: params.width, height: params.height });
+            // Top/left handles move the node's origin as well
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === id
+                  ? { ...node, position: { x: params.x, y: params.y } }
+                  : node
+              )
+            );
+          }}
+          onResizeEnd={(_event, params) => {
+            onResize(params.x, params.y, params.width, params.height);
+            // Keep the dropped size until the committed SCXML re-parses
+            setNodes((nds) =>
+              nds.map((node) =>
+                node.id === id
+                  ? {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        width: params.width,
+                        height: params.height,
+                      },
+                    }
+                  : node
+              )
+            );
+            setLiveSize(null);
+          }}
+          minWidth={NOTE.MIN_WIDTH}
+          minHeight={NOTE.MIN_HEIGHT}
+          maxWidth={NOTE.MAX_WIDTH}
+          maxHeight={NOTE.MAX_HEIGHT}
+          handleClassName='!w-3 !h-3 !bg-yellow-500 !border-yellow-700'
+          lineClassName='!border-yellow-600'
+          color='#ca8a04'
+          isVisible={selected}
+        />
+      )}
       <div
         className={`group relative bg-yellow-200 shadow-md rounded-sm border ${
           selected
             ? 'border-yellow-600 ring-2 ring-yellow-500/50'
             : 'border-yellow-300'
         }`}
-        style={{ width: NOTE.WIDTH, height }}
+        style={{ width: baseWidth, height }}
       >
         {/* Delete button - same hover pattern as state nodes */}
         {onDelete && (
@@ -174,6 +240,7 @@ export const StickyNoteNode = memo<NodeProps<StickyNoteNodeData>>(
           </div>
         )}
       </div>
+      </>
     );
   }
 );

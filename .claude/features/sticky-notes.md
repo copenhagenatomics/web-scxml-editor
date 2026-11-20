@@ -6,22 +6,24 @@ Let a user leave free-text documentation directly on the diagram canvas, at any 
 
 ## User behavior
 
-- Add a note via the toolbar's note button; it appears as a fixed-width yellow post-it.
+- Add a note via the toolbar's note button; it appears as a 500×250 yellow post-it.
 - Type text directly into it; height grows automatically as text is added.
 - If text keeps growing past what auto-expansion can accommodate, further growth is blocked and an amber "Note is full — store large documentation externally" banner appears (deletions are always still allowed).
-- Notes can be moved and deleted like states, but **cannot be resized** by dragging (no resize handles) and are not connectable (no transition can start/end at a note).
+- Notes can be moved, deleted and **resized** like states (yellow `NodeResizer` handles appear when the note is selected and not being edited), but are not connectable (no transition can start/end at a note).
 - A note added while drilled into a compound state is scoped to that hierarchy level — it won't appear at the root or in a sibling container.
 
 ## UI behavior
 
-- Fixed **500×500 base size** always; only height is ever allowed to grow beyond the base, via a font-shrink-then-height-expand-then-"full" cascade.
+- **Base size** = the stored `viz:xywh` width × height (default 500×250 for new notes), user-resizable within `NOTE.MIN_WIDTH/MIN_HEIGHT` (200×100) and `NOTE.MAX_WIDTH/MAX_HEIGHT` (1200×1200), clamped by `clampNoteSize()`. The font-shrink → height-expand (base × 2) → "full" cascade runs relative to that base box; only the base is persisted, never the expanded height.
+- During a live resize drag, height expansion is suspended so the note tracks the handles exactly; on release the cascade re-applies (so shrinking below the text's needs makes the note grow back up to 2× the dropped height, or show the "full" banner).
 - Excluded from: compound-state/"has children" detection (a note living inside a state does not make that state look/behave like a compound state), edge obstacle-avoidance routing (edges may pass behind/through a note's area), and the single-click "open State Actions panel" gating (clicking a note does not try to open state actions for it).
 
 ## Internal architecture
 
 - Identified purely by **id prefix** (`note:`, via `isNoteId()` / `VISUAL_METADATA_CONSTANTS.NOTE.ID_PREFIX`), not a `data` flag — `:` is not a valid character in an SCXML state id, so this cannot collide with a real state id.
 - Rendered as a separate ReactFlow node type, `scxmlNote` → `StickyNoteNode` (`src/components/diagram/nodes/sticky-note-node.tsx`), sizing logic factored into `use-note-sizing.ts`.
-- **Sizing cascade** (`computeSizing`, `use-note-sizing.ts:72-89`): (1) try large font at base height; (2) try small font at base height; (3) try small font at expanded height (`HEIGHT × HEIGHT_EXPANSION_FACTOR`); (4) if still overflowing, mark `isFull` and block further growth-causing keystrokes (deletion keystrokes still allowed). Text is measured via a hidden singleton off-screen `<div>` mirroring the real content box's width/padding/line-height — the same technique `measure-label-width.ts` uses for state labels.
+- **Sizing cascade** (`computeSizing(text, width, baseHeight, allowExpansion)` in `use-note-sizing.ts`): (1) try large font at base height; (2) try small font at base height; (3) try small font at expanded height (`baseHeight × HEIGHT_EXPANSION_FACTOR`, skipped mid-resize); (4) if still overflowing, mark `isFull` and block further growth-causing keystrokes (deletion keystrokes still allowed). Text is measured via a hidden singleton off-screen `<div>` whose width is set per call to the note's content width — the same technique `measure-label-width.ts` uses for state labels.
+- **Resize path**: `StickyNoteNode`'s `NodeResizer` → `data.onResize` → `handleNodeResize` in `visual-diagram.tsx` → `UpdatePositionAndDimensionsCommand` (which resolves note ids via `findNoteElement` and clamps). `UpdatePositionCommand`/`BatchUpdatePositionCommand` preserve a note's stored size on move (default size only when none is stored).
 - Stored as a **`<viz:note>` XML element** (not just attributes) — a child of either the document root or a specific parent state element, and that placement is what determines its hierarchy-level scoping in the diagram (matches how real child states nest).
 
 ## Relevant components
@@ -56,11 +58,10 @@ None — notes are not SCXML-semantic elements and are not validated by `SCXMLVa
 
 ## Tests
 
-No dedicated test file for `sticky-note-node.tsx` or `use-note-sizing.ts` was found in this pass — a gap, especially for the sizing cascade logic (font-shrink → expand → full), which has non-trivial branching.
+`src/lib/commands/note-resize.test.ts` covers the resize/move commands, clamping, and `extractNoteNodes` reading the stored size. No test for `sticky-note-node.tsx` or `use-note-sizing.ts` — a gap, especially for the sizing cascade logic (font-shrink → expand → full), which depends on real DOM text measurement.
 
 ## Known limitations
 
-- Notes cannot be manually resized — width is permanently fixed at 500px; a user needing a wider note has no option besides splitting content across multiple notes.
 - Legacy notes lacking a `viz:id` are handled via a transient `note:idx-N` fallback id (positional, one render cycle only) until `ensureNoteIds` persists a real id — code touching notes by id must be aware this fallback exists and only trust it when the candidate element genuinely has no persisted id yet (see `BaseCommand.findNoteElement`'s guard).
 
 ## Important edge cases
@@ -71,7 +72,7 @@ No dedicated test file for `sticky-note-node.tsx` or `use-note-sizing.ts` was fo
 ## Things that must NOT be changed
 
 - Do not change `collectNoteElementsInDeclaredOrder` (in `base-command.ts`) or `collectNotes` (in `note-conversion.ts`) independently — they must stay in lockstep, per explicit code comments in both files.
-- Do not give notes a resize handle without deciding what "note is full" means for a variable width too — the current sizing cascade assumes a fixed width and only varies height.
+- Do not remove the resize max bounds (`NOTE.MAX_WIDTH/MAX_HEIGHT`) without revisiting the "note is full" cap — unbounded resizing would make that cap meaningless.
 
 ## Previous design decisions
 
