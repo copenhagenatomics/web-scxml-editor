@@ -15,6 +15,7 @@ export const PRE_READY_STUB_SCRIPT = `(function(){
     clearErrors:function(){q.ops.push({type:'clearErrors'});},
     loadScxml:function(){},
     getScxml:function(){return'';},
+    getValidationErrors:function(){return[];},
     toggleConfigPanel:function(){},
     setActiveTab:function(){}
   };

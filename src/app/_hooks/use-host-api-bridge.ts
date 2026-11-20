@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { HistoryManager } from '@/lib/history/history-manager';
 import { annotateLegacyConfTypes, extractUnresolvedChannelRefs } from '@/lib/utils/datamodel-extractor';
 import { EVENT_FALLBACK_VALUE } from '@/lib/utils/common-utils';
+import { validateScxmlContent } from '@/lib/validators/validate-content';
 import { useEditorStore } from '@/stores/editor-store';
 import { usePanelStore } from '@/stores/panel-store';
 import { useHostAPIStore } from '@/stores/host-api-store';
@@ -91,6 +92,11 @@ export function useHostAPIBridge() {
       setActiveTab: (tab) => useHostAPIStore.getState().setRequestedTab(tab),
       showErrors: (errors) => useHostAPIStore.getState().showErrors(errors),
       clearErrors: () => useHostAPIStore.getState().clearHostErrors(),
+      // Fresh result, not the debounced store copy, so a host check right after an edit is accurate.
+      getValidationErrors: () =>
+        validateScxmlContent(contentRef.current).map(({ message, severity, line, column }) => ({
+          message, severity, line, column,
+        })),
     };
 
     if (stub?._q) {

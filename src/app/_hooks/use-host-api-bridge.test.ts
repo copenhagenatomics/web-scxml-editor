@@ -255,4 +255,28 @@ describe('useHostAPIBridge loadScxml', () => {
     expect(state.loadGeneration).toBe(generation + 1);
     expect(window.ScxmlEditorAPI.getScxml()).toBe(xml);
   });
+
+  it('getValidationErrors validates the current content now, without waiting for the debounced store copy', () => {
+    renderHook(() => useHostAPIBridge());
+    const clean =
+      '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A"><state id="A"/></scxml>';
+    const broken =
+      '<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="A"><state id="A"><transition event="go" target="Missing"/></state></scxml>';
+
+    act(() => window.ScxmlEditorAPI.loadScxml(clean));
+    expect(window.ScxmlEditorAPI.getValidationErrors()).toEqual([]);
+
+    act(() => useEditorStore.getState().setContent(broken));
+    // The store's errors are still the (empty) debounced result; the API must not return those.
+    expect(useEditorStore.getState().errors).toEqual([]);
+    const issues = window.ScxmlEditorAPI.getValidationErrors();
+    expect(issues.some(i => i.severity === 'error' && i.message.includes('Missing'))).toBe(true);
+    // Only the documented fields cross the boundary (no internal fix/stateId payloads).
+    issues.forEach(i => expect(Object.keys(i).sort()).toEqual(['column', 'line', 'message', 'severity']));
+  });
+
+  it('the pre-ready stub answers getValidationErrors with an empty list instead of throwing', () => {
+    installRealPreReadyStub();
+    expect(window.ScxmlEditorAPI.getValidationErrors()).toEqual([]);
+  });
 });

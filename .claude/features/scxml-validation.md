@@ -22,7 +22,7 @@ Give the user real-time, line/column-precise feedback on both XML syntax and SCX
 
 ## Internal architecture
 
-Two fully independent stages, chained but not coupled:
+`validateScxmlContent(xml)` (`src/lib/validators/validate-content.ts`) is the single entry point that chains both stages. The debounced live validation (`use-content-validation.ts`), the host command gate and `ScxmlEditorAPI.getValidationErrors()` all call it (see `host-api-embedding.md`). Two fully independent stages, chained but not coupled:
 1. **`SCXMLParser.parse(xmlContent)`** (`src/lib/parsers/scxml-parser.ts`) — runs a hand-rolled character-scanning XML syntax checker first (tag-stack matching, CDATA/comment/PI-aware, unescaped-`&` detection, with a heuristic to avoid false "unclosed tag" errors while the user is mid-typing), then `fast-xml-parser`'s own `XMLValidator.validate()` as a second opinion (deduped against the first), then the real parse if no hard errors.
 2. **`SCXMLValidator.validate(scxml, xmlContent)`** (`src/lib/validators/scxml-validator.ts`) — only runs if parsing succeeded. **18 ordered passes**, order matters (later passes depend on state built earlier — id sets, hierarchy maps):
    1. Build element-position index + state-id/hierarchy maps.

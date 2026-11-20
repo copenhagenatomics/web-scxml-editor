@@ -16,3 +16,4 @@ export * from './transition-validator';
 export * from './w3c-validator';
 export * from './initial-group-validator';
 export * from './transition-slot-validator';
+export * from './validate-content';

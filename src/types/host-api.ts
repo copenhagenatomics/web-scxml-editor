@@ -21,7 +21,22 @@ export interface CommandOptions {
   order: number;
   /** Where to render the command. 'toolbar' (default) renders it as its own toolbar button; 'menu' renders it inside the "More options" (⋮) dropdown, alongside Upload/Clean SCXML/Download. */
   placement?: 'toolbar' | 'menu';
+  /**
+   * Block the command until the editor's own validation is clean. On click the current SCXML is
+   * re-validated (not the debounced result); if it has blocking issues, `run()` is not called and
+   * the Validation panel opens instead. 'errors' blocks on errors only; 'errors-and-warnings'
+   * blocks on warnings too. Host Alerts never block. Omit to run unconditionally (the default).
+   */
+  requiresValidScxml?: 'errors' | 'errors-and-warnings';
   run: () => void | Promise<void>;
+}
+
+/** One issue from the editor's own validation, as returned by `getValidationErrors()`. */
+export interface ValidationIssue {
+  message: string;
+  severity: 'error' | 'warning';
+  line?: number;
+  column?: number;
 }
 
 export interface RegisteredCommand extends CommandOptions {
@@ -82,6 +97,11 @@ export interface ScxmlEditorAPI {
   showErrors: (errors: Array<{ message: string; level?: 'info' | 'warning' | 'error' }>) => void;
   /** Remove all host errors from the Host Alerts tab. */
   clearErrors: () => void;
+  /**
+   * Validate the current SCXML now and return the editor's own errors and warnings (Host Alerts
+   * are not included). Empty when the document is clean. Call it after onReady.
+   */
+  getValidationErrors: () => ValidationIssue[];
 }
 
 declare global {

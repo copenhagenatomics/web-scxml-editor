@@ -1,6 +1,29 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
+import { validateScxmlContent } from '@/lib/validators/validate-content';
+import { useEditorStore } from './editor-store';
 import type { ChannelInfo, ChannelMapping, CommandOptions, ConfigOverride, EventEntry, FeedbackItem, HostErrorItem, RegisteredCommand } from '@/types/host-api';
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/**
+ * Re-validates the current content (the live result is debounced, so it can be stale right after
+ * an edit) and publishes it to the editor store so the Validation panel shows what blocked the
+ * command. Returns the toast text when the command must not run, otherwise null. Only the editor's
+ * own validation counts; Host Alerts are the host's report and never block.
+ */
+function findBlockingIssues(mode: NonNullable<CommandOptions['requiresValidScxml']>, label: string): string | null {
+  const issues = validateScxmlContent(useEditorStore.getState().content);
+  useEditorStore.getState().setErrors(issues);
+  const errorCount = issues.filter(i => i.severity === 'error').length;
+  const warningCount = mode === 'errors-and-warnings' ? issues.length - errorCount : 0;
+  if (errorCount + warningCount === 0) return null;
+  const parts = [
+    errorCount > 0 ? plural(errorCount, 'error') : null,
+    warningCount > 0 ? plural(warningCount, 'warning') : null,
+  ].filter(Boolean);
+  return `Fix ${parts.join(' and ')} before ${label}.`;
+}
 
 interface HostAPIState {
   commands: RegisteredCommand[];
@@ -82,6 +105,15 @@ export const useHostAPIStore = create<HostAPIState & HostAPIActions>((set, get) 
     const { commands, showFeedback, showErrors } = get();
     const command = commands.find(c => c.id === id);
     if (!command) return;
+
+    if (command.requiresValidScxml) {
+      const blockedMessage = findBlockingIssues(command.requiresValidScxml, command.label);
+      if (blockedMessage) {
+        set({ requestedValidationTab: 'validation' });
+        showFeedback(blockedMessage, 'warning');
+        return;
+      }
+    }
 
     set(state => ({
       commands: state.commands.map(c =>
