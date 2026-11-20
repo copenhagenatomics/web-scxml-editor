@@ -7,7 +7,7 @@ Let a user expose specific datamodel values as per-deployment configurable setti
 ## User behavior
 
 - Adding `conf_` as a prefix to any `<data>` field's id makes it appear in this panel automatically — no separate registration step.
-- Each row shows the field name, an inline type selector (`int`/`double`/`bool`/`string`), the "Data Model" default value (editable, committed on blur or Enter), and the "IO.Conf" override value (host-provided, also editable in this UI, which optimistically merges local edits over host state).
+- Each row shows the field name, an inline type selector (`int`/`double`/`bool`/`string`), the "Default Value" field (the `<data>` element's `expr`) (editable, committed on blur or Enter), and the "IO.Conf" override value (host-provided, also editable in this UI, which optimistically merges local edits over host state).
 - Deleting a config field is **refused** (not just warned) if it's still referenced anywhere in the SCXML — the user gets an explanatory toast instead ("Cannot delete 'conf_x': still referenced in ...").
 - Adding a new config value here writes a real `<data id="conf_name" expr="..." confType="...">` into the document's `<datamodel>` (creating `<datamodel>` if absent).
 
