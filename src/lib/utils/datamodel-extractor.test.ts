@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  extractMainPrefixedExpressionRefs,
+  extractUnresolvedChannelRefs,
   getConfigFieldUsage,
   inferChannelInitialExpr,
   inferChannelRetypes,
@@ -375,5 +377,47 @@ describe('getConfigFieldUsage', () => {
         <state id="S3"/>
       </scxml>`;
     expect(getConfigFieldUsage(xml, 'threshold')).toEqual(['S1']);
+  });
+});
+
+// An "after X" transition stores X in <send delayexpr>, which is often the only place a
+// channel or config value is referenced. Every reference scan must see it.
+describe('delayexpr references', () => {
+  const timerXml = (delayexpr: string) => `
+    <scxml>
+      <state id="S1">
+        <onentry><send event="timer.S1.0" delayexpr="${delayexpr}"/></onentry>
+        <transition event="timer.S1.0" target="S2"/>
+      </state>
+      <state id="S2"/>
+    </scxml>`;
+
+  it('extractUnresolvedChannelRefs finds a name used only in a send delayexpr', () => {
+    expect(extractUnresolvedChannelRefs(timerXml('delayms'), [])).toEqual(['delayms']);
+  });
+
+  it('extractUnresolvedChannelRefs finds it inside the seconds-to-ms conversion too', () => {
+    expect(extractUnresolvedChannelRefs(timerXml('delaySec * 1000'), [])).toEqual(['delaySec']);
+  });
+
+  it('extractUnresolvedChannelRefs still skips a delayexpr name that is already a system channel', () => {
+    expect(extractUnresolvedChannelRefs(timerXml('delayms'), ['delayms'])).toEqual([]);
+  });
+
+  it('extractMainPrefixedExpressionRefs finds a main_ variable in a delayexpr', () => {
+    expect(extractMainPrefixedExpressionRefs(timerXml('main_delay'))).toEqual(['main_delay']);
+  });
+
+  it('getConfigFieldUsage reports a config value used only in a delayexpr', () => {
+    const xml = `
+      <scxml>
+        <datamodel><data id="conf_wait" expr="500" confType="int"/></datamodel>
+        <state id="S1">
+          <onentry><send event="timer.S1.0" delayexpr="conf_wait"/></onentry>
+          <transition event="timer.S1.0" target="S2"/>
+        </state>
+        <state id="S2"/>
+      </scxml>`;
+    expect(getConfigFieldUsage(xml, 'wait')).toEqual(['S1']);
   });
 });

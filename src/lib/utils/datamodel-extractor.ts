@@ -664,7 +664,10 @@ export function deleteConfigField(xmlContent: string, name: string): string {
   return updateBuilder.build(doc);
 }
 
-const SCXML_EXPR_ATTRS = new Set(['@_cond', '@_expr', '@_location', '@_namelist', '@_targetexpr', '@_srcexpr']);
+// delayexpr matters: an "after X" transition stores X in <send delayexpr>, often its only reference.
+const SCXML_EXPR_ATTRS = new Set([
+  '@_cond', '@_expr', '@_location', '@_namelist', '@_targetexpr', '@_srcexpr', '@_delayexpr',
+]);
 
 /**
  * Returns variable names referenced in SCXML expressions/conditions that are not
@@ -710,7 +713,7 @@ export function extractUnresolvedChannelRefs(xmlContent: string, channels: strin
 
 /**
  * Returns "main_"-prefixed variable names referenced anywhere in SCXML expressions
- * (cond, expr, location, namelist, targetexpr, srcexpr), across every element - not just
+ * (cond, expr, location, namelist, targetexpr, srcexpr, delayexpr), across every element - not just
  * <data> declarations. Unlike extractUnresolvedChannelRefs, this does not exclude <data>'s
  * own expr, since a reference to a "main_" variable there is just as non-portable.
  */
@@ -746,7 +749,7 @@ export function extractMainPrefixedExpressionRefs(xmlContent: string): string[] 
 
 /**
  * Returns the ids of elements that reference conf_<name> anywhere in the SCXML
- * (cond, expr, location, namelist, targetexpr, srcexpr), excluding the field's own
+ * (cond, expr, location, namelist, targetexpr, srcexpr, delayexpr), excluding the field's own
  * <data> declaration. Each entry is the nearest enclosing element id (e.g. the state
  * containing the referencing transition), falling back to the element's tag name if
  * no ancestor has an id. Empty array means the field is safe to delete.
