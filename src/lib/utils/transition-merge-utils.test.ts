@@ -4,6 +4,8 @@ import { SCXMLParser } from '@/lib/parsers/scxml-parser';
 import {
   combineConditions,
   isSameTransitionFamily,
+  isSameTransitionFamilyByCond,
+  eventsAreEqual,
   actionsAreEqual,
   findMergeGroups,
   mergeTransitionGroup,
@@ -137,6 +139,70 @@ describe('isSameTransitionFamily', () => {
   });
 });
 
+describe('eventsAreEqual', () => {
+  it('treats two absent events as equal', () => {
+    expect(eventsAreEqual(undefined, undefined)).toBe(true);
+  });
+
+  it('treats an absent event and a whitespace-only event as equal', () => {
+    expect(eventsAreEqual(undefined, '  ')).toBe(true);
+  });
+
+  it('ignores token order, separators and duplicates', () => {
+    expect(eventsAreEqual('a, b', 'b a')).toBe(true);
+    expect(eventsAreEqual('a, a, b', 'b, a')).toBe(true);
+  });
+
+  it('treats differing events as not equal', () => {
+    expect(eventsAreEqual('e1', 'e2')).toBe(false);
+  });
+
+  it('treats a present event and an absent event as not equal', () => {
+    expect(eventsAreEqual('ack', undefined)).toBe(false);
+  });
+
+  it('treats a subset event list as not equal', () => {
+    expect(eventsAreEqual('a, b', 'a')).toBe(false);
+  });
+});
+
+describe('isSameTransitionFamilyByCond', () => {
+  const base = (overrides: Partial<TransitionElement> = {}): TransitionElement => ({
+    '@_target': 'B',
+    ...overrides,
+  });
+
+  it('matches two cond-only transitions to the same target', () => {
+    expect(
+      isSameTransitionFamilyByCond(base({ '@_cond': 'x>1' }), base({ '@_cond': 'x<0' }))
+    ).toBe(true);
+  });
+
+  it('matches transitions with the same event and differing conds', () => {
+    expect(
+      isSameTransitionFamilyByCond(
+        base({ '@_event': 'e1', '@_cond': 'x>1' }),
+        base({ '@_event': 'e1', '@_cond': 'x<0' })
+      )
+    ).toBe(true);
+  });
+
+  it('does not match transitions with differing events', () => {
+    expect(
+      isSameTransitionFamilyByCond(
+        base({ '@_event': 'e1', '@_cond': 'x>1' }),
+        base({ '@_event': 'e2', '@_cond': 'x<0' })
+      )
+    ).toBe(false);
+  });
+
+  it('does not match an event-only transition with a cond-only transition', () => {
+    expect(
+      isSameTransitionFamilyByCond(base({ '@_event': 'ack' }), base({ '@_cond': 'btn > 0.5' }))
+    ).toBe(false);
+  });
+});
+
 describe('isSameTransitionFamilyByEvent', () => {
   const base = (overrides: Partial<TransitionElement> = {}): TransitionElement => ({
     '@_target': 'B',
@@ -226,17 +292,29 @@ describe('actionsAreEqual', () => {
 });
 
 describe('findMergeGroups', () => {
-  it('groups two same-target, same-actions transitions and excludes a third that has different actions', () => {
+  it('groups two same-target, same-event, same-actions transitions and excludes a third that has different actions', () => {
     const t1: TransitionElement = { '@_target': 'B', '@_event': 'click', '@_cond': 'x>1' };
-    const t2: TransitionElement = { '@_target': 'B', '@_event': 'hover', '@_cond': 'x<0' };
+    const t2: TransitionElement = { '@_target': 'B', '@_event': 'click', '@_cond': 'x<0' };
     const t3: TransitionElement = {
       '@_target': 'B',
-      '@_event': 'press',
+      '@_event': 'click',
       '@_cond': 'x==5',
       assign: { '@_location': 'y', '@_expr': '1' },
     } as any;
     const groups = findMergeGroups([t1, t2, t3]);
     expect(groups).toEqual([[t1, t2]]);
+  });
+
+  it('does not group same-target transitions with differing events', () => {
+    const t1: TransitionElement = { '@_target': 'B', '@_event': 'click', '@_cond': 'x>1' };
+    const t2: TransitionElement = { '@_target': 'B', '@_event': 'hover', '@_cond': 'x<0' };
+    expect(findMergeGroups([t1, t2])).toEqual([]);
+  });
+
+  it('does not group an event-only transition with a cond-only transition to the same target', () => {
+    const t1: TransitionElement = { '@_target': 'B', '@_event': 'ack' };
+    const t2: TransitionElement = { '@_target': 'B', '@_cond': 'AckButtonIn > 0.5' };
+    expect(findMergeGroups([t1, t2])).toEqual([]);
   });
 
   it('omits singleton clusters (no other transition targets the same state)', () => {
@@ -343,7 +421,7 @@ describe('mergeDuplicateTransitionsInDocument', () => {
     const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
       <state id="A">
         <transition event="e1" target="B" cond="x&gt;1"/>
-        <transition event="e2" target="B" cond="x&lt;0"/>
+        <transition event="e1" target="B" cond="x&lt;0"/>
       </state>
       <state id="B"/>
     </scxml>`;
@@ -360,7 +438,7 @@ describe('mergeDuplicateTransitionsInDocument', () => {
     const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
       <state id="A">
         <transition event="e1" target="B" cond="x&gt;1"/>
-        <transition event="e2" target="B"/>
+        <transition event="e1" target="B"/>
       </state>
       <state id="B"/>
     </scxml>`;
@@ -369,6 +447,34 @@ describe('mergeDuplicateTransitionsInDocument', () => {
     const a = parseState(result, 'A');
     const t = a.transition as TransitionElement;
     expect(t['@_cond']).toBeUndefined();
+    expect(t['@_event']).toBe('e1');
+  });
+
+  it('leaves same-target transitions with differing events unmerged (no event is discarded)', () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="A">
+        <transition event="e1" target="B" cond="x&gt;1"/>
+        <transition event="e2" target="B" cond="x&lt;0"/>
+      </state>
+      <state id="B"/>
+    </scxml>`;
+
+    expect(mergeDuplicateTransitionsInDocument(xml)).toBe(xml);
+  });
+
+  it('never folds a cond-only transition into an event-only transition to the same target', () => {
+    // Regression: `event="ack"` + `cond="AckButtonIn > 0.5"` used to collapse into a bare
+    // `event="ack"` (the missing cond made the merge unconditional), silently deleting the
+    // AckButtonIn trigger.
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="A">
+        <transition event="ack" target="B"/>
+        <transition cond="AckButtonIn &gt; 0.5" target="B"/>
+      </state>
+      <state id="B"/>
+    </scxml>`;
+
+    expect(mergeDuplicateTransitionsInDocument(xml)).toBe(xml);
   });
 
   it('leaves transitions with differing executable actions unmerged', () => {
@@ -401,7 +507,7 @@ describe('mergeDuplicateTransitionsInDocument', () => {
     const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
       <state id="A">
         <transition event="e1" target="B" cond="x&gt;1"/>
-        <transition event="e2" target="B" cond="x&lt;0"/>
+        <transition event="e1" target="B" cond="x&lt;0"/>
         <transition event="e3" target="C" cond="z==1"/>
       </state>
       <state id="B"/>
@@ -573,7 +679,7 @@ describe('event-merge and cond-merge pipeline ordering', () => {
     return found!;
   }
 
-  it('running event-merge before cond-merge preserves both merged events and the OR-combined cond', () => {
+  it('event-merge then cond-merge combines same-cond events but keeps a differing-event transition separate', () => {
     const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
       <state id="A">
         <transition event="e1" target="B" cond="x&gt;1"/>
@@ -586,10 +692,24 @@ describe('event-merge and cond-merge pipeline ordering', () => {
     const afterEventMerge = mergeDuplicateTransitionsByEventInDocument(xml);
     const result = mergeDuplicateTransitionsInDocument(afterEventMerge);
     const a = parseState(result, 'A');
-    expect(Array.isArray(a.transition)).toBe(false);
-    const t = a.transition as TransitionElement;
-    expect(t['@_target']).toBe('B');
-    expect(t['@_event']).toBe('e1, e2');
-    expect(t['@_cond']).toBe('(x>1) || (x<0)');
+    expect(Array.isArray(a.transition)).toBe(true);
+    const transitions = a.transition as TransitionElement[];
+    expect(transitions).toHaveLength(2);
+    expect(transitions[0]).toMatchObject({ '@_event': 'e1, e2', '@_cond': 'x>1' });
+    // Previously folded into the first transition, losing e3 and making e1/e2 fire on x<0.
+    expect(transitions[1]).toMatchObject({ '@_event': 'e3', '@_cond': 'x<0' });
+  });
+
+  it('leaves an event-only + cond-only pair to the same target untouched through the full load pipeline', () => {
+    const xml = `<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0">
+      <state id="supply">
+        <transition event="ack" target="battery_test"/>
+        <transition cond="AckButtonIn &gt; 0.5" target="battery_test"/>
+      </state>
+      <state id="battery_test"/>
+    </scxml>`;
+
+    const result = mergeDuplicateTransitionsInDocument(mergeDuplicateTransitionsByEventInDocument(xml));
+    expect(result).toBe(xml);
   });
 });

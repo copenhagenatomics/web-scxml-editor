@@ -345,7 +345,7 @@ See `decisions/testing.md` #5, `.claude/skills/ui-changes/SKILL.md`. This refine
 **18.3 — The `<initial>` child-element form must continue to be read (for reachability/group analysis) even though only the `@initial` attribute form is ever written going forward. Do not stop reading the legacy form — this would silently break older files' Initial-state detection.** [EXPLICIT]
 See `decisions/backward-compatibility.md` #4.
 
-**18.4 — Duplicate/legacy transition patterns from older files are normalized (merged) on load, not flagged as validation errors. Preserve the exact order (event-merge before cond-merge) or event names can be silently dropped, per the modules' own documented warning.** [EXPLICIT]
+**18.4 — Duplicate/legacy transition patterns from older files are normalized (merged) on load, not flagged as validation errors. Preserve the order (event-merge before cond-merge), and never let either pass merge transitions that differ in the attribute it doesn't combine — cond-merge requires identical events, event-merge requires identical conds — or a trigger is silently lost.** [EXPLICIT]
 
 ---
 

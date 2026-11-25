@@ -65,3 +65,49 @@ describe('SCXMLParser syntax diagnostics', () => {
     expect(result.errors).toEqual([]);
   });
 });
+
+describe('SCXMLParser.serialize empty elements', () => {
+  // Regression: a whole-document rewrite (e.g. load/GitHub-pull transition merging)
+  // used to expand every self-closing element into an explicit end tag.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="a">
+  <datamodel>
+    <data id="x" expr="0"/>
+  </datamodel>
+  <state id="a">
+    <onentry>
+      <assign location="x" expr="1"/>
+      <send event="t" delay="1s"/>
+    </onentry>
+    <onexit>
+      <cancel sendid="t" />
+    </onexit>
+    <transition event="go" target="b">
+    </transition>
+  </state>
+  <final id="b"/>
+</scxml>`;
+
+  it.each([true, false])('keeps empty elements self-closing (includeVisualMetadata=%s)', (withMetadata) => {
+    const parser = new SCXMLParser();
+    const result = parser.parse(xml);
+    expect(result.success).toBe(true);
+    const out = parser.serialize(result.data!, withMetadata);
+
+    expect(out).not.toMatch(/><\/(data|assign|send|cancel|transition|final)>/);
+    expect(out).toContain('<data id="x" expr="0"/>');
+    expect(out).toContain('<assign location="x" expr="1"/>');
+    expect(out).toContain('<cancel sendid="t"/>');
+    expect(out).toContain('<transition event="go" target="b"/>');
+    expect(out).toContain('<final id="b"/>');
+  });
+
+  it('still writes child content and text normally', () => {
+    const parser = new SCXMLParser();
+    const result = parser.parse(xml);
+    const out = parser.serialize(result.data!, true);
+    expect(out).toMatch(/<onentry>\s*<assign/);
+    expect(out).toMatch(/<\/onentry>/);
+    expect(new SCXMLParser().parse(out).success).toBe(true);
+  });
+});
