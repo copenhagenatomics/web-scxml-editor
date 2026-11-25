@@ -271,6 +271,33 @@ function collectUsageTypes(
 }
 
 /**
+ * Records the types a <send delayexpr> implies for the this_ channels it reads. A delay is a
+ * number, so a channel that is a direct operand of the delay's arithmetic (`this_t * 6 * 1000`,
+ * `(this_a + 1) * 1000`) is NUMERIC_USE. Inside a ternary, comparison or logical expression
+ * (`(this_on ? 5 : 0) * 1000`) the condition rules apply instead (collectUsageTypes), so a
+ * ternary's test is a bool. Anything else (function arguments, property access) says nothing.
+ */
+function collectDelayUsageTypes(
+  raw: string,
+  record: (id: string, expr: string) => void,
+  known: ReadonlyMap<string, ExprType>
+): void {
+  const expr = stripOuterParens(raw);
+  if (!expr) return;
+  const masked = maskNested(expr);
+  if (/[?<>=!&|]/.test(masked)) {
+    collectUsageTypes(expr, false, record, known);
+    return;
+  }
+  for (const part of splitAtTopLevel(expr, masked, /[-+*/%]/g)) {
+    const operand = stripOuterParens(part);
+    if (THIS_CHANNEL_ID.test(operand)) record(operand, NUMERIC_USE);
+    // Only recurse when parentheses were stripped, so an unsplittable operand can't loop.
+    else if (operand && operand !== part.trim()) collectDelayUsageTypes(operand, record, known);
+  }
+}
+
+/**
  * Reduces the types implied for one channel to a single <data expr> zero value, NUMERIC_USE when
  * it is only known to be some number, or null when the uses disagree or one is undeterminable.
  */
@@ -284,7 +311,8 @@ function resolveChannelExpr(types: Set<string> | undefined): string | null {
 
 /**
  * Works out what the datamodel needs for this_ channels to match how they are used in conditions
- * (any `cond` attribute) and <assign> elements:
+ * (any `cond` attribute), <assign> elements and <send delayexpr> delays (the "after X" time
+ * transitions):
  *
  * - `missing`: this_ channels referenced but not declared, with the <data expr> to create them with
  *   (a double when the type cannot be determined, as for inferChannelInitialExpr).
@@ -337,10 +365,14 @@ export function inferChannelRetypes(xmlContent: string): Array<{ id: string; exp
   return inferThisChannelChanges(xmlContent).retypes;
 }
 
-/** Where a this_ channel is referenced: a condition (on a transition, or an <if>) or an <assign>. */
+/**
+ * Where a this_ channel is referenced: a condition (on a transition, or an <if>), an <assign>, or
+ * the delayexpr of a <send> (the delay of an "after X" time transition).
+ */
 export type ThisChannelSite =
   | { kind: 'cond'; stateId?: string; targetId?: string }
-  | { kind: 'assign'; stateId?: string };
+  | { kind: 'assign'; stateId?: string }
+  | { kind: 'delay'; stateId?: string };
 
 interface ThisChannelUsage {
   /** A <data expr> zero value ('false', '0', '0.0'), NUMERIC_USE, or 'unknown'. */
@@ -351,7 +383,7 @@ interface ThisChannelUsage {
 const STATE_TAGS: ReadonlySet<string> = new Set(['state', 'parallel', 'final']);
 
 /**
- * Collects every this_ channel reference in conditions and <assign>s, with the type each use
+ * Collects every this_ channel reference in conditions, <assign>s and <send delayexpr>s, with the type each use
  * implies (see collectUsageTypes) and where it is. Null when the document doesn't parse.
  */
 function analyzeThisChannels(xmlContent: string): {
@@ -397,6 +429,17 @@ function analyzeThisChannels(xmlContent: string): {
 
     for (const [key, val] of Object.entries(obj)) {
       if (key.startsWith('@_')) continue;
+      if (key === 'send') {
+        for (const item of Array.isArray(val) ? val : [val]) {
+          const delayexpr = item?.['@_delayexpr'];
+          if (typeof delayexpr !== 'string') continue;
+          const site: ThisChannelSite = { kind: 'delay', stateId: here };
+          findThisChannelRefs(delayexpr).forEach((id) => push(referenceSites, id, site));
+          collectDelayUsageTypes(delayexpr, (id, type) => push(usages, id, { type, site }), known);
+        }
+        collect(val, key, here);
+        continue;
+      }
       if (key !== 'assign') {
         collect(val, key, here);
         continue;

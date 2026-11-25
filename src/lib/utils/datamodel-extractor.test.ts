@@ -420,4 +420,33 @@ describe('delayexpr references', () => {
       </scxml>`;
     expect(getConfigFieldUsage(xml, 'wait')).toEqual(['S1']);
   });
+
+  const withData = (data: string, delayexpr: string) =>
+    timerXml(delayexpr).replace('<scxml>', `<scxml><datamodel>${data}</datamodel>`);
+
+  it('inferThisChannelChanges reports a this_ channel used only in a delayexpr as missing, as a double', () => {
+    expect(inferThisChannelChanges(timerXml('this_sasas * 6 * 1000')).missing).toEqual([
+      { id: 'this_sasas', expr: '0.0' },
+    ]);
+  });
+
+  it.each([
+    ['this_t', 'this_t'],
+    ['(this_a + 1) * 1000', 'this_a'],
+    ['-this_n * 1000', 'this_n'],
+  ])('inferThisChannelChanges types a direct delay operand in %j as a number', (delayexpr, id) => {
+    expect(inferThisChannelChanges(withData(`<data id="${id}" expr="false"/>`, delayexpr)).retypes).toEqual([
+      { id, expr: '0.0' },
+    ]);
+  });
+
+  it('inferThisChannelChanges types a ternary test inside a delay as a bool', () => {
+    expect(inferThisChannelChanges(timerXml('(this_on ? 5 : 0) * 1000')).missing).toEqual([
+      { id: 'this_on', expr: 'false' },
+    ]);
+  });
+
+  it('inferThisChannelChanges ignores a this_ property access or string in a delay', () => {
+    expect(inferThisChannelChanges(timerXml("foo.this_x + 'this_y'")).missing).toEqual([]);
+  });
 });

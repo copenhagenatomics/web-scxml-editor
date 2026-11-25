@@ -43,6 +43,33 @@ describe('changedItems', () => {
   });
 });
 
+describe('syncThisChannels with an "after X" delay', () => {
+  const timerDoc = (data: string, delayexpr: string) =>
+    `<scxml xmlns="http://www.w3.org/2005/07/scxml" initial="A">${data}` +
+    `<state id="A"><onentry><send event="A_t_0_timeEvent_0" delayexpr="${delayexpr}"/></onentry>` +
+    `<onexit><cancel sendid="A_t_0_timeEvent_0"/></onexit>` +
+    `<transition event="A_t_0_timeEvent_0" target="B"/></state><state id="B"/></scxml>`;
+
+  // The reported case: "after this_sasas * 6 s" saved without declaring this_sasas.
+  it('declares a new this_ channel used only in the delay, as a double', () => {
+    const delayexpr = 'this_sasas * 6 * 1000';
+    const synced = syncThisChannels(timerDoc('', delayexpr), thisChannelRefsIn([delayexpr]));
+    expect(dataExpr(synced, 'this_sasas')).toBe('0.0');
+  });
+
+  it('declares a ternary test in the delay as a bool', () => {
+    const delayexpr = '(this_on ? 5 : 0) * 1000';
+    const synced = syncThisChannels(timerDoc('', delayexpr), thisChannelRefsIn([delayexpr]));
+    expect(dataExpr(synced, 'this_on')).toBe('false');
+  });
+
+  it('re-types a generated bool channel to a number when it becomes a delay operand', () => {
+    const delayexpr = 'this_t * 1000';
+    const xml = timerDoc('<datamodel><data id="this_t" expr="false"/></datamodel>', delayexpr);
+    expect(dataExpr(syncThisChannels(xml, thisChannelRefsIn([delayexpr])), 'this_t')).toBe('0.0');
+  });
+});
+
 describe('syncThisChannels', () => {
   // The reported case: editing one assign in a state must not re-type the state's other channels,
   // even though three of them are wrong (they're left to the Validation panel's warnings).

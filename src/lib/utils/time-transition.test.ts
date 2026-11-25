@@ -52,9 +52,12 @@ describe('getAfterExpressionSuggestions', () => {
     expect(labels('after 2 s')).toEqual([]);
   });
 
-  it('never offers operators or a new-channel row', () => {
+  it('never offers operators', () => {
     expect(labels('after this_timeout ')).toEqual([]);
-    expect(labels('after this_brand_new')).toEqual([]);
+  });
+
+  it('offers a new-channel row for an unknown this_ name, which saving declares', () => {
+    expect(at('after this_brand_new')?.suggestions).toEqual([{ label: 'this_brand_new', kind: 'new-channel' }]);
   });
 
   it('suggests nothing for a numeric delay or an empty expression', () => {
