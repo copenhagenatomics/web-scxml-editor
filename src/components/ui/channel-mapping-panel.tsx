@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, TriangleAlert } from 'lucide-react';
 import { extractDatamodelVariables, extractUnresolvedChannelRefs } from '@/lib/utils/datamodel-extractor';
 import { useHostAPIStore } from '@/stores/host-api-store';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -48,6 +48,13 @@ export function ChannelMappingPanel({ isVisible, onClose, scxmlContent }: Channe
     [channelMappings],
   );
 
+  // Matches validateChannelMappings: only flagged once the host has supplied channels to choose from.
+  const unmappedRefs = useMemo(
+    () => (channels.length === 0 ? [] : unresolvedRefs.filter(ref => !mappedByRef[ref])),
+    [channels.length, unresolvedRefs, mappedByRef],
+  );
+  const unmappedSet = useMemo(() => new Set(unmappedRefs), [unmappedRefs]);
+
   const handleConfirmAdd = () => {
     const trimmed = newRef.trim();
     if (!trimmed || existingRefs.has(trimmed) || !newChannel) return;
@@ -86,6 +93,14 @@ export function ChannelMappingPanel({ isVisible, onClose, scxmlContent }: Channe
         ) : undefined
       }
     >
+      {unmappedRefs.length > 0 && (
+        <div role='status' className='flex items-center gap-2 px-3 py-2 text-xs text-warning bg-[var(--ui-warning)]/10 border-b border-[var(--ui-border)]'>
+          <TriangleAlert className='h-3.5 w-3.5 shrink-0' />
+          <span>
+            {unmappedRefs.length === 1 ? '1 channel isn\'t' : `${unmappedRefs.length} channels aren't`} mapped yet.
+          </span>
+        </div>
+      )}
       {isEmpty && !isAdding ? (
         <PanelEmptyState>
           <p>No unresolved channel references found in this SCXML.</p>
@@ -102,7 +117,12 @@ export function ChannelMappingPanel({ isVisible, onClose, scxmlContent }: Channe
           {unresolvedRefs.map(ref => (
             <li key={ref} className='px-3 py-2 hover:bg-muted'>
               <div className='flex items-center gap-2'>
-                <span className='font-mono text-default text-xs truncate flex-1 min-w-0' title={ref}>{ref}</span>
+                <span className='flex items-center gap-1.5 flex-1 min-w-0'>
+                  {unmappedSet.has(ref) && (
+                    <TriangleAlert className='h-3 w-3 shrink-0 text-warning' aria-label='Not mapped' />
+                  )}
+                  <span className='font-mono text-default text-xs truncate' title={unmappedSet.has(ref) ? `${ref} isn't mapped to a channel` : ref}>{ref}</span>
+                </span>
                 {availableOptions.length === 0 ? (
                   <span className='text-dimmed italic text-xs shrink-0'>No channels available</span>
                 ) : (
@@ -111,6 +131,7 @@ export function ChannelMappingPanel({ isVisible, onClose, scxmlContent }: Channe
                       value={mappedByRef[ref] ?? ''}
                       options={availableOptions}
                       onChange={v => updateChannelMapping(ref, v)}
+                      warning={unmappedSet.has(ref)}
                     />
                   </div>
                 )}

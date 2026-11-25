@@ -7,7 +7,7 @@ import { EVENT_FALLBACK_VALUE } from '@/lib/utils/common-utils';
 import { validateScxmlContent } from '@/lib/validators/validate-content';
 import { useEditorStore } from '@/stores/editor-store';
 import { usePanelStore } from '@/stores/panel-store';
-import { useHostAPIStore } from '@/stores/host-api-store';
+import { getChannelMappingContext, useHostAPIStore } from '@/stores/host-api-store';
 import type { ChannelInfo, ChannelMapping, ConfigOverride, ConfigValue, EventEntry, FeedbackItem, ScxmlEditorAPI } from '@/types/host-api';
 
 export function useHostAPIBridge() {
@@ -94,7 +94,7 @@ export function useHostAPIBridge() {
       clearErrors: () => useHostAPIStore.getState().clearHostErrors(),
       // Fresh result, not the debounced store copy, so a host check right after an edit is accurate.
       getValidationErrors: () =>
-        validateScxmlContent(contentRef.current).map(({ message, severity, line, column }) => ({
+        validateScxmlContent(contentRef.current, getChannelMappingContext()).map(({ message, severity, line, column }) => ({
           message, severity, line, column,
         })),
     };

@@ -9,9 +9,11 @@ export interface SearchableSelectProps {
   options: string[];
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Warning outline, e.g. a required choice that is still empty. */
+  warning?: boolean;
 }
 
-export function SearchableSelect({ value, options, onChange, placeholder = '—' }: SearchableSelectProps) {
+export function SearchableSelect({ value, options, onChange, placeholder = '—', warning = false }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
@@ -88,7 +90,8 @@ export function SearchableSelect({ value, options, onChange, placeholder = '—'
       <button
         ref={buttonRef}
         onClick={() => (isOpen ? (setIsOpen(false), setSearch('')) : handleOpen())}
-        className='w-full border border-default rounded-md px-2.5 py-1.5 text-xs bg-elevated flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary hover:border-primary transition-colors'
+        aria-invalid={warning || undefined}
+        className={`w-full border ${warning ? 'border-[var(--ui-warning)]' : 'border-default'} rounded-md px-2.5 py-1.5 text-xs bg-elevated flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary hover:border-primary transition-colors`}
       >
         <span className={`truncate ${value ? 'text-default' : 'text-dimmed'}`}>
           {value || placeholder}
