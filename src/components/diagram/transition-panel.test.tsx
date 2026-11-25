@@ -209,10 +209,25 @@ describe('TransitionPanel "after X" expression suggestions', () => {
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ newValue: 'afterSave', editingField: 'event' }));
   });
 
-  it('does not offer a new-channel row for an unknown this_ name in a delay', () => {
+  it('offers a new-channel row for an unknown this_ name in a delay', () => {
     renderPanel();
     fireEvent.change(screen.getByPlaceholderText(EVENT_PLACEHOLDER), { target: { value: 'after this_brand_new' } });
-    expect(screen.queryByText('(new channel)')).not.toBeInTheDocument();
+    expect(screen.getByText('(new channel)')).toBeInTheDocument();
+  });
+
+  // The handler behind onApply declares the channel (syncThisChannels on the delay expression).
+  it('saves "after this_x * 6 s" as a time transition with the channel in the delay', () => {
+    const onApply = vi.fn(() => undefined);
+    renderPanel({ onApply });
+    const input = screen.getByPlaceholderText(EVENT_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'after this_sasas * 6 s' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      editingField: 'event',
+      delay: { type: 'delayexpr', value: 'this_sasas * 6 * 1000' },
+    }));
   });
 
   it('suggests for the "after" segment of a merged event list', () => {

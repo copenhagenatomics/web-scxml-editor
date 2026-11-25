@@ -557,8 +557,12 @@ const VisualDiagramInner: React.FC<VisualDiagramProps> = ({
           }
         }
 
-        // Declare/re-type only the this_ channels the applied condition references
-        const channels = editingField === 'cond' ? thisChannelRefsIn([newValue]) : [];
+        // Declare/re-type only the this_ channels the applied condition or "after X" delay
+        // expression references
+        const channels = thisChannelRefsIn([
+          editingField === 'cond' ? newValue : undefined,
+          delay?.type === 'delayexpr' ? delay.value : undefined,
+        ]);
         onSCXMLChange(syncThisChannels(content, channels), 'property');
       } catch (error) {
         console.error('Failed to apply transition:', error);

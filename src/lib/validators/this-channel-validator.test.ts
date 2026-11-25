@@ -21,6 +21,29 @@ const transition = (cond: string) =>
 const entryAssign = (location: string, expr: string) =>
   `  <state id="C">\n    <onentry><assign location="${location}" expr="${expr}"/></onentry>\n  </state>`;
 
+describe('this_ channel validation for "after X" delays', () => {
+  const timer = (delayexpr: string) =>
+    `  <state id="A">\n    <onentry><send event="A_t_0_timeEvent_0" delayexpr="${delayexpr}"/></onentry>\n` +
+    `    <transition event="A_t_0_timeEvent_0" target="B"/>\n  </state>\n  <state id="B"/>`;
+
+  it('reports a this_ channel used only in a delay as undeclared, with a fix', () => {
+    const [error] = channelErrors(doc('', timer('this_sasas * 6 * 1000')));
+    expect(error.severity).toBe('error');
+    expect(error.message).toBe(
+      "Channel 'this_sasas' is used in the delay of a time transition from 'A' but isn't declared in the datamodel, so the host can't generate the program. Declare it as a number (0.0)."
+    );
+    expect(error.stateId).toBe('A');
+    expect(error.fix).toEqual({ label: 'Declare as number (0.0)', kind: 'add-data', dataId: 'this_sasas', expr: '0.0' });
+  });
+
+  it('warns when a bool channel is used as a number in a delay', () => {
+    const [warning] = channelErrors(doc('    <data id="this_t" expr="false"/>', timer('this_t * 1000')));
+    expect(warning.message).toBe(
+      "Channel 'this_t' starts as false (true/false) but is used as a number in the delay of a time transition from 'A'. Change its initial value to 0.0, or the host will fail to generate the program."
+    );
+  });
+});
+
 describe('this_ channel type validation', () => {
   // The reported case: the channel edited to false in the code editor, compared to a number.
   it('warns, with a fix, when a bool channel is compared to a number', () => {

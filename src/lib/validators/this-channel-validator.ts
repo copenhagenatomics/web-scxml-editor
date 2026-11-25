@@ -12,6 +12,9 @@ function describeSite(site: ThisChannelSite): string {
     if (site.stateId && site.targetId) return `the condition on '${site.stateId}' → '${site.targetId}'`;
     return site.stateId ? `a condition in '${site.stateId}'` : 'a condition';
   }
+  if (site.kind === 'delay') {
+    return site.stateId ? `the delay of a time transition from '${site.stateId}'` : 'the delay of a time transition';
+  }
   return site.stateId ? `an assignment in '${site.stateId}'` : 'an assignment';
 }
 
@@ -28,6 +31,10 @@ function describeUse(use: 'bool' | 'number' | 'double', site: ThisChannelSite): 
   if (site.kind === 'cond') {
     if (use === 'bool') return `is used as a true/false condition in ${where}`;
     return `is compared to ${use === 'double' ? 'a decimal number' : 'a number'} in ${where}`;
+  }
+  if (site.kind === 'delay') {
+    if (use === 'bool') return `is used as a true/false test in ${where}`;
+    return `is used as a number in ${where}`;
   }
   if (use === 'bool') return `is assigned a true/false value in ${where}`;
   return `is assigned ${use === 'double' ? 'a decimal number' : 'a number'} in ${where}`;

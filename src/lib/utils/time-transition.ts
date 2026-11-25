@@ -156,12 +156,12 @@ function findAfterExpressionStart(text: string, caret: number): number | null {
  * isn't inside an "after " expression, so callers can fall back to their own suggestions.
  * Token bounds are absolute positions in `text`, ready for `applyExpressionSuggestion`.
  *
- * Narrower than condition autocomplete:
+ * Differs from condition autocomplete in two ways:
  *  - no operator suggestions — the comparison/logical operators don't make sense in a delay;
- *  - no "(new channel)" row — `syncThisChannels` only declares channels used by conditions and
- *    `<assign>`s, so an unknown this_ name in a delay would not actually be declared on save;
  *  - nothing at the unit position — a word typed after a completed operand and a space
  *    (`after this_x s`, `after (x) ms`) is the unit, not the start of a name.
+ * An unknown this_ name still gets the "(new channel)" row: saving declares it, as for a
+ * condition (the delay's channels go through `syncThisChannels`).
  */
 export function getAfterExpressionSuggestions(
   text: string,
@@ -182,7 +182,7 @@ export function getAfterExpressionSuggestions(
   if (atUnitPosition) return { suggestions: [], tokenStart, tokenEnd };
 
   return {
-    suggestions: local.suggestions.filter((s) => s.kind !== 'operator' && s.kind !== 'new-channel'),
+    suggestions: local.suggestions.filter((s) => s.kind !== 'operator'),
     tokenStart,
     tokenEnd,
   };
