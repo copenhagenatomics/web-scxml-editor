@@ -213,13 +213,16 @@ export class VisualMetadataManager {
     // Preserve boolean-like attribute values before serialization
     const preservedDoc = this.preserveBooleanAttributes(enrichedDoc);
 
-    // Serialize with XML builder
+    // Serialize with XML builder. Empty elements stay self-closing
+    // (`<data .../>`, not `<data ...></data>`) so a whole-document rewrite,
+    // e.g. load/pull-time transition merging, doesn't add an end tag to
+    // every empty element in the file.
     const builder = new XMLBuilder({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
       format: fullConfig.formatOutput,
       indentBy: '  ',
-      suppressEmptyNode: false,
+      suppressEmptyNode: true,
     });
 
     let result = builder.build(preservedDoc);
@@ -665,7 +668,7 @@ export class VisualMetadataManager {
       attributeNamePrefix: '@_',
       format: true,
       indentBy: '  ',
-      suppressEmptyNode: false,
+      suppressEmptyNode: true,
     });
 
     let result = builder.build(preservedDoc);

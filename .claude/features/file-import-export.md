@@ -55,7 +55,7 @@ PDF export (diagram):
 
 - `src/lib/utils/file-utils.ts` — `validateFile`/`validateFileContent` (size/extension/encoding checks), `readFileAsText`, `downloadFile`, `detectFileEncoding`, `sanitizeFileName`.
 - `src/lib/utils/datamodel-extractor.ts` (`annotateLegacyConfTypes`) — backfills `@_confType` on older `conf_` fields that predate that attribute.
-- `src/lib/utils/transition-merge-utils.ts` — collapses semantically-duplicate transitions from older/hand-edited files; **must run in this exact order** (`mergeDuplicateTransitionsByEventInDocument` before `mergeDuplicateTransitionsInDocument`) or event names can be silently dropped, per that module's own comments.
+- `src/lib/utils/transition-merge-utils.ts` — collapses semantically-duplicate transitions from older/hand-edited files; runs `mergeDuplicateTransitionsByEventInDocument` before `mergeDuplicateTransitionsInDocument`. Cond-merge only clusters transitions with identical events. When anything merges, the whole document is re-serialized (empty elements stay self-closing, but source formatting and CDATA are not preserved; see `decisions/editing.md` #7).
 - `src/lib/consts/default_scxml_template.ts` — the "create new" starting document.
 - `src/lib/utils/visual-metadata-utils.ts` (`removeVisualMetadataFromXML`) — the regex-based clean-export fallback.
 
@@ -104,7 +104,7 @@ File-level validation (size/extension) happens before content ever reaches the S
 - Never split a level across pages — one level = exactly one page is an explicit product requirement (a tiling implementation existed briefly and was removed for this reason).
 - PDF export must restore `hierarchyState` and the active tab in a `finally` — a failed export must not leave the user stranded on a different level/tab.
 
-- Do not change the order of the two transition-merge calls in the load pipeline (`mergeDuplicateTransitionsByEventInDocument` then `mergeDuplicateTransitionsInDocument`) — the modules' own comments document that reversing this order silently drops merged event names.
+- Do not change the order of the two transition-merge calls in the load pipeline (`mergeDuplicateTransitionsByEventInDocument` then `mergeDuplicateTransitionsInDocument`) — and keep cond-merge's identical-event requirement (`isSameTransitionFamilyByCond`); without it, an event-only and a cond-only transition to the same target collapse into one and the cond trigger is lost.
 - Do not wire `visual-metadata-export.tsx` back in without first deciding whether `use-download.ts`'s fallback chain is the one you want (they've likely drifted slightly since being duplicated).
 
 ## Previous design decisions

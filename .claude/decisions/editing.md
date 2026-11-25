@@ -160,13 +160,13 @@ Accepted (explicit switch); inferred/auto-detected mode is Superseded.
 Older or hand-edited SCXML files can contain multiple transitions that are semantically duplicates (same target/type, differing only in an event or condition that could be merged).
 
 ### Decision
-`mergeDuplicateTransitionsInDocument` (OR-combines `cond` for same target+type+actions) and `mergeDuplicateTransitionsByEventInDocument` (comma-combines `event` lists for same target+type+cond+actions) run automatically on every file load, GitHub pull, and whole-document Monaco paste — in that specific order (event-merge before cond-merge, or event names can be silently dropped per the modules' own comments).
+`mergeDuplicateTransitionsInDocument` (OR-combines `cond` for same target+type+**event**+actions) and `mergeDuplicateTransitionsByEventInDocument` (comma-combines `event` lists for same target+type+cond+actions) run automatically on every file load, GitHub pull, and whole-document Monaco paste, event-merge first. Cond-merge originally ignored `event`, which dropped event names and folded an `event="ack"` + `cond="btn > 0.5"` pair into a bare `event="ack"` (losing the cond trigger entirely); it now requires identical event sets (`isSameTransitionFamilyByCond`), so neither pass can discard the other's attribute.
 
 ### Reason
 This normalization is what allows the static `transition-slot-validator` to only need to catch violations introduced *after* load, per that validator's own docstring — merge-on-load already cleans up legacy duplicates from older files so they don't spam validation errors on documents the user didn't just create.
 
 ### Constraints
-The two merge functions must run in the documented order; reversing them causes silent event-name loss per their own comments.
+Keep event-merge before cond-merge (the documented pipeline order). Known remaining defect: cond-merge places the merged transition at the first member's position, so a non-adjacent pair with another eventless transition between them (e.g. `cond=A → right`, `cond=B → left`, `cond=C → right`) changes which transition wins in document-order selection. Any merge also rewrites the whole document through `fast-xml-parser`: empty elements stay self-closing (`suppressEmptyNode: true` in `visual-metadata-manager.ts`; it was `false`, which expanded every `<x/>` into `<x></x>`), but source formatting, CDATA wrappers and `<script>` whitespace are not preserved, and `xmlns:viz` is added to the root.
 
 ### Alternatives
 None found evidenced (e.g., flagging duplicates as validation errors instead of silently merging them was not the chosen approach).

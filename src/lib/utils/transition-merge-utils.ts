@@ -20,8 +20,9 @@ function isEventless(t: TransitionElement): boolean {
 
 /**
  * Two transitions belong to the same merge family when they share a target and a type
- * (internal/external, defaulting to external). The `event` attribute is deliberately not
- * compared — merging is driven purely by combining conditions via OR, not by event names.
+ * (internal/external, defaulting to external). Neither `event` nor `cond` is compared here —
+ * each merge pass adds its own check for the attribute it does NOT combine
+ * (isSameTransitionFamilyByCond / isSameTransitionFamilyByEvent).
  * A bare/eventless transition (no event, no cond) is only ever a family member of another
  * bare transition — otherwise merging would silently fold it into an event- or cond-bearing
  * transition, discarding one of the two.
@@ -32,6 +33,33 @@ export function isSameTransitionFamily(a: TransitionElement, b: TransitionElemen
   if (typeOf(a) !== typeOf(b)) return false;
   return isEventless(a) === isEventless(b);
 }
+
+/** Splits an event attribute on comma/whitespace into its sorted, deduped token list. */
+function eventTokens(event: string | undefined): string[] {
+  if (!event) return [];
+  return [...new Set(event.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean))].sort();
+}
+
+/**
+ * Same set of event descriptors, ignoring order, separators and duplicates ("a, b" equals
+ * "b a"). Absent and whitespace-only both count as "no event".
+ */
+export function eventsAreEqual(a: string | undefined, b: string | undefined): boolean {
+  const ta = eventTokens(a);
+  const tb = eventTokens(b);
+  return ta.length === tb.length && ta.every((t, i) => t === tb[i]);
+}
+
+/**
+ * Same family check as isSameTransitionFamily, plus an exact event match. Cond-merge keeps
+ * only the first transition's event, so OR-combining conds is only sound when every member
+ * fires on the same event(s) — otherwise the other members' events are lost, and a member
+ * with no cond would make the merged transition unconditional on the first one's event
+ * (e.g. `event="ack"` + `cond="btn > 0.5"` collapsing into a bare `event="ack"`).
+ */
+export function isSameTransitionFamilyByCond(a: TransitionElement, b: TransitionElement): boolean {
+  return isSameTransitionFamily(a, b) && eventsAreEqual(a['@_event'], b['@_event']);
+ }
 
 /**
  * Exact equality of two cond values, normalizing "absent" (undefined or whitespace-only)
@@ -116,8 +144,8 @@ export function actionsAreEqual(a: TransitionElement, b: TransitionElement): boo
 
 /**
  * Groups a flat transitions array into merge-candidate clusters: same family
- * (target + type) and identical actions. Clusters of size 1 are omitted since
- * there's nothing to merge them with.
+ * (target + type), same event(s), and identical actions. Clusters of size 1 are
+ * omitted since there's nothing to merge them with.
  */
 export function findMergeGroups(transitions: TransitionElement[]): TransitionElement[][] {
   const groups: TransitionElement[][] = [];
@@ -131,7 +159,7 @@ export function findMergeGroups(transitions: TransitionElement[]): TransitionEle
     for (let j = i + 1; j < transitions.length; j++) {
       const candidate = transitions[j];
       if (assigned.has(candidate)) continue;
-      if (isSameTransitionFamily(t, candidate) && actionsAreEqual(t, candidate)) {
+      if (isSameTransitionFamilyByCond(t, candidate) && actionsAreEqual(t, candidate)) {
         group.push(candidate);
         assigned.add(candidate);
       }
@@ -264,9 +292,9 @@ function mergeTransitionsOnElementByEvent(element: { transition?: TransitionElem
  * Load-time normalization: scans an SCXML document for sets of transitions between the same
  * source+target+cond with identical actions and merges each set into one transition with a
  * comma-combined event list. Returns the original string unmodified (byte-identical) if
- * nothing needed merging. Must run before mergeDuplicateTransitionsInDocument (cond-merge) —
- * cond-merge ignores event when clustering, so running it first would silently discard event
- * names before this function ever saw them.
+ * nothing needed merging. Runs before mergeDuplicateTransitionsInDocument (cond-merge) in
+ * every load path; cond-merge only clusters transitions with identical events, so neither
+ * pass can discard the other's attribute.
  */
 export function mergeDuplicateTransitionsByEventInDocument(xmlContent: string): string {
   const parser = new SCXMLParser();
@@ -306,8 +334,8 @@ export function mergeDuplicateTransitionsByEventInDocument(xmlContent: string): 
 
 /**
  * Load-time normalization: scans an SCXML document for sets of transitions between the same
- * source+target with identical actions and merges each set into one transition with an OR-combined
- * cond. Returns the original string unmodified (byte-identical) if nothing needed merging.
+ * source+target+event with identical actions and merges each set into one transition with an
+ * OR-combined cond. Returns the original string unmodified (byte-identical) if nothing needed merging.
  */
 export function mergeDuplicateTransitionsInDocument(xmlContent: string): string {
   const parser = new SCXMLParser();
