@@ -1,10 +1,17 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import { validateScxmlContent } from '@/lib/validators/validate-content';
+import type { ChannelMappingContext } from '@/lib/validators/channel-mapping-validator';
 import { useEditorStore } from './editor-store';
 import type { ChannelInfo, ChannelMapping, CommandOptions, ConfigOverride, EventEntry, FeedbackItem, HostErrorItem, RegisteredCommand } from '@/types/host-api';
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** The host state validateScxmlContent needs for its unmapped-channel warnings. */
+export function getChannelMappingContext(): ChannelMappingContext {
+  const { channels, channelMappings } = useHostAPIStore.getState();
+  return { channels: channels.map(c => c.name), channelMappings };
+}
 
 /**
  * Re-validates the current content (the live result is debounced, so it can be stale right after
@@ -13,7 +20,7 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
  * own validation counts; Host Alerts are the host's report and never block.
  */
 function findBlockingIssues(mode: NonNullable<CommandOptions['requiresValidScxml']>, label: string): string | null {
-  const issues = validateScxmlContent(useEditorStore.getState().content);
+  const issues = validateScxmlContent(useEditorStore.getState().content, getChannelMappingContext());
   useEditorStore.getState().setErrors(issues);
   const errorCount = issues.filter(i => i.severity === 'error').length;
   const warningCount = mode === 'errors-and-warnings' ? issues.length - errorCount : 0;
